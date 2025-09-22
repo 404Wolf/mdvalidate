@@ -25,9 +25,9 @@ format:
 <!-- Describe the purpose of this SRS and its intended audience. -->
 
 This SRS lays out the scope of a Markdown validation and templating tool,
-mdvalidate. The goal of this document is to motivate the need for such a tool,
-explain what exists and why there is currently no equivalent, and outline the
-general shape that the project will take.
+`MDvalidate`. The goal of this document is to motivate the need for such a
+tool, explain what exists and why there is currently no equivalent, and outline
+the general shape that the project will take.
 
 ## Document Conventions {#document-conventions}
 
@@ -70,23 +70,26 @@ An SRS that specifies the next release of an evolving product should contain
 its own scope statement as a subset of the long-term strategic product
 vision. -->
 
-MDValidate is a cli tool and associated library that takes a Markdown file and
+MDValidate is a CLI tool and associated library that takes a Markdown file and
 performs validation, providing useful information about whether it conforms to
 a shape in a schema.
 
 There's a lot of associated tooling that can be created and built into or for
-MDValidate, so we will focus initally on the core validation engine. This will include:
-- A schema definition language for describing the shape of Markdown documents
-- A command line interface for validating Markdown files against schemas
-- A library interface for integrating validation into other applications
+MDValidate, so we will focus initally on the core validation engine. This will
+include:
+- A schema definition language for describing the shape of Markdown documents.
+- A command line interface for validating Markdown files against schemas.
+- A library interface for integrating validation into other applications.
 
 And then, time permitting, we will build out some of the associated tooling:
-- A templating engine for generating Markdown documents from schemas and data
-- A language server protocol (LSP) extension for real-time validation in editors
-- Integration into external Markdown tooling, associated Github actions, etc
+- A templating engine for generating Markdown documents from schemas and data.
+- A language server protocol (LSP) extension for real-time validation in editors.
+- Integration into external Markdown tooling, associated Github actions, etc.
 
 MDValidate has the potential to address various real business needs:
-- Integration into CI/CD pipelines for Markdown documentation validation
+- Integration into CI/CD pipelines for Markdown documentation validation.
+- Use in other tools that allow users to edit arbitrary document formats as
+  Markdown.
 
 ## References {#references}
 
@@ -138,6 +141,7 @@ classes. Distinguish the favored user classes from those who are less
 important to satisfy. -->
 
 **Technical Hobbiests:**
+
 These users are technical users who use Markdown on a daily basis to take
 notes, and generally prefer text-based document formats. Many of these users
 may be taking notes in markdown (e.g., Obsidian, Logseq, etc) and want to
