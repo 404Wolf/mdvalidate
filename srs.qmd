@@ -101,8 +101,8 @@ requirements specifications, use case documents, or a vision and scope
 document. Provide enough information so that the reader could access a copy
 of each reference, including title, author, version number, date, and source
 or location. -->
+ 
 
-# Overall Description
 
 ## Product Perspective {#product-perspective}
 
@@ -172,20 +172,24 @@ functions to make them understandable to any reader of the SRS. A picture of
 the major groups of related requirements and how they relate, such as a top
 level data flow diagram or a class diagram, is often effective. -->
 
+Core features include:
+- The user is able to define a schema for a Markdown document.
+- The user is able to validate a Markdown document against a schema.
+- The user is able to generate a Markdown document from a schema and data.
+
+
+Further features include:
+- VS code integration: after installation the user would be able to validate Markdown files against their schemas in VS code and errors will show underlined by a red squiggly line.
+
 ## User Classes and Characteristics {#user-classes}
 
-<!-- Alesandro -->
+**SWE in Big Tech Companies**:
+These users, frequently write technical documentation, API specifications, and design documents in Markdown format. They need standardized schemas to ensure their documentation is consistently structured, machine-readable, and easily consumable by AI systems for automated processing, code generation, and knowledge extraction.
 
-<!-- Identify the various user classes that you anticipate will use this product.
-User classes may be differentiated based on frequency of use, subset of
-product functions used, technical expertise, security or privilege levels,
-educational level, or experience. Describe the pertinent characteristics of
-each user class. Certain requirements may pertain only to certain user
-classes. Distinguish the favored user classes from those who are less
-important to satisfy. -->
+**AI**
+AI systems increasingly require structured data formats for agentic behavior - autonomous decision-making and task execution workflows that are currently implemented using JSON schemas. However, Markdown offers significant advantages in token efficiency, making it a more cost-effective alternative for AI operations that process large volumes of structured content. By providing schema validation for Markdown documents, this tool enables AI systems to both enforce reproducible data structures for language model interactions and generate consistent documentation from schema-driven data, potentially reducing token costs and improving processing efficiency in high-frequency AI applications.
 
 **Technical Hobbiests:**
-
 These users are technical users who use Markdown on a daily basis to take
 notes, and generally prefer text-based document formats. Many of these users
 may be taking notes in markdown (e.g., Obsidian, Logseq, etc) and want to
@@ -193,15 +197,7 @@ ensure that their notes conform to a certain structure for better organization
 and retrieval. Some will be developers looking to build meta-tooling incorporating
 Markdown validation into their own applications.
 
-## Operating Environment {#operating-environment}
-
-<!-- Wolf -->
-
-<!-- Describe the environment in which the software will operate, including the hardware platform,
-operating system and versions, and any other software components or applications with which it
-must peacefully coexist. -->
-
-The core validator CLI should be able to operate on all platforms. We will
+## User Needs {#user-needs}all platforms. We will
 initially focus on the x86_64/linux platform, but should be able to build for
 macOS and Windows as well.
 
@@ -319,6 +315,7 @@ satisfied. -->
 protection of the data used or created by the product. Define any user identity authentication
 requirements. Refer to any external policies or regulations containing security issues that affect
 the product. Define any security or privacy certifications that must be satisfied. -->
+
 
 ## Software Quality Attributes
 
