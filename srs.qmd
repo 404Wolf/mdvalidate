@@ -279,7 +279,7 @@ example, could be generated from an LLM model, and incrementally validate the
 AST of the document as it changes, allowing for real-time validation (and
 termination).
 
-## REST API to manage android instances
+## Feature 1: Schema Definition Language
 
 ### Description and Priority
 
@@ -295,10 +295,23 @@ be concise, complete, unambiguous, verifiable, and necessary. Use "TBD" as a
 placeholder to indicate when necessary information is not yet available.
 
 Each requirement should be uniquely identified with a sequence number or a meaningful
-tag of some kind.
+tag of some kind. -->
 
-REQ-1:
-REQ-2: -->
+## Feature 2: Command Line Validator Tool
+
+### Description and Priority
+
+### Stimulus/Response Sequences
+
+### Functional Requirements
+
+## Feature 3: Language Server (LSP) Integration
+
+### Description and Priority
+
+### Stimulus/Response Sequences
+
+### Functional Requirements
 
 # External Interface Requirements
 
@@ -306,55 +319,74 @@ REQ-2: -->
 
 <!-- Wolf -->
 
-<!-- Describe the connections between this product and other specific software components (name
-and version), including databases, operating systems, tools, libraries, and integrated commercial
-components. Identify the data items or messages coming into the system and going out and
-describe the purpose of each. Describe the services needed and the nature of communications.
-Refer to documents that describe detailed application programming interface protocols. Identify
-data that will be shared across software components. If the data sharing mechanism must be
-implemented in a specific way (for example, use of a global data area in a multitasking operating
-system), specify this as an implementation constraint. -->
+<!-- Describe the connections between this product and other specific software
+components (name and version), including databases, operating systems, tools,
+libraries, and integrated commercial components. Identify the data items or
+messages coming into the system and going out and describe the purpose of each.
+Describe the services needed and the nature of communications. Refer to
+documents that describe detailed application programming interface protocols.
+Identify data that will be shared across software components. If the data
+sharing mechanism must be implemented in a specific way (for example, use of a
+global data area in a multitasking operating system), specify this as an
+implementation constraint. -->
 
 # Other Nonfunctional Requirements
 
 ## Performance Requirements
 
-<!-- If there are performance requirements for the product under various circumstances, state them
-here and explain their rationale, to help the developers understand the intent and make suitable
-design choices. Specify the timing relationships for real time systems. Make such requirements as
-specific as possible. You may need to state performance requirements for individual functional
-requirements or features. -->
+<!-- If there are performance requirements for the product under various
+circumstances, state them here and explain their rationale, to help the
+developers understand the intent and make suitable design choices. Specify the
+timing relationships for real time systems. Make such requirements as specific
+as possible. You may need to state performance requirements for individual
+functional requirements or features. -->
+
 **Speed** 
-the current validation time for a json schema is about 8 ms for a 1.3k character. Speed is especially important for AI systems that need to validate large volumes of content in real-time. So we aim to be at least under 20 ms for a 1.3k character Markdown file.
+the current validation time for a json schema is about 8 ms for a 1.3k
+character. Speed is especially important for AI systems that need to validate
+large volumes of content in real-time. So we aim to be at least under 20 ms for
+a 1.3k character Markdown file.
+
 **Reliability**
-The tool should be reliable and able to handle large volumes of content. So we aim to be at least 99.999% reliable.
+The tool should be reliable and able to handle large volumes of content. So we
+aim to be at least 99.999% reliable.
+
 **Scalability**
-The tool should be scalable and able to handle large volumes of content. So we aim to be able to handle at least 100k characters.
+The tool should be scalable and able to handle large volumes of content. So we
+aim to be able to handle at least 100k characters.
+
 **Usability**
 So we aim to be able to use the tool with 2 to 3 commands.
 
 ## Safety Requirements
 
-<!-- Specify those requirements that are concerned with possible loss, damage, or harm that could
-result from the use of the product. Define any safeguards or actions that must be taken, as well as
-actions that must be prevented. Refer to any external policies or regulations that state safety
-issues that affect the product's design or use. Define any safety certifications that must be
+<!-- Specify those requirements that are concerned with possible loss, damage,
+or harm that could result from the use of the product. Define any safeguards or
+actions that must be taken, as well as actions that must be prevented. Refer to
+any external policies or regulations that state safety issues that affect the
+product's design or use. Define any safety certifications that must be
 satisfied. -->
 
-- Handle corrupted or extremely large files gracefully without system crashes or memory exhaustion
-- Ensure robust error handling that fails safely when encountering unexpected input formats
-- Isolate validation processes to prevent cascading failures affecting other system components
+- Handle corrupted or extremely large files gracefully without system crashes
+  or memory exhaustion
+
+- Ensure robust error handling that fails safely when encountering unexpected
+  input formats
+- Isolate validation processes to prevent cascading failures affecting other
+  system components
 
 ## Security Requirements {#security-requirements}
 
 <!-- Alessandro -->
 
-<!-- Specify any requirements regarding security or privacy issues surrounding use of the product or
-protection of the data used or created by the product. Define any user identity authentication
-requirements. Refer to any external policies or regulations containing security issues that affect
-the product. Define any security or privacy certifications that must be satisfied. -->
+<!-- Specify any requirements regarding security or privacy issues surrounding
+use of the product or protection of the data used or created by the product.
+Define any user identity authentication requirements. Refer to any external
+policies or regulations containing security issues that affect the product.
+Define any security or privacy certifications that must be satisfied. -->
 
-  - We dont have security or privacy issues yet. We are not going to store or have access to any data.
+  - We dont have security or privacy issues yet. We are not going to store or
+  have access to any data.
 
 ## Software Quality Attributes
 
@@ -364,7 +396,9 @@ interoperability, maintainability, portability, reliability, reusability, robust
 usability. Write these to be specific, quantitative, and verifiable when possible. At the least, clarify
 the relative preferences for various attributes, such as ease of use over ease of learning. -->
 
-- our program will be accessible and downloadable by anyone with an internet connection and a simple command line interface (accessible via nix packages or via brew)
+- our program will be accessible and downloadable by anyone with an internet
+connection and a simple command line interface (accessible via nix packages or
+via brew)
 
 # Other Requirements
 

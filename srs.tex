@@ -1,0 +1,454 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+\PassOptionsToPackage{dvipsnames,svgnames,x11names}{xcolor}
+%
+\documentclass[
+]{article}
+
+\usepackage{amsmath,amssymb}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math}
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else  
+    % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\usepackage[margin=1in]{geometry}
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\setcounter{secnumdepth}{5}
+% Make \paragraph and \subparagraph free-standing
+\makeatletter
+\ifx\paragraph\undefined\else
+  \let\oldparagraph\paragraph
+  \renewcommand{\paragraph}{
+    \@ifstar
+      \xxxParagraphStar
+      \xxxParagraphNoStar
+  }
+  \newcommand{\xxxParagraphStar}[1]{\oldparagraph*{#1}\mbox{}}
+  \newcommand{\xxxParagraphNoStar}[1]{\oldparagraph{#1}\mbox{}}
+\fi
+\ifx\subparagraph\undefined\else
+  \let\oldsubparagraph\subparagraph
+  \renewcommand{\subparagraph}{
+    \@ifstar
+      \xxxSubParagraphStar
+      \xxxSubParagraphNoStar
+  }
+  \newcommand{\xxxSubParagraphStar}[1]{\oldsubparagraph*{#1}\mbox{}}
+  \newcommand{\xxxSubParagraphNoStar}[1]{\oldsubparagraph{#1}\mbox{}}
+\fi
+\makeatother
+
+
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}\usepackage{longtable,booktabs,array}
+\usepackage{calc} % for calculating minipage widths
+% Correct order of tables after \paragraph or \subparagraph
+\usepackage{etoolbox}
+\makeatletter
+\patchcmd\longtable{\par}{\if@noskipsec\mbox{}\fi\par}{}{}
+\makeatother
+% Allow footnotes in longtable head/foot
+\IfFileExists{footnotehyper.sty}{\usepackage{footnotehyper}}{\usepackage{footnote}}
+\makesavenoteenv{longtable}
+\usepackage{graphicx}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+
+\makeatletter
+\@ifpackageloaded{caption}{}{\usepackage{caption}}
+\AtBeginDocument{%
+\ifdefined\contentsname
+  \renewcommand*\contentsname{Table of contents}
+\else
+  \newcommand\contentsname{Table of contents}
+\fi
+\ifdefined\listfigurename
+  \renewcommand*\listfigurename{List of Figures}
+\else
+  \newcommand\listfigurename{List of Figures}
+\fi
+\ifdefined\listtablename
+  \renewcommand*\listtablename{List of Tables}
+\else
+  \newcommand\listtablename{List of Tables}
+\fi
+\ifdefined\figurename
+  \renewcommand*\figurename{Figure}
+\else
+  \newcommand\figurename{Figure}
+\fi
+\ifdefined\tablename
+  \renewcommand*\tablename{Table}
+\else
+  \newcommand\tablename{Table}
+\fi
+}
+\@ifpackageloaded{float}{}{\usepackage{float}}
+\floatstyle{ruled}
+\@ifundefined{c@chapter}{\newfloat{codelisting}{h}{lop}}{\newfloat{codelisting}{h}{lop}[chapter]}
+\floatname{codelisting}{Listing}
+\newcommand*\listoflistings{\listof{codelisting}{List of Listings}}
+\makeatother
+\makeatletter
+\makeatother
+\makeatletter
+\@ifpackageloaded{caption}{}{\usepackage{caption}}
+\@ifpackageloaded{subcaption}{}{\usepackage{subcaption}}
+\makeatother
+
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+\usepackage{bookmark}
+
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same} % disable monospaced font for URLs
+\hypersetup{
+  pdftitle={Software Requirements Specification for MDvalidate},
+  pdfauthor={Wolf Mermelstein; Alesandro Mason},
+  colorlinks=true,
+  linkcolor={blue},
+  filecolor={Maroon},
+  citecolor={Blue},
+  urlcolor={Blue},
+  pdfcreator={LaTeX via pandoc}}
+
+
+\title{Software Requirements Specification for \emph{MDvalidate}}
+\author{Wolf Mermelstein \and Alesandro Mason}
+\date{2025-09-14}
+
+\begin{document}
+\maketitle
+
+\renewcommand*\contentsname{Table of contents}
+{
+\hypersetup{linkcolor=}
+\setcounter{tocdepth}{3}
+\tableofcontents
+}
+
+\section{Introduction}\label{introduction}
+
+\subsection{Purpose}\label{purpose}
+
+This SRS lays out the scope of a Markdown validation and templating
+tool, \texttt{MDvalidate}. The goal of this document is to motivate the
+need for such a tool, explain what exists and why there is currently no
+equivalent, and outline the general shape that the project will take.
+
+\subsection{Document Conventions}\label{document-conventions}
+
+This document is written in \href{https://quarto.org/}{Quarto}, a
+scientific and technical publishing system.
+
+We assume knowledge of some surrounding technologies like abstract
+syntax trees, but defines more specific tooling in the glossary section
+at the end.
+
+\subsection{Intended Audience and Reading
+Suggestions}\label{intended-audience}
+
+This document serves as a technical outline for technical of the project
+for consumers of semi-structured Markdown data, or developers who
+interact with disparate document formats looking for a nice unified
+standard.
+
+\subsection{Project Scope}\label{project-scope}
+
+MDValidate is a CLI tool and associated library that takes a Markdown
+file and performs validation, providing useful information about whether
+it conforms to a shape in a schema.
+
+There's a lot of associated tooling that can be created and built into
+or for MDValidate, so we will focus initally on the core validation
+engine. This will include: - A schema definition language for describing
+the shape of Markdown documents. - A command line interface for
+validating Markdown files against schemas. - A library interface for
+integrating validation into other applications.
+
+And then, time permitting, we will build out some of the associated
+tooling: - A templating engine for generating Markdown documents from
+schemas and data. - A language server protocol (LSP) extension for
+real-time validation in editors. - Integration into external Markdown
+tooling, associated Github actions, etc.
+
+MDValidate has the potential to address various real business needs: -
+Integration into CI/CD pipelines for Markdown documentation validation.
+- Use in other tools that allow users to edit arbitrary document formats
+as Markdown.
+
+\subsection{References}\label{references}
+
+\subsection{Product Perspective}\label{product-perspective}
+
+\textbf{MDValidate}
+
+We will be building a DSL (domain-specific-language) for validating
+Markdown, and an associated tool that you can run to process Markdown
+and check whether it conforms to a schema.
+
+Our tool will initially take the form of a CLI, and then may offer
+editor integration, in a way that looks somewhat like the following:
+
+\includegraphics[width=5.02in,height=1.38in]{srs_files/figure-latex/mermaid-figure-1.png}
+
+It will also offer a library interface for integration into other tools.
+
+\textbf{Meta}
+
+There are currently many tools for working with Markdown.
+
+Some notable ones include linters, like
+\href{https://github.com/DavidAnson/markdownlint}{markdownlint}, that
+can validate Markdown. It will tell you if (and where) you are missing
+closing tags, for example, or have bad spacing alignment. There are also
+formatting tools for markdown like \href{https://prettier.io/}{Prettier}
+that can format markdown to a unified style.
+
+Recently, with the advent of AI, many new Markdown related tools have
+sprung into existence, since Markdown is a paricuarly easy to parse and
+generate textual format that can convey a large amount of information in
+a relatively small amount of tokens. For example, recently Microsoft has
+been working on
+\href{https://github.com/microsoft/markitdown}{MarkItDown}, a tool that
+can convert many different inputs, like PDFs, word documents, and more
+to Markdown. There are also traditional document conversion tools, like
+\href{https://pandoc.org/}{Pandoc}, that can convert between many
+different document formats, including Markdown, that have gained
+popularity.
+
+\textbf{Gaps}
+
+Right now, there are many great options to work with Markdown, edit
+markdown, generate Markdown, and display or render Markdown, but there
+is no great way to
+
+\subsection{Product Features}\label{product-features}
+
+Core features include: - The user is able to define a schema for a
+Markdown document. - The user is able to validate a Markdown document
+against a schema. - The user is able to generate a Markdown document
+from a schema and data.
+
+Further features include: - VS code integration: after installation the
+user would be able to validate Markdown files against their schemas in
+VS code and errors will show underlined by a red squiggly line.
+
+\subsection{User Classes and Characteristics}\label{user-classes}
+
+\textbf{SWE in Big Tech Companies}: These users, frequently write
+technical documentation, API specifications, and design documents in
+Markdown format. They need standardized schemas to ensure their
+documentation is consistently structured, machine-readable, and easily
+consumable by AI systems for automated processing, code generation, and
+knowledge extraction.
+
+\textbf{AI} AI systems increasingly require structured data formats for
+agentic behavior - autonomous decision-making and task execution
+workflows that are currently implemented using JSON schemas. However,
+Markdown offers significant advantages in token efficiency, making it a
+more cost-effective alternative for AI operations that process large
+volumes of structured content. By providing schema validation for
+Markdown documents, this tool enables AI systems to both enforce
+reproducible data structures for language model interactions and
+generate consistent documentation from schema-driven data, potentially
+reducing token costs and improving processing efficiency in
+high-frequency AI applications.
+
+\textbf{Technical Hobbiests:} These users are technical users who use
+Markdown on a daily basis to take notes, and generally prefer text-based
+document formats. Many of these users may be taking notes in markdown
+(e.g., Obsidian, Logseq, etc) and want to ensure that their notes
+conform to a certain structure for better organization and retrieval.
+Some will be developers looking to build meta-tooling incorporating
+Markdown validation into their own applications.
+
+\subsection{User Needs}\label{user-needs}
+
+We will initially focus on the x86\_64/linux platform, but should be
+able to build for macOS and Windows. (the actual validator will be a
+Rust binary that should be able to build for all platforms).
+
+\subsection{Design and Implementation
+Constraints}\label{design-constraints}
+
+\textbf{Malleability}
+
+The tool we are building is intentionally very generic so that it can be
+used for a large variety of different use cases. This means that we will
+need to maintain interfaces that are suitable for human and machine
+interpretation.
+
+\textbf{Performance}
+
+One consideration that we will try to balance and keep in mind when
+designing MDValidate is performance. We want to keep our schema
+declaration language generic and logical, while also allowing it to be
+very flexible for the end user. The more flexibility and look-ahead
+requirements in our language the slower our interpreter/validator will
+be.
+
+\subsection{User Documentation}\label{user-documentation}
+
+\subsection{Assumptions and
+Dependencies}\label{assumptions-dependencies}
+
+\section{System Features}\label{system-features}
+
+\subsection{Priority Implementation
+Order}\label{priority-implementation-order}
+
+\subsection{Technical Stack}\label{technical-stack}
+
+To keep our program performant and light-weight we will use
+\href{https://tree-sitter.github.io/tree-sitter/}{Treesitter}.
+Treesitter is an incremental parsing library that allows us to generate
+an AST for given text content, and then recompute the AST as the text
+changes.
+
+This means that we can allow an input stream of Markdown text, which,
+for example, could be generated from an LLM model, and incrementally
+validate the AST of the document as it changes, allowing for real-time
+validation (and termination).
+
+\subsection{Feature 1: Schema Definition
+Language}\label{feature-1-schema-definition-language}
+
+\subsubsection{Description and Priority}\label{description-and-priority}
+
+\subsubsection{Stimulus/Response
+Sequences}\label{stimulusresponse-sequences}
+
+\subsubsection{Functional Requirements}\label{functional-requirements}
+
+\subsection{Feature 2: Command Line Validator
+Tool}\label{feature-2-command-line-validator-tool}
+
+\subsubsection{Description and
+Priority}\label{description-and-priority-1}
+
+\subsubsection{Stimulus/Response
+Sequences}\label{stimulusresponse-sequences-1}
+
+\subsubsection{Functional Requirements}\label{functional-requirements-1}
+
+\subsection{Feature 3: Language Server (LSP)
+Integration}\label{feature-3-language-server-lsp-integration}
+
+\subsubsection{Description and
+Priority}\label{description-and-priority-2}
+
+\subsubsection{Stimulus/Response
+Sequences}\label{stimulusresponse-sequences-2}
+
+\subsubsection{Functional Requirements}\label{functional-requirements-2}
+
+\section{External Interface
+Requirements}\label{external-interface-requirements}
+
+\subsection{Software Interfaces}\label{software-interfaces}
+
+\section{Other Nonfunctional
+Requirements}\label{other-nonfunctional-requirements}
+
+\subsection{Performance Requirements}\label{performance-requirements}
+
+\textbf{Speed} the current validation time for a json schema is about 8
+ms for a 1.3k character. Speed is especially important for AI systems
+that need to validate large volumes of content in real-time. So we aim
+to be at least under 20 ms for a 1.3k character Markdown file.
+
+\textbf{Reliability} The tool should be reliable and able to handle
+large volumes of content. So we aim to be at least 99.999\% reliable.
+
+\textbf{Scalability} The tool should be scalable and able to handle
+large volumes of content. So we aim to be able to handle at least 100k
+characters.
+
+\textbf{Usability} So we aim to be able to use the tool with 2 to 3
+commands.
+
+\subsection{Safety Requirements}\label{safety-requirements}
+
+\begin{itemize}
+\item
+  Handle corrupted or extremely large files gracefully without system
+  crashes or memory exhaustion
+\item
+  Ensure robust error handling that fails safely when encountering
+  unexpected input formats
+\item
+  Isolate validation processes to prevent cascading failures affecting
+  other system components
+\end{itemize}
+
+\subsection{Security Requirements}\label{security-requirements}
+
+\begin{itemize}
+\tightlist
+\item
+  We dont have security or privacy issues yet. We are not going to store
+  or have access to any data.
+\end{itemize}
+
+\subsection{Software Quality
+Attributes}\label{software-quality-attributes}
+
+\begin{itemize}
+\tightlist
+\item
+  our program will be accessible and downloadable by anyone with an
+  internet connection and a simple command line interface (accessible
+  via nix packages or via brew)
+\end{itemize}
+
+\section{Other Requirements}\label{other-requirements}
+
+\section{Appendix A: Glossary}\label{appendix-a-glossary}
+
+\section{Appendix B: Analysis Models}\label{appendix-b-analysis-models}
+
+\section{Appendix C: Issues List}\label{issues-list}
+
+
+
+
+\end{document}
