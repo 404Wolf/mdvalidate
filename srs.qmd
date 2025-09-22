@@ -101,8 +101,8 @@ requirements specifications, use case documents, or a vision and scope
 document. Provide enough information so that the reader could access a copy
 of each reference, including title, author, version number, date, and source
 or location. -->
+ 
 
-# Overall Description
 
 ## Product Perspective {#product-perspective}
 
@@ -128,17 +128,23 @@ functions to make them understandable to any reader of the SRS. A picture of
 the major groups of related requirements and how they relate, such as a top
 level data flow diagram or a class diagram, is often effective. -->
 
+Core features include:
+- The user is able to define a schema for a Markdown document.
+- The user is able to validate a Markdown document against a schema.
+- The user is able to generate a Markdown document from a schema and data.
+
+
+Further features include:
+- VS code integration: after installation the user would be able to validate Markdown files against their schemas in VS code and errors will show underlined by a red squiggly line.
+
 ## User Classes and Characteristics {#user-classes}
 
-<!-- Alesandro -->
+**Software** **developers** 
+who are writing Markdown documents and want to ensure that they conform to a certain structure for reproducibility.
 
-<!-- Identify the various user classes that you anticipate will use this product.
-User classes may be differentiated based on frequency of use, subset of
-product functions used, technical expertise, security or privilege levels,
-educational level, or experience. Describe the pertinent characteristics of
-each user class. Certain requirements may pertain only to certain user
-classes. Distinguish the favored user classes from those who are less
-important to satisfy. -->
+**AI**
+- AI to both enforce a reproducible schema for an LLM and to generate Markdown documents from a schema and data. 
+- AI for agentic behaviour, right now is done with JSON but markdown is more token efficient.
 
 **Technical Hobbiests:**
 
@@ -148,16 +154,9 @@ may be taking notes in markdown (e.g., Obsidian, Logseq, etc) and want to
 ensure that their notes conform to a certain structure for better organization
 and retrieval. Some will be developers looking to build meta-tooling incorporating
 Markdown validation into their own applications.
+ld be able to operate on 
 
-## Operating Environment {#operating-environment}
-
-<!-- Wolf -->
-
-<!-- Describe the environment in which the software will operate, including the hardware platform,
-operating system and versions, and any other software components or applications with which it
-must peacefully coexist. -->
-
-The core validator CLI should be able to operate on all platforms. We will
+## User Needs {#user-needs}all platforms. We will
 initially focus on the x86_64/linux platform, but should be able to build for
 macOS and Windows as well.
 
