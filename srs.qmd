@@ -197,9 +197,11 @@ ensure that their notes conform to a certain structure for better organization
 and retrieval. Some will be developers looking to build meta-tooling incorporating
 Markdown validation into their own applications.
 
-## User Needs {#user-needs}all platforms. We will
-initially focus on the x86_64/linux platform, but should be able to build for
-macOS and Windows as well.
+## User Needs {#user-needs} 
+
+We will initially focus on the x86_64/linux platform, but should be able to
+build for macOS and Windows. (the actual validator will be a Rust binary that
+should be able to build for all platforms).
 
 ## Design and Implementation Constraints {#design-constraints}
 
@@ -211,6 +213,20 @@ requirements); interfaces to other applications; specific technologies, tools, a
 used; parallel operations; language requirements; communications protocols; security
 considerations; design conventions or programming standards (for example, if the customer's
 organization will be responsible for maintaining the delivered software). -->
+
+**Malleability**
+
+The tool we are building is intentionally very generic so that it can be used
+for a large variety of different use cases. This means that we will need to
+maintain interfaces that are suitable for human and machine interpretation.
+
+**Performance**
+
+One consideration that we will try to balance and keep in mind when designing
+MDValidate is performance. We want to keep our schema declaration language
+generic and logical, while also allowing it to be very flexible for the end
+user. The more flexibility and look-ahead requirements in our language the
+slower our interpreter/validator will be.
 
 ## User Documentation {#user-documentation}
 
@@ -252,6 +268,16 @@ these, whatever makes the most logical sense for your product.
 ## Priority Implementation Order
 
 ## Technical Stack
+
+To keep our program performant and light-weight we will use
+[Treesitter](https://tree-sitter.github.io/tree-sitter/). Treesitter is an
+incremental parsing library that allows us to generate an AST for given text
+content, and then recompute the AST as the text changes.
+
+This means that we can allow an input stream of Markdown text, which, for
+example, could be generated from an LLM model, and incrementally validate the
+AST of the document as it changes, allowing for real-time validation (and
+termination).
 
 ## REST API to manage android instances
 
