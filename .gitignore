@@ -1,1 +1,3 @@
 *.pdf
+*_files
+/.quarto/

@@ -50,28 +50,11 @@
         "type": "github"
       }
     },
-    "nixpkgs_3": {
-      "locked": {
-        "lastModified": 1757068644,
-        "narHash": "sha256-NOrUtIhTkIIumj1E/Rsv1J37Yi3xGStISEo8tZm3KW4=",
-        "owner": "nixos",
-        "repo": "nixpkgs",
-        "rev": "8eb28adfa3dc4de28e792e3bf49fcf9007ca8ac9",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nixos",
-        "ref": "nixos-unstable",
-        "repo": "nixpkgs",
-        "type": "github"
-      }
-    },
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
-        "treefmt": "treefmt",
-        "typix": "typix"
+        "treefmt": "treefmt"
       }
     },
     "systems": {
@@ -104,24 +87,6 @@
       "original": {
         "owner": "numtide",
         "repo": "treefmt-nix",
-        "type": "github"
-      }
-    },
-    "typix": {
-      "inputs": {
-        "nixpkgs": "nixpkgs_3"
-      },
-      "locked": {
-        "lastModified": 1757234666,
-        "narHash": "sha256-yOvQn99hMmpHhQzW5kvak6MK+xGQ+z3YDOYz/JpjIho=",
-        "owner": "loqusion",
-        "repo": "typix",
-        "rev": "44573c222b828d448166d1b2cbf27a783f6ea32b",
-        "type": "github"
-      },
-      "original": {
-        "owner": "loqusion",
-        "repo": "typix",
         "type": "github"
       }
     }

@@ -1,0 +1,305 @@
+---
+title: "Software Requirements Specification for *MDvalidate*"
+author:
+  - Wolf Mermelstein
+  - Alesandro Mason
+date: "September 14, 2025"
+affiliation: "Case Western Reserve University"
+toc: true
+toc-depth: 3
+number-sections: true
+format:
+  pdf:
+    documentclass: article
+    geometry: margin=1in
+  html:
+    theme: default
+---
+
+# Introduction
+
+## Purpose {#purpose}
+
+<!-- Alesandro -->
+
+<!-- Describe the purpose of this SRS and its intended audience. -->
+
+This SRS lays out the scope of a Markdown validation and templating tool,
+mdvalidate. The goal of this document is to motivate the need for such a tool,
+explain what exists and why there is currently no equivalent, and outline the
+general shape that the project will take.
+
+## Document Conventions {#document-conventions}
+
+<!-- Wolf -->
+
+<!-- Describe any standards or typographical conventions that were followed when
+writing this SRS, such as fonts or highlighting that have special
+significance. For example, state whether priorities for higher-level
+requirements are assumed to be inherited by detailed requirements, or whether
+every requirement statement is to have its own priority. -->
+
+This document is written in [Quarto](https://quarto.org/), a scientific and
+technical publishing system.
+
+We assume knowledge of some surrounding technologies like abstract syntax
+trees, but defines more specific tooling in the glossary section at the end.
+
+## Intended Audience and Reading Suggestions {#intended-audience}
+
+<!-- Wolf -->
+
+<!-- Describe the different types of reader that the document is intended for,
+such as developers, project managers, marketing staff, users, testers, and
+documentation writers. Describe what the rest of this SRS contains and how it
+is organized. Suggest a sequence for reading the document, beginning with the
+overview sections and proceeding through the sections that are most pertinent
+to each reader type. -->
+
+This document serves as a technical outline for technical of the project for
+consumers of semi-structured Markdown data, or developers who interact with
+disparate document formats looking for a nice unified standard.
+
+## Project Scope {#project-scope}
+
+<!-- Provide a short description of the software being specified and its purpose,
+including relevant benefits, objectives, and goals. Relate the software to
+corporate goals or business strategies. If a separate vision and scope
+document is available, refer to it rather than duplicating its contents here.
+An SRS that specifies the next release of an evolving product should contain
+its own scope statement as a subset of the long-term strategic product
+vision. -->
+
+MDValidate is a cli tool and associated library that takes a Markdown file and
+performs validation, providing useful information about whether it conforms to
+a shape in a schema.
+
+There's a lot of associated tooling that can be created and built into or for
+MDValidate, so we will focus initally on the core validation engine. This will include:
+- A schema definition language for describing the shape of Markdown documents
+- A command line interface for validating Markdown files against schemas
+- A library interface for integrating validation into other applications
+
+And then, time permitting, we will build out some of the associated tooling:
+- A templating engine for generating Markdown documents from schemas and data
+- A language server protocol (LSP) extension for real-time validation in editors
+- Integration into external Markdown tooling, associated Github actions, etc
+
+MDValidate has the potential to address various real business needs:
+- Integration into CI/CD pipelines for Markdown documentation validation
+
+## References {#references}
+
+<!-- Wolf -->
+
+<!-- List any other documents or Web addresses to which this SRS refers. These may
+include user interface style guides, contracts, standards, system
+requirements specifications, use case documents, or a vision and scope
+document. Provide enough information so that the reader could access a copy
+of each reference, including title, author, version number, date, and source
+or location. -->
+
+# Overall Description
+
+## Product Perspective {#product-perspective}
+
+<!-- Wolf -->
+
+<!-- Describe the context and origin of the product being specified in this SRS.
+For example, state whether this product is a follow-on member of a product
+family, a replacement for certain existing systems, or a new, self-contained
+product. If the SRS defines a component of a larger system, relate the
+requirements of the larger system to the functionality of this software and
+identify interfaces between the two. A simple diagram that shows the major
+components of the overall system, subsystem interconnections, and external
+interfaces can be helpful. -->
+
+## Product Features {#product-features}
+
+<!-- Alesandro -->
+
+<!-- Summarize the major features the product contains or the significant
+functions that it performs or lets the user perform. Details will be provided
+in Section 3, so only a high level summary is needed here. Organize the
+functions to make them understandable to any reader of the SRS. A picture of
+the major groups of related requirements and how they relate, such as a top
+level data flow diagram or a class diagram, is often effective. -->
+
+## User Classes and Characteristics {#user-classes}
+
+<!-- Alesandro -->
+
+<!-- Identify the various user classes that you anticipate will use this product.
+User classes may be differentiated based on frequency of use, subset of
+product functions used, technical expertise, security or privilege levels,
+educational level, or experience. Describe the pertinent characteristics of
+each user class. Certain requirements may pertain only to certain user
+classes. Distinguish the favored user classes from those who are less
+important to satisfy. -->
+
+**Technical Hobbiests:**
+These users are technical users who use Markdown on a daily basis to take
+notes, and generally prefer text-based document formats. Many of these users
+may be taking notes in markdown (e.g., Obsidian, Logseq, etc) and want to
+ensure that their notes conform to a certain structure for better organization
+and retrieval. Some will be developers looking to build meta-tooling incorporating
+Markdown validation into their own applications.
+
+## Operating Environment {#operating-environment}
+
+<!-- Wolf -->
+
+<!-- Describe the environment in which the software will operate, including the hardware platform,
+operating system and versions, and any other software components or applications with which it
+must peacefully coexist. -->
+
+The core validator CLI should be able to operate on all platforms. We will
+initially focus on the x86_64/linux platform, but should be able to build for
+macOS and Windows as well.
+
+## Design and Implementation Constraints {#design-constraints}
+
+<!-- Wolf -->
+
+<!-- Describe any items or issues that will limit the options available to the developers. These might
+include: corporate or regulatory policies; hardware limitations (timing requirements, memory
+requirements); interfaces to other applications; specific technologies, tools, and databases to be
+used; parallel operations; language requirements; communications protocols; security
+considerations; design conventions or programming standards (for example, if the customer's
+organization will be responsible for maintaining the delivered software). -->
+
+## User Documentation {#user-documentation}
+
+<!-- Wolf -->
+
+<!-- List the user documentation components (such as user manuals, on-line help, and tutorials) that
+will be delivered along with the software. Identify any known user documentation delivery formats
+or standards. -->
+
+## Assumptions and Dependencies {#assumptions-dependencies}
+
+<!-- Wolf -->
+
+<!-- List any assumed factors (as opposed to known facts) that could affect the requirements stated in
+the SRS. These could include third-party or commercial components that you plan to use, issues
+around the development or operating environment, or constraints. The project could be affected if
+these assumptions are incorrect, are not shared, or change. Also identify any dependencies the
+project has on external factors, such as software components that you intend to reuse from
+another project, unless they are already documented elsewhere (for example, in the vision and
+scope document or the project plan). -->
+
+# System Features
+
+<!-- This template illustrates organizing the functional requirements for the product by system
+features, the major services provided by the product. You may prefer to organize this section by
+use case, mode of operation, user class, object class, functional hierarchy, or combinations of
+these, whatever makes the most logical sense for your product.
+
+- Getting a screen and audio streamed to a react component in a web browser.
+- Creating a programmatic way to "spin up" an emulator with an HTTP API.
+- Making a front end web appication to use that endpoint and show your running device.
+- Allow having multiple emulators that are running at the same time.
+- Sandboxing a android phone in a docker container *with a mounted SD card*.
+- Supporting controlling the device from the browser over a WebRTC data stream.
+- "Multiplayer" (many people viewing the same device with a share link).
+- "Multiplayer" and allowing many people to **control** the same device.
+- Deploying to edge containers like fly.io OR building a multitenent system on a bare metal instance. -->
+
+## Priority Implementation Order
+
+## Technical Stack
+
+## REST API to manage android instances
+
+### Description and Priority
+
+### Stimulus/Response Sequences
+
+### Functional Requirements
+
+<!-- Itemize the detailed functional requirements associated with this feature. These are the
+software capabilities that must be present in order for the user to carry out the
+services provided by the feature, or to execute the use case. Include how the product
+should respond to anticipated error conditions or invalid inputs. Requirements should
+be concise, complete, unambiguous, verifiable, and necessary. Use "TBD" as a
+placeholder to indicate when necessary information is not yet available.
+
+Each requirement should be uniquely identified with a sequence number or a meaningful
+tag of some kind.
+
+REQ-1:
+REQ-2: -->
+
+# External Interface Requirements
+
+## Software Interfaces {#software-interfaces}
+
+<!-- Wolf -->
+
+<!-- Describe the connections between this product and other specific software components (name
+and version), including databases, operating systems, tools, libraries, and integrated commercial
+components. Identify the data items or messages coming into the system and going out and
+describe the purpose of each. Describe the services needed and the nature of communications.
+Refer to documents that describe detailed application programming interface protocols. Identify
+data that will be shared across software components. If the data sharing mechanism must be
+implemented in a specific way (for example, use of a global data area in a multitasking operating
+system), specify this as an implementation constraint. -->
+
+# Other Nonfunctional Requirements
+
+## Performance Requirements
+
+<!-- If there are performance requirements for the product under various circumstances, state them
+here and explain their rationale, to help the developers understand the intent and make suitable
+design choices. Specify the timing relationships for real time systems. Make such requirements as
+specific as possible. You may need to state performance requirements for individual functional
+requirements or features. -->
+
+## Safety Requirements
+
+<!-- Specify those requirements that are concerned with possible loss, damage, or harm that could
+result from the use of the product. Define any safeguards or actions that must be taken, as well as
+actions that must be prevented. Refer to any external policies or regulations that state safety
+issues that affect the product's design or use. Define any safety certifications that must be
+satisfied. -->
+
+## Security Requirements {#security-requirements}
+
+<!-- Alessandro -->
+
+<!-- Specify any requirements regarding security or privacy issues surrounding use of the product or
+protection of the data used or created by the product. Define any user identity authentication
+requirements. Refer to any external policies or regulations containing security issues that affect
+the product. Define any security or privacy certifications that must be satisfied. -->
+
+## Software Quality Attributes
+
+<!-- Specify any additional quality characteristics for the product that will be important to either the
+customers or the developers. Some to consider are: adaptability, availability, correctness, flexibility,
+interoperability, maintainability, portability, reliability, reusability, robustness, testability, and
+usability. Write these to be specific, quantitative, and verifiable when possible. At the least, clarify
+the relative preferences for various attributes, such as ease of use over ease of learning. -->
+
+# Other Requirements
+
+<!-- Define any other requirements not covered elsewhere in the SRS. This might include database
+requirements, internationalization requirements, legal requirements, reuse objectives for the
+project, and so on. Add any new sections that are pertinent to the project. -->
+
+# Appendix A: Glossary
+
+<!-- Define all the terms necessary to properly interpret the SRS, including acronyms and
+abbreviations. You may wish to build a separate glossary that spans multiple projects or the entire
+organization, and just include terms specific to a single project in each SRS. -->
+
+# Appendix B: Analysis Models
+
+<!-- Optionally, include any pertinent analysis models, such as data flow diagrams, class diagrams,
+state-transition diagrams, or entity-relationship diagrams. -->
+
+# Appendix C: Issues List {#issues-list}
+
+<!-- Wolf -->
+
+<!-- This is a dynamic list of the open requirements issues that remain to be resolved, including
+TBDs, pending decisions, information that is needed, conflicts awaiting resolution, and the like. -->
