@@ -305,7 +305,7 @@ tag of some kind. -->
 ## Feature 2: Command Line Validator Tool
 
 ### Description and Priority  
-**Priority: High** - CLI tool that validates Markdown files against schemas.
+**Priority: Medium** - CLI tool that validates Markdown files against schemas.
 
 ### Stimulus/Response Sequences
 - `mdvalidate schema.mdschema document.md` → Validation report
@@ -322,6 +322,18 @@ tag of some kind. -->
 - Complete validation within 20ms for 1.3k characters
 
 ## Feature 3: Language Server (LSP) Integration
+
+### Description and Priority
+**Priority: High** - LSP server for real-time Markdown validation.
+
+### Stimulus/Response Sequences
+- Schema violation detected → Returns error messages
+- Schema file changes → All open Markdown files re-validated
+
+### Functional Requirements
+- Provide real-time diagnostics with error locations and messages
+- Auto-detect schema files in project directories
+- Handle multiple Markdown files simultaneously
 
 ### Description and Priority
 
