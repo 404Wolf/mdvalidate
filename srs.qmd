@@ -139,22 +139,19 @@ Further features include:
 
 ## User Classes and Characteristics {#user-classes}
 
-**Software** **developers** 
-who are writing Markdown documents and want to ensure that they conform to a certain structure for reproducibility.
+**SWE in Big Tech Companies**:
+These users, frequently write technical documentation, API specifications, and design documents in Markdown format. They need standardized schemas to ensure their documentation is consistently structured, machine-readable, and easily consumable by AI systems for automated processing, code generation, and knowledge extraction.
 
 **AI**
-- AI to both enforce a reproducible schema for an LLM and to generate Markdown documents from a schema and data. 
-- AI for agentic behaviour, right now is done with JSON but markdown is more token efficient.
+AI systems increasingly require structured data formats for agentic behavior - autonomous decision-making and task execution workflows that are currently implemented using JSON schemas. However, Markdown offers significant advantages in token efficiency, making it a more cost-effective alternative for AI operations that process large volumes of structured content. By providing schema validation for Markdown documents, this tool enables AI systems to both enforce reproducible data structures for language model interactions and generate consistent documentation from schema-driven data, potentially reducing token costs and improving processing efficiency in high-frequency AI applications.
 
 **Technical Hobbiests:**
-
 These users are technical users who use Markdown on a daily basis to take
 notes, and generally prefer text-based document formats. Many of these users
 may be taking notes in markdown (e.g., Obsidian, Logseq, etc) and want to
 ensure that their notes conform to a certain structure for better organization
 and retrieval. Some will be developers looking to build meta-tooling incorporating
 Markdown validation into their own applications.
-ld be able to operate on 
 
 ## User Needs {#user-needs}all platforms. We will
 initially focus on the x86_64/linux platform, but should be able to build for
@@ -274,6 +271,7 @@ satisfied. -->
 protection of the data used or created by the product. Define any user identity authentication
 requirements. Refer to any external policies or regulations containing security issues that affect
 the product. Define any security or privacy certifications that must be satisfied. -->
+
 
 ## Software Quality Attributes
 
