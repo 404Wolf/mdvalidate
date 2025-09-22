@@ -324,6 +324,14 @@ here and explain their rationale, to help the developers understand the intent a
 design choices. Specify the timing relationships for real time systems. Make such requirements as
 specific as possible. You may need to state performance requirements for individual functional
 requirements or features. -->
+**Speed** 
+the current validation time for a json schema is about 8 ms for a 1.3k character. Speed is especially important for AI systems that need to validate large volumes of content in real-time. So we aim to be at least under 20 ms for a 1.3k character Markdown file.
+**Reliability**
+The tool should be reliable and able to handle large volumes of content. So we aim to be at least 99.999% reliable.
+**Scalability**
+The tool should be scalable and able to handle large volumes of content. So we aim to be able to handle at least 100k characters.
+**Usability**
+So we aim to be able to use the tool with 2 to 3 commands.
 
 ## Safety Requirements
 
@@ -332,6 +340,10 @@ result from the use of the product. Define any safeguards or actions that must b
 actions that must be prevented. Refer to any external policies or regulations that state safety
 issues that affect the product's design or use. Define any safety certifications that must be
 satisfied. -->
+
+- Handle corrupted or extremely large files gracefully without system crashes or memory exhaustion
+- Ensure robust error handling that fails safely when encountering unexpected input formats
+- Isolate validation processes to prevent cascading failures affecting other system components
 
 ## Security Requirements {#security-requirements}
 
@@ -342,6 +354,7 @@ protection of the data used or created by the product. Define any user identity 
 requirements. Refer to any external policies or regulations containing security issues that affect
 the product. Define any security or privacy certifications that must be satisfied. -->
 
+  - We dont have security or privacy issues yet. We are not going to store or have access to any data.
 
 ## Software Quality Attributes
 
@@ -351,11 +364,14 @@ interoperability, maintainability, portability, reliability, reusability, robust
 usability. Write these to be specific, quantitative, and verifiable when possible. At the least, clarify
 the relative preferences for various attributes, such as ease of use over ease of learning. -->
 
+- our program will be accessible and downloadable by anyone with an internet connection and a simple command line interface (accessible via nix packages or via brew)
+
 # Other Requirements
 
 <!-- Define any other requirements not covered elsewhere in the SRS. This might include database
 requirements, internationalization requirements, legal requirements, reuse objectives for the
 project, and so on. Add any new sections that are pertinent to the project. -->
+
 
 # Appendix A: Glossary
 
