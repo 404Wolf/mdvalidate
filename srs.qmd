@@ -335,13 +335,6 @@ tag of some kind. -->
 - Auto-detect schema files in project directories
 - Handle multiple Markdown files simultaneously
 
-### Description and Priority
-
-### Stimulus/Response Sequences
-
-### Functional Requirements
-
-# External Interface Requirements
 
 ## Software Interfaces {#software-interfaces}
 
