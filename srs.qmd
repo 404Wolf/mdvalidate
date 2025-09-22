@@ -117,6 +117,50 @@ identify interfaces between the two. A simple diagram that shows the major
 components of the overall system, subsystem interconnections, and external
 interfaces can be helpful. -->
 
+**MDValidate**
+
+We will be building a DSL (domain-specific-language) for validating Markdown,
+and an associated tool that you can run to process Markdown and check whether
+it conforms to a schema.
+
+Our tool will initially take the form of a CLI, and then may offer editor
+integration, in a way that looks somewhat like the following:
+
+```{mermaid}
+graph LR
+     A[".MDSchema file"] --> B["./mdvalidate"]
+      C["Markdown file"] --> B
+      B --> D["Validation Report"]
+```
+
+It will also offer a library interface for integration into other tools.
+
+**Meta**
+
+There are currently many tools for working with Markdown.
+
+Some notable ones include linters, like
+[markdownlint](https://github.com/DavidAnson/markdownlint), that can validate
+Markdown. It will tell you if (and where) you are missing closing tags, for
+example, or have bad spacing alignment. There are also formatting tools for
+markdown like [Prettier](https://prettier.io/) that can format markdown to a
+unified style.
+
+Recently, with the advent of AI, many new Markdown related tools have sprung
+into existence, since Markdown is a paricuarly easy to parse and generate
+textual format that can convey a large amount of information in a relatively
+small amount of tokens. For example, recently Microsoft has been working on
+[MarkItDown](https://github.com/microsoft/markitdown), a tool that can convert
+many different inputs, like PDFs, word documents, and more to Markdown. There
+are also traditional document conversion tools, like
+[Pandoc](https://pandoc.org/), that can convert between many different document
+formats, including Markdown, that have gained popularity.
+
+**Gaps**
+
+Right now, there are many great options to work with Markdown, edit markdown,
+generate Markdown, and display or render Markdown, but there is no great way to 
+
 ## Product Features {#product-features}
 
 <!-- Alesandro -->
