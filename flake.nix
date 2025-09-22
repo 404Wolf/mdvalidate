@@ -35,7 +35,7 @@
             treefmtconfig = treefmt.lib.evalModule pkgs {
               projectRootFile = "flake.nix";
               programs.nixfmt.enable = true;
-              programs.mdfmt.enable = true;
+              programs.prettier.enable = true;
             };
           in
           treefmtconfig.config.build.wrapper;
@@ -48,6 +48,7 @@
               nixd
               nixfmt
               quarto
+              texliveSmall
             ]
           );
         };
