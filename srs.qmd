@@ -278,15 +278,6 @@ This means that we can allow an input stream of Markdown text, which, for
 example, could be generated from an LLM model, and incrementally validate the
 AST of the document as it changes, allowing for real-time validation (and
 termination).
-
-## Feature 1: Schema Definition Language
-
-### Description and Priority
-
-### Stimulus/Response Sequences
-
-### Functional Requirements
-
 <!-- Itemize the detailed functional requirements associated with this feature. These are the
 software capabilities that must be present in order for the user to carry out the
 services provided by the feature, or to execute the use case. Include how the product
@@ -297,13 +288,38 @@ placeholder to indicate when necessary information is not yet available.
 Each requirement should be uniquely identified with a sequence number or a meaningful
 tag of some kind. -->
 
-## Feature 2: Command Line Validator Tool
+## Feature 1: Schema Definition Language
 
 ### Description and Priority
+**Priority: High** - DSL for defining Markdown document structure and constraints.
 
 ### Stimulus/Response Sequences
+- User creates `.MDSchema` file → Schema parsed and validated
+- Invalid schema syntax → Error messages with line numbers
 
 ### Functional Requirements
+- Support required/optional Markdown elements (headers, lists, code blocks)
+- Define heading hierarchy constraints 
+- Returns clear error messages for malformed schemas
+
+## Feature 2: Command Line Validator Tool
+
+### Description and Priority  
+**Priority: High** - CLI tool that validates Markdown files against schemas.
+
+### Stimulus/Response Sequences
+- `mdvalidate schema.mdschema document.md` → Validation report
+- `cat document.md | mdvalidate schema.mdschema` → Stream validation
+- Invalid document → Detailed error report with line numbers
+- Missing files → Clear error messages
+
+### Functional Requirements
+- Accept schema and Markdown file paths as arguments
+- Accept Markdown content from stdin streams
+- Parse Markdown into AST for validation
+- Generate pass/fail reports with error locations
+- Return appropriate exit codes
+- Complete validation within 20ms for 1.3k characters
 
 ## Feature 3: Language Server (LSP) Integration
 
