@@ -15,7 +15,7 @@
   #v(-10em)
 
   #text(size: 24pt, weight: "bold")[
-    Software Requirements Specification for _WebRTCDroid_
+    Software Requirements Specification for _MDvalidate_
   ]
 
   #v(1em)
@@ -49,9 +49,10 @@
 
 // Describe the purpose of this SRS and its intended audience.
 
-This SRS lays out the scope of our WebRTC android-in-the-browser project, its
-features, and the general architecture. The intended audience is both developers
-looking to contribute, and potential API consumers of the project.
+This SRS lays out the scope of a Markdown validation and templating tool,
+mdvalidate. The goal of this document is to motivate the need for such a tool,
+explain what exists and why there is currently no equivalent, and outline the
+general shape that the project will take.
 
 == Document Conventions // wolf
 
@@ -61,10 +62,11 @@ looking to contribute, and potential API consumers of the project.
 // requirements are assumed to be inherited by detailed requirements, or whether
 // every requirement statement is to have its own priority.
 
-We are laying out a general outline of a effort to get physical android devices
-streamed over WebRTC. Some of the specifications we provide are general bulleted
-lists of features or specification that aren't totally complete, and are
-simplifications to stay focused to the primary goal of the project.
+This document is written in [Typst](https://typst.app/), a modern markup
+language.
+
+We assume knowledge of some surrounding technologies like abstract syntax
+trees, but defines more specific tooling in the glossary section at the end.
 
 == Intended Audience and Reading Suggestions // wolf
 
@@ -76,7 +78,8 @@ simplifications to stay focused to the primary goal of the project.
 // to each reader type.
 
 This document serves as a technical outline for technical of the project for
-Android DevOps engineers.
+consumers of semi-structured Markdown data, or developers who interact with
+disparate document formats looking for a nice unified standard.
 
 == Project Scope
 
@@ -88,21 +91,23 @@ Android DevOps engineers.
 // its own scope statement as a subset of the long-term strategic product
 // vision.
 
-*Primary Objectives:*
-- Remote device control for development teams without hardware dependencies  
-- Cost-effective alternative to physical device testing infrastructure
-- Real-time collaborative testing and demonstration capabilities
-- Automated CI/CD pipeline integration for mobile app testing at scale
+MDValidate is a cli tool and associated library that takes a Markdown file and
+performs validation, providing useful information about whether it conforms to
+a shape in a schema.
 
-*Business Value:*
-  Improving development velocity through instant device provisioning and
-  parallel testing capabilities. Supports corporate digital transformation
-  initiatives by enabling distributed mobile development teams.
-  *Competitors*: The current market leader with their starter plan at 708 per year and their premium plan at 3828 per year
+There's a lot of associated tooling that can be created and built into or for
+MDValidate, so we will focus initally on the core validation engine. This will include:
+- A schema definition language for describing the shape of Markdown documents
+- A command line interface for validating Markdown files against schemas
+- A library interface for integrating validation into other applications
 
-Addresses the growing demand for mobile-first applications by providing
-  scalable testing infrastructure that supports continuous delivery practices
-  and remote development workflows.
+And then, time permitting, we will build out some of the associated tooling:
+- A templating engine for generating Markdown documents from schemas and data
+- A language server protocol (LSP) extension for real-time validation in editors
+- Integration into external Markdown tooling, associated Github actions, etc
+
+MDValidate has the potential to address various real business needs:
+- Integration into CI/CD pipelines for Markdown documentation validation
 
 == References // wolf
 
@@ -116,40 +121,6 @@ Addresses the growing demand for mobile-first applications by providing
 = Overall Description
 
 == Product Perspective // wolf
-
-The tool being developed functions as a collection of standalone components that
-the actual "product" we will end up building composes into a undified demo.
-
-The android developer tooling ecosystem currently is relatively scattered.
-
-#figure(
-  image("images/avd-manager.png", width: 50%),
-  caption: [Android Studio Virtual Device Manager GUI]
-)
-
-To configure a virtual android device for developing Android applications you
-often will use [Android Studio](https://developer.android.com/studio), which is
-a Jetbrains based GUI that provides a fully integrated developer environment for
-making Android applications. It has a UI where you can configure an Android
-virtual device, download Android images that you can run as emulators, and
-generally provides a wrappers on Google's official Android CLIs (like
-`avdmanager` and `emulator`). Android Studio also has the ability to actually
-program Android applications and provides a side by side emulator, much like
-Apple's XCode integration for writing Swift IOS applications.
-
-This type of tooling is, however, designed for end users that are programming
-applications, and our focus is more on automated pipelines, application
-consumers, and providing a more editor agnostic/generic tool for using
-virtualized Android devices. Google maintains a similar tool to offer a "fully
-integrated" experience for browsers, as part of [Project IDX](https://idx.dev/)
-(now known as Fireship Studio). This tool motivated Google to add native WebRTC
-support for android.
-
-One of the tools that we will be using to implement our project, which achieves
-a similar objective but is designed mostly for local use and not for browser
-compatibility, is [Screen Copy](https://github.com/Genymobile/scrcpy). Screen
-copy lets you stream your Android device to their custom client that runs on
-your desktop, and can handle streaming audio, video, and control inputs.
 
 // Describe the context and origin of the product being specified in this SRS.
 // For example, state whether this product is a follow-on member of a product
@@ -178,35 +149,24 @@ your desktop, and can handle streaming audio, video, and control inputs.
 // each user class. Certain requirements may pertain only to certain user
 // classes. Distinguish the favored user classes from those who are less
 // important to satisfy.
-*Primary Users - DevOps Engineers (High Priority):*
-- Frequency: Daily automated usage via CI/CD pipelines
-- Technical expertise: Advanced scripting and infrastructure management
-- Key requirements: API reliability, horizontal scaling, integration capabilities
-- Usage patterns: Batch testing, parallel device provisioning, automated deployment validation
 
-*Secondary Users - Mobile Developers (High Priority):*
-- Frequency: Regular interactive usage during development cycles
-- Technical expertise: Mobile development proficiency, moderate infrastructure knowledge
-- Key requirements: Low-latency interaction, device variety, debugging capabilities
-- Usage patterns: Interactive testing, APK deployment, collaborative debugging sessions
-
-*Tertiary Users - QA Teams (Medium Priority):*
-- Frequency: Periodic manual testing campaigns
-- Technical expertise: Testing methodology focus, basic technical skills
-- Key requirements: User-friendly web interface, session sharing, test result capture
-- Usage patterns: Manual testing workflows, bug reproduction, stakeholder demonstrations
-
-*Administrative Users - Platform Operators (Medium Priority):*
-- Frequency: Ongoing system monitoring and maintenance
-- Technical expertise: System administration and security management
-- Key requirements: Monitoring dashboards, user management, resource optimization
-- Usage patterns: System health monitoring, user provisioning, capacity planning
+*Technical Hobbiests:*
+These users are technical users who use Markdown on a daily basis to take
+notes, and generally prefer text-based document formats. Many of these users
+may be taking notes in markdown (e.g., Obsidian, Logseq, etc) and want to
+ensure that their notes conform to a certain structure for better organization
+and retrieval. Some will be developers looking to build meta-tooling incorporating
+Markdown validation into their own applications.
 
 == Operating Environment // wolf
 
 // Describe the environment in which the software will operate, including the hardware platform,
 // operating system and versions, and any other software components or applications with which it
 // must peacefully coexist.
+
+The core validator CLI should be able to operate on all platforms. We will
+initially focus on the x86_64/linux platform, but should be able to build for
+macOS and Windows as well.
 
 == Design and Implementation Constraints // wolf
 
@@ -252,110 +212,13 @@ your desktop, and can handle streaming audio, video, and control inputs.
 
 == Priority Implementation Order
 
-+ WebRTC video/audio streaming to browser
-+ HTTP API for emulator lifecycle management
-+ Web dashboard for emulator access and control
-+ Docker containerization with SD card mounting
-+ Browser-based device control via WebRTC data channels
-
-_Time permitting_
-
-+ Production deployment (edge or bare metal)
-+ Multi-instance concurrent emulator support
-+ Multiplayer viewing with shareable links
-+ Collaborative control with multiple users
-
 == Technical Stack
-
-- *Backend*:
-  - Podman OCI runtime with Nix image building
-  - Go with Pion WebRTC library
-  - REST API, future gRPC migration
-
-- *Frontend*:
-  - Vanilla react built with Vite
-  - WebRTC with adapter.js or native WebRTC browser API
-
-- *Android*:
-  - Official emulators
-  - Custom image support (LineageOS via Robotnix)
 
 == REST API to manage android instances
 
-We will have a REST API to manage android instances. The API will allow users
-to create, start, stop, and delete android instances. The API will also allow
-users to get the status of an instance.
-
 === Description and Priority
 
-We will have a REST API that can manage android images and instances. It will
-offer the ability to:
-
-High Priority:
-
-+ Create new Android instance that is instantly running, and return an ID
-  associated with that and get a URL to connect to it.
-
-Medium Priority:
-
-+ Create an image and virtual device, with configuration options (device type,
-  Android version, etc).
-
-Low Priority:
-
-+ Virtual SD card support (so you can "transfer" state between instances).
-+ Stop an instance given an instance ID.
-+ Get the status of an instance given an instance ID.
-+ Get logs associated with an emulator instance.
-+ Pause and resume instances (preserving the state of the instance).
-
 === Stimulus/Response Sequences
-
-Generally, the flow to create and connect to a virtual Android device will be:
-
-1. User clicks a "Make image" button on the web app. This sends a request that
-   looks like:
-
-```
-HTTP POST /images
-Content-Type: application/json
-{
-  "label": "my-android-image",
-  "type": "android",
-  "android_version": "11",
-}
-```
-
-2. User clicks a "Create device" button on the web app. This sends a
-   request that looks like:
-
-```
-HTTP POST /devices
-Content-Type: application/json
-{
-  "resolution": {
-    "width": 1080,
-    "height": 2340,
-    "density": 440
-  },
-  "label": "my-android-device"
-}
-```
-
-For both 1. and 2. the server responds with a JSON that has a unique ID for the
-image and device.
-
-3. The user then clicks a "Start instance" button on the web app. This sends a
-   request that looks like:
-
-```
-HTTP POST /instances
-Content-Type: application/json
-{
-  "image_id": "image-uuid",
-  "device_id": "device-uuid"
-}
-```
 
 === Functional Requirements
 
@@ -372,25 +235,9 @@ Content-Type: application/json
 // REQ-1:
 // REQ-2:
 
-== Live video, audio, and interaaction streaming
-
-// Additional system features follow the same structure as System Feature 1
-
-== Web App to interface with the device manager
-
-// Additional system features follow the same structure as System Feature 1
-
 = External Interface Requirements
 
 == Software Interfaces // wolf
-
-We will be making a `go` server that speaks `Scrcpy`'s binary protocol and
-re-exposes the phone over a WebRTC API so that you can communicate with the
-phone via a web browser.
-
-The `go` server will establish TCP connections to the `scrcpy` server running on
-the Android device, and then, using [pion](https://github.com/pion/webrtc), a
-`go` implementation of WebRTC, re-expose the phone over WebRTC.
 
 // Describe the connections between this product and other specific software components (name
 // and version), including databases, operating systems, tools, libraries, and integrated commercial
@@ -411,11 +258,6 @@ the Android device, and then, using [pion](https://github.com/pion/webrtc), a
 // specific as possible. You may need to state performance requirements for individual functional
 // requirements or features.
 
-- Concurrent emulators: n+ per server node
-- Streaming latency: $< n m s$ end-to-end
-- Container startup: $\<n $ seconds
-- Multi-viewer support: 50 viewers, 10 controllers per instance
-
 == Safety Requirements // 
 
 // Specify those requirements that are concerned with possible loss, damage, or harm that could
@@ -423,11 +265,6 @@ the Android device, and then, using [pion](https://github.com/pion/webrtc), a
 // actions that must be prevented. Refer to any external policies or regulations that state safety
 // issues that affect the product's design or use. Define any safety certifications that must be
 // satisfied.
-// 
-- Container isolation with read-only filesystems
-- Encrypted WebRTC communications (DTLS/SRTP)
-- Resource quotas and automatic cleanup
-- Session-based access controls
 
 == Security Requirements // alessandro
 
@@ -436,7 +273,6 @@ the Android device, and then, using [pion](https://github.com/pion/webrtc), a
 // requirements. Refer to any external policies or regulations containing security issues that affect
 // the product. Define any security or privacy certifications that must be satisfied.
 
-
 == Software Quality Attributes // 
 
 // Specify any additional quality characteristics for the product that will be important to either the
@@ -444,11 +280,6 @@ the Android device, and then, using [pion](https://github.com/pion/webrtc), a
 // interoperability, maintainability, portability, reliability, reusability, robustness, testability, and
 // usability. Write these to be specific, quantitative, and verifiable when possible. At the least, clarify
 // the relative preferences for various attributes, such as ease of use over ease of learning.
-// 
-- *Reliability*: 99.9% uptime with automatic recovery
-- *Scalability*: Linear performance scaling to design limits  
-- *Usability*: 5-minute learning curve for new users
-- *Maintainability*: >80% test coverage, daily deployment capability
 
 = Other Requirements
 
@@ -471,8 +302,6 @@ the Android device, and then, using [pion](https://github.com/pion/webrtc), a
 
 // Optionally, include any pertinent analysis models, such as data flow diagrams, class diagrams,
 // state-transition diagrams, or entity-relationship diagrams.
-
-#figure(image("images/overall-system.svg"))
 
 = Appendix C: Issues List // wolf
 
