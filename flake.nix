@@ -20,19 +20,10 @@
         pkgs = import nixpkgs { inherit system; };
       in
       {
-        packages = {
-          default = pkgs.callPackage ./android/docker.nix { inherit pkgs; };
+        packages = rec {
+          default = build;
+          build = pkgs.callPackage ./nix/build.nix { };
         };
-
-        formatter =
-          let
-            treefmtconfig = treefmt.lib.evalModule pkgs {
-              projectRootFile = "flake.nix";
-              programs.nixfmt.enable = true;
-              programs.prettier.enable = true;
-            };
-          in
-          treefmtconfig.config.build.wrapper;
 
         devShells.default = pkgs.mkShell {
           packages = (
@@ -42,10 +33,24 @@
               nixd
               nixfmt
               quarto
-              texliveSmall
+              texliveFull
+              cargo
+              rustc
+              rust-analyzer
             ]
           );
         };
+
+        formatter =
+          let
+            treefmtconfig = treefmt.lib.evalModule pkgs {
+              projectRootFile = "flake.nix";
+              programs.nixfmt.enable = true;
+              programs.yamlfmt.enable = true;
+              programs.prettier.enable = true;
+            };
+          in
+          treefmtconfig.config.build.wrapper;
       }
     );
 }

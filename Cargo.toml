@@ -1,0 +1,12 @@
+[package]
+name = "mdvalidate"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.48", features = ["derive"] }
+log = "0.4.28"
+tree-sitter = "0.25.10"
+
+[build-dependencies]
+cc="*"

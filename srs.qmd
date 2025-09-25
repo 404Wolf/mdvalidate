@@ -3,7 +3,7 @@ title: "Software Requirements Specification for *MDvalidate*"
 author:
   - Wolf Mermelstein
   - Alesandro Mason
-date: "September 14, 2025"
+date: "September 22, 2025"
 affiliation: "Case Western Reserve University"
 toc: true
 toc-depth: 3
@@ -43,7 +43,7 @@ This document is written in [Quarto](https://quarto.org/), a scientific and
 technical publishing system.
 
 We assume knowledge of some surrounding technologies like abstract syntax
-trees, but defines more specific tooling in the glossary section at the end.
+trees, but defines more specific terms in the glossary section at the end.
 
 ## Intended Audience and Reading Suggestions {#intended-audience}
 
@@ -70,28 +70,97 @@ An SRS that specifies the next release of an evolving product should contain
 its own scope statement as a subset of the long-term strategic product
 vision. -->
 
-MDValidate is a CLI tool and associated library that takes a Markdown file and
+`mdvalidate` is a CLI tool and associated library that takes a Markdown file and
 performs validation, providing useful information about whether it conforms to
 a shape in a schema.
+
+[Markdown](https://learnxinyminutes.com/markdown/) is an unstructured superset
+of html that is easy to read and write for humans. It is widely used for
+technical documentation, note-taking, and more. However, because it is
+unstructured, it can be difficult to ensure that Markdown documents conform to a
+specific structure or schema and generally isn't specifically meant to be used
+as structured data. MDValidate makes that possible.
+
+The general idea is that you can intake a valid Markdown file like
+
+```{markdown}
+# Wolf Mermelstein
+
+This is me!
+
+## Phones
+| Type   | Number             |
+| :----- | :----------------- |
+| Backup | `c!(212) 767-9653` |
+| Misc   | `c!(123) 456-789W` |
+```
+
+Which is a "unsafe" (a markdown file that does not have a specific shape) file,
+and validate it against a schema defined in a custom schema language (that we
+will design) that may look something along the lines of
+
+```{txt}
+# (name:/([A-Z][a-z]+){2}/) // First Last
+
+(notes:/.+/)
+// Notes about the person can go here
+
+## Phones
+| Type   | Number             |
+| :----- | :----------------- |
+(phone_row:| (phone_type:([\w ]+) | `c!(\d{3}) \d{3}-\d{3}` |)
+```
+
+To get an error report that might say
+
+```{txt}
+Failed to validate!
+
+On line 7, column 40, expected phone_type<regex> to match `c!(\d{3})
+\d{3}-\d{4}` but got `c!(123) 456-789W`
+```
+
+The beauty of defining a schema in such a way that every Markdown AST node has
+a clear definition and label is we will also be able to go from a structured
+data format like JSON or YAML to a Markdown document that conforms to the
+schema. For example, given the schema above and the JSON data
+
+```json
+{
+  "name": "Wolf Mermelstein",
+  "phone_rows": [
+    {"Backup": "(212) 767-9653"},
+    {"Misc": "(123) 456-7890"}
+  ]
+}
+```
+
+Back to the original Markdown document.
 
 There's a lot of associated tooling that can be created and built into or for
 MDValidate, so we will focus initally on the core validation engine. This will
 include:
+
 - A schema definition language for describing the shape of Markdown documents.
 - A command line interface for validating Markdown files against schemas.
 - A library interface for integrating validation into other applications.
 
 And then, time permitting, we will build out some of the associated tooling:
+
 - A templating engine for generating Markdown documents from schemas and data.
 - A language server protocol (LSP) extension for real-time validation in editors.
 - Integration into external Markdown tooling, associated Github actions, etc.
 
 MDValidate has the potential to address various real business needs:
+
 - Integration into CI/CD pipelines for Markdown documentation validation.
 - Use in other tools that allow users to edit arbitrary document formats as
-  Markdown.
+  Markdown (for example, if you define a tool that can transform any file format
+  to JSON, then you define a Markdown schema that can carry all the fields of
+  the JSON, then you can make it possible to "edit" those types of files in
+  Markdown in a way where it can easily be converted back).
 
-## References {#references}
+<!-- ## References {#references} -->
 
 <!-- Wolf -->
 
@@ -102,8 +171,6 @@ document. Provide enough information so that the reader could access a copy
 of each reference, including title, author, version number, date, and source
 or location. -->
  
-
-
 ## Product Perspective {#product-perspective}
 
 <!-- Wolf -->
@@ -119,21 +186,13 @@ interfaces can be helpful. -->
 
 **MDValidate**
 
-We will be building a DSL (domain-specific-language) for validating Markdown,
-and an associated tool that you can run to process Markdown and check whether
-it conforms to a schema.
+The primary "product" will be the command line tool `mdvalidate`, which will
+take a schema and a Markdown file (or stream) and output whether the document
+conforms to the schema and useful error information, including the line of
+issues and why validation failed.
 
-Our tool will initially take the form of a CLI, and then may offer editor
-integration, in a way that looks somewhat like the following:
-
-```{mermaid}
-graph LR
-     A[".MDSchema file"] --> B["./mdvalidate"]
-      C["Markdown file"] --> B
-      B --> D["Validation Report"]
-```
-
-It will also offer a library interface for integration into other tools.
+An important subcomponent of the project will be the custom schema definition
+language that we will design in the process.
 
 **Meta**
 
@@ -147,7 +206,7 @@ markdown like [Prettier](https://prettier.io/) that can format markdown to a
 unified style.
 
 Recently, with the advent of AI, many new Markdown related tools have sprung
-into existence, since Markdown is a paricuarly easy to parse and generate
+into existence, since Markdown is a particularly easy to parse and generate
 textual format that can convey a large amount of information in a relatively
 small amount of tokens. For example, recently Microsoft has been working on
 [MarkItDown](https://github.com/microsoft/markitdown), a tool that can convert
@@ -159,7 +218,15 @@ formats, including Markdown, that have gained popularity.
 **Gaps**
 
 Right now, there are many great options to work with Markdown, edit markdown,
-generate Markdown, and display or render Markdown, but there is no great way to 
+generate Markdown, and display or render Markdown, but there is no great way to
+actually validate or template Markdown. There's even tools dedicated to Markdown
+AST manipulation for end users, to make it easy to make websites that can
+display Markdown, via the [remark/rehype](https://github.com/remarkjs/remark)
+ecosystem.
+
+You can use common templating tools like [handlebars](https://handlebarsjs.com/)
+to take structured data and place it into valid Markdown, but there's no great
+way to then go back in the other direction.
 
 ## Product Features {#product-features}
 
@@ -173,29 +240,49 @@ the major groups of related requirements and how they relate, such as a top
 level data flow diagram or a class diagram, is often effective. -->
 
 Core features include:
-- The user is able to define a schema for a Markdown document.
-- The user is able to validate a Markdown document against a schema.
-- The user is able to generate a Markdown document from a schema and data.
 
+- Defining a schema for a Markdown document.
+- Validating a Markdown document against a schema.
+- Generating a Markdown document from a schema and data.
 
-Further features include:
-- VS code integration: after installation the user would be able to validate Markdown files against their schemas in VS code and errors will show underlined by a red squiggly line.
+Further key features include:
+
+- Editor integration via Language Server Protocol. This lets users of
+  MDvalidate validate Markdown files against their schemas in editors that
+  support LSP protocol (like VSCode and Neovim) identify errors by a red squiggly
+  lines as they edit their Markdown.
 
 ## User Classes and Characteristics {#user-classes}
 
-**SWE in Big Tech Companies**:
-These users, frequently write technical documentation, API specifications, and design documents in Markdown format. They need standardized schemas to ensure their documentation is consistently structured, machine-readable, and easily consumable by AI systems for automated processing, code generation, and knowledge extraction.
-
-**AI**
-AI systems increasingly require structured data formats for agentic behavior - autonomous decision-making and task execution workflows that are currently implemented using JSON schemas. However, Markdown offers significant advantages in token efficiency, making it a more cost-effective alternative for AI operations that process large volumes of structured content. By providing schema validation for Markdown documents, this tool enables AI systems to both enforce reproducible data structures for language model interactions and generate consistent documentation from schema-driven data, potentially reducing token costs and improving processing efficiency in high-frequency AI applications.
-
 **Technical Hobbiests:**
+
 These users are technical users who use Markdown on a daily basis to take
 notes, and generally prefer text-based document formats. Many of these users
 may be taking notes in markdown (e.g., Obsidian, Logseq, etc) and want to
 ensure that their notes conform to a certain structure for better organization
 and retrieval. Some will be developers looking to build meta-tooling incorporating
 Markdown validation into their own applications.
+
+**Corporate software engineers/Companies**:
+
+These users, frequently write technical documentation, API specifications, and
+design documents in Markdown format. They need standardized schemas to ensure
+their documentation is consistently structured, machine-readable, and easily
+consumable by AI systems for automated processing, code generation, and
+knowledge extraction.
+
+**AI Consumers**
+
+AI systems increasingly require structured data formats for agentic behavior -
+autonomous decision-making and task execution workflows that are currently
+implemented using JSON schemas. However, Markdown offers significant advantages
+in token efficiency, making it a more cost-effective alternative for AI
+operations that process large volumes of structured content. By providing
+schema validation for Markdown documents, this tool enables AI systems to both
+enforce reproducible data structures for language model interactions and
+generate consistent documentation from schema-driven data, potentially reducing
+token costs and improving processing efficiency in high-frequency AI
+applications.
 
 ## User Needs {#user-needs} 
 
@@ -214,11 +301,25 @@ used; parallel operations; language requirements; communications protocols; secu
 considerations; design conventions or programming standards (for example, if the customer's
 organization will be responsible for maintaining the delivered software). -->
 
+MDvalidate has some difficult and important core technical requirements:
+
+**Incremental Validation**
+
+It should be able to handle streamed input data that is not fully declared
+initially. It should be able to "break" validating and say that the Markdown has
+not validated before the rest of the Markdown has come in. This is useful in
+applications where you are validating the output of an LLM in real-time, and
+want to terminate the LLM's response before it finishes because it began to
+output Markdown that does not conform to the schema.
+
 **Malleability**
 
 The tool we are building is intentionally very generic so that it can be used
 for a large variety of different use cases. This means that we will need to
-maintain interfaces that are suitable for human and machine interpretation.
+maintain interfaces that are suitable for human and machine interpretation. It
+will be important that stick to CLI conventions like taking input files for the
+validator via stdin and providing machine-readable output when the tty is a
+non-user-interactive terminal via stdout and stderr.
 
 **Performance**
 
@@ -236,6 +337,13 @@ slower our interpreter/validator will be.
 will be delivered along with the software. Identify any known user documentation delivery formats
 or standards. -->
 
+We will provide generated documentation using [clap](https://clap.rs/) for the
+command line interface, and will also provide a simple Markdown `README.md` on
+the GitHub repo that explains the basics for using MDvalidate.
+
+For our actual custom schema description language, we will provide a document
+that outlines the grammer and provide many examples.
+
 ## Assumptions and Dependencies {#assumptions-dependencies}
 
 <!-- Wolf -->
@@ -248,36 +356,52 @@ project has on external factors, such as software components that you intend to 
 another project, unless they are already documented elsewhere (for example, in the vision and
 scope document or the project plan). -->
 
+Markdown is a common language format but has some ambiguities. For the rest of
+this document we will be assuming that Markdown refers to the
+[CommonMark](https://commonmark.org/) specification of Markdown, which is a
+well-defined and widely adopted standard. We will also strive to have support
+for GitHub Flavored Markdown (GFM), additions, like Markdown tables.
+
 # System Features
 
 <!-- This template illustrates organizing the functional requirements for the product by system
 features, the major services provided by the product. You may prefer to organize this section by
 use case, mode of operation, user class, object class, functional hierarchy, or combinations of
-these, whatever makes the most logical sense for your product.
-
-- Getting a screen and audio streamed to a react component in a web browser.
-- Creating a programmatic way to "spin up" an emulator with an HTTP API.
-- Making a front end web appication to use that endpoint and show your running device.
-- Allow having multiple emulators that are running at the same time.
-- Sandboxing a android phone in a docker container *with a mounted SD card*.
-- Supporting controlling the device from the browser over a WebRTC data stream.
-- "Multiplayer" (many people viewing the same device with a share link).
-- "Multiplayer" and allowing many people to **control** the same device.
-- Deploying to edge containers like fly.io OR building a multitenent system on a bare metal instance. -->
-
-## Priority Implementation Order
+these, whatever makes the most logical sense for your product. -->
 
 ## Technical Stack
 
-To keep our program performant and light-weight we will use
+The project will be written in Rust so that we can enforce strict memory
+preconditions and achieve a high performance requirement.
+
+We will use [Clap](https://github.com/clap-rs/clap) to build the command line
+interface and do argument parsing, which is one of the most common rust CLI
+libraries.
+
+We will also use many common Rust development tools like
+[Machete](https://github.com/bnjbvr/cargo-machete) and `cargo` tools.
+
+To enable incremental parsing, which is important for streamed input and
+real-time validation, we will use
 [Treesitter](https://tree-sitter.github.io/tree-sitter/). Treesitter is an
 incremental parsing library that allows us to generate an AST for given text
-content, and then recompute the AST as the text changes.
+content, and then recompute the AST as the text changes. We may even be able to
+define a grammer for our DSL with Treesitter grammers as well to make processing
+our schema files easier.
 
 This means that we can allow an input stream of Markdown text, which, for
 example, could be generated from an LLM model, and incrementally validate the
 AST of the document as it changes, allowing for real-time validation (and
 termination).
+
+When we get to implementing a language server for our validator, we will use
+[Tower LSP](https://github.com/ebkalderon/tower-lsp), which is a Rust library to
+build language servers. It is used by popular language LSPs like [Deno's
+language server](https://docs.deno.com/runtime/reference/cli/lsp/).
+
+To package our program, we will use [Nix](https://nixos.org/) for builds and
+deployment/CI.
+
 <!-- Itemize the detailed functional requirements associated with this feature. These are the
 software capabilities that must be present in order for the user to carry out the
 services provided by the feature, or to execute the use case. Include how the product
@@ -291,49 +415,74 @@ tag of some kind. -->
 ## Feature 1: Schema Definition Language
 
 ### Description and Priority
-**Priority: High** - DSL for defining Markdown document structure and constraints.
+
+**Priority: High**
+
+DSL for defining Markdown document structure and constraints. This will include
+a specification for writing code in our custom language.
 
 ### Stimulus/Response Sequences
-- User creates `.MDSchema` file → Schema parsed and validated
-- Invalid schema syntax → Error messages with line numbers
+
+- User creates `.mds` (markdown-schema) file -> Schema parsed and validated by MDvalidate
+- Invalid schema syntax -> Error messages with line/column numbers in either a
+  human or machine-readable format
 
 ### Functional Requirements
-- Support required/optional Markdown elements (headers, lists, code blocks)
-- Define heading hierarchy constraints 
-- Returns clear error messages for malformed schemas
+
+- Support specifying required/optional Markdown elements (headers, lists, code
+  blocks) and patterns that they must conform to
+- Define heading hierarchy constraints (e.g., H2 must follow H1)
+- Returns clear error messages for malformed schemas (e.g., missing end tags,
+  invalid regex, and associated labels)
+- Support comments and whitespace for readability
 
 ## Feature 2: Command Line Validator Tool
 
 ### Description and Priority  
-**Priority: Medium** - CLI tool that validates Markdown files against schemas.
+
+**Priority: Medium**
+
+CLI tool that validates Markdown files against schemas.
 
 ### Stimulus/Response Sequences
-- `mdvalidate schema.mdschema document.md` → Validation report
-- `cat document.md | mdvalidate schema.mdschema` → Stream validation
+
+- `mdvalidate schema.mds document.md` → Validation report
+- `cat document.md | mdvalidate schema.mds` → Stream validation
 - Invalid document → Detailed error report with line numbers
 - Missing files → Clear error messages
 
 ### Functional Requirements
+
 - Accept schema and Markdown file paths as arguments
 - Accept Markdown content from stdin streams
 - Parse Markdown into AST for validation
 - Generate pass/fail reports with error locations
 - Return appropriate exit codes
-- Complete validation within 20ms for 1.3k characters
+- Complete validation within 20ms for 1.3k characters (which is about twice as
+  long as it takes for [the official `jsoncschema`
+  validator](https://github.com/sourcemeta/jsonschema) to validate a JSON schema
+  of about 1k characters)
 
 ## Feature 3: Language Server (LSP) Integration
 
 ### Description and Priority
-**Priority: High** - LSP server for real-time Markdown validation.
+
+**Priority: High**
+
+LSP server for real-time Markdown validation.
 
 ### Stimulus/Response Sequences
-- Schema violation detected → Returns error messages
-- Schema file changes → All open Markdown files re-validated
+
+- Schema violation detected -> Returns error messages
+- Schema file changes -> All open Markdown files re-validated
 
 ### Functional Requirements
-- Provide real-time diagnostics with error locations and messages
-- Auto-detect schema files in project directories
-- Handle multiple Markdown files simultaneously
+
+- Provide real-time diagnostics with error locations and messages, including
+  incremental analysis (which will be important for streaming and LSP
+  integration).
+- Auto-detect schema files in project directories by using a $schema pragma in
+  the Markdown's frontmatter
 
 
 ## Software Interfaces {#software-interfaces}
@@ -351,6 +500,44 @@ sharing mechanism must be implemented in a specific way (for example, use of a
 global data area in a multitasking operating system), specify this as an
 implementation constraint. -->
 
+`mdvalidate` will function as a standalone Rust binary that can be run from the
+command line. It will also offer a library interface for integration into other
+tools, and will expose itself as a simple Rust crate (library).
+
+```{mermaid}
+graph LR
+     A[".mds file"] --> B["./mdvalidate"]
+      C["Markdown file"] --> B
+      B --> D["Validation Report"]
+```
+
+You will use it by running commands that roughly look like
+
+```bash
+$$ echo "# (header:/First Name\:\w+/)" > schema.mds
+$$ echo "# First Name: Wolf" > input.md"
+$$ ./mdvalidate schema.mds input.md
+Valid!
+$$ echo $?
+0
+```
+
+Or by providing in Markdown frontmatter a reference to the schema,
+
+```bash
+$$ cat <<EOF > schema.mds
+---
+schema: ./schema.mds
+---
+# (header:/First Name\:\w+/)
+EOF
+$$ echo "# First Name: Wolf" > input.md"
+$$ ./mdvalidate schema.mds input.md
+Valid!
+$$ echo $?
+0
+```
+
 # Other Nonfunctional Requirements
 
 ## Performance Requirements
@@ -363,21 +550,24 @@ as possible. You may need to state performance requirements for individual
 functional requirements or features. -->
 
 **Speed** 
-the current validation time for a json schema is about 8 ms for a 1.3k
-character. Speed is especially important for AI systems that need to validate
-large volumes of content in real-time. So we aim to be at least under 20 ms for
-a 1.3k character Markdown file.
+Complete validation within 20ms for 1.3k characters (which is about twice as
+long as it takes for [the official `jsoncschema`
+validator](https://github.com/sourcemeta/jsonschema) to validate a JSON schema
+of about 1k characters)
 
 **Reliability**
-The tool should be reliable and able to handle large volumes of content. So we
-aim to be at least 99.999% reliable.
+The tool should be reliable and able to handle large volumes of content. We aim
+to guarantee that if you validate a Markdown file it definitely conforms to your
+schema.
 
 **Scalability**
 The tool should be scalable and able to handle large volumes of content. So we
-aim to be able to handle at least 100k characters.
+aim to be able to handle 100k+ characters as an incoming stream without losing
+significant efficiency in the process.
 
 **Usability**
-So we aim to be able to use the tool with 2 to 3 commands.
+So we aim to be able to use `mdvalidate` with defaults with just 2 to 3
+commands, and to conform to common CLI standards.
 
 ## Safety Requirements
 
@@ -388,13 +578,13 @@ any external policies or regulations that state safety issues that affect the
 product's design or use. Define any safety certifications that must be
 satisfied. -->
 
-- Handle corrupted or extremely large files gracefully without system crashes
-  or memory exhaustion
-
+- Handle corrupted or extremely large files gracefully without crashing or memory exhaustion
 - Ensure robust error handling that fails safely when encountering unexpected
-  input formats
-- Isolate validation processes to prevent cascading failures affecting other
-  system components
+  input formats and provides a detailed report to the user
+- Isolate validation processes and not use errors (`Result`s in Rust) for the
+  validator components to prevent cascading failures affecting other system
+  components
+- General best practices for Rust to avoid panics wherever possible
 
 ## Security Requirements {#security-requirements}
 
@@ -406,8 +596,12 @@ Define any user identity authentication requirements. Refer to any external
 policies or regulations containing security issues that affect the product.
 Define any security or privacy certifications that must be satisfied. -->
 
-  - We dont have security or privacy issues yet. We are not going to store or
-  have access to any data.
+Our program is designed to provide security guaranteess. It's highly critical
+that we meet the requirements that we claim to have. Users will be trusting our
+tool with arbitrarily shaped Markdown, potentially as a pre-processing step
+before putting originally unstructured and potentially unsafe Markdown into
+their database. This will mean that having good test coverage and many examples
+for our validator will be very important.
 
 ## Software Quality Attributes
 
@@ -417,16 +611,20 @@ interoperability, maintainability, portability, reliability, reusability, robust
 usability. Write these to be specific, quantitative, and verifiable when possible. At the least, clarify
 the relative preferences for various attributes, such as ease of use over ease of learning. -->
 
-- our program will be accessible and downloadable by anyone with an internet
-connection and a simple command line interface (accessible via nix packages or
-via brew)
+Our program will be accessible and downloadable by anyone with an internet
+connection and a simple command line interface.
+
+We will distribute MDvalidate via the [the Nix package
+repository](https://search.nixos.org/packages), directly from GitHub.
 
 # Other Requirements
+
+The project is very standalone and doesn't need a server/web component. It can
+be neatly packaged into a single binary!
 
 <!-- Define any other requirements not covered elsewhere in the SRS. This might include database
 requirements, internationalization requirements, legal requirements, reuse objectives for the
 project, and so on. Add any new sections that are pertinent to the project. -->
-
 
 # Appendix A: Glossary
 
@@ -434,12 +632,29 @@ project, and so on. Add any new sections that are pertinent to the project. -->
 abbreviations. You may wish to build a separate glossary that spans multiple projects or the entire
 organization, and just include terms specific to a single project in each SRS. -->
 
-# Appendix B: Analysis Models
+- **LSP**: Language server protocol, a protocol for language servers to communicate with
+  editors and IDEs.
+- **AST**: Abstract syntax tree, a tree representation of the abstract syntactic structure of 
+  source code.
+- **DSL**: Domain specific language, a programming language or specification language dedicated to
+  a particular problem domain, a particular problem representation technique, and/or a particular
+  solution technique.
+- **MDvalidate**: The name of the Markdown validation tool we are building.
+- **Markdown**: A lightweight markup language with plain text formatting syntax.
+- **Schema**: A formal definition of the structure and constraints of a document or data format
+  that MDvalidate will use to validate Markdown documents.
+- **CommonMark**: A strongly defined, highly compatible specification of Markdown.
+- **GFM**: GitHub Flavored Markdown, a dialect of Markdown that adds some features to the
+  original Markdown specification, like tables.
+- **Regex**: Regular expression, a sequence of characters that define a search pattern, often
+  used for string matching within texts.
+
+<!-- # Appendix B: Analysis Models -->
 
 <!-- Optionally, include any pertinent analysis models, such as data flow diagrams, class diagrams,
 state-transition diagrams, or entity-relationship diagrams. -->
 
-# Appendix C: Issues List {#issues-list}
+<!-- # Appendix C: Issues List {#issues-list} -->
 
 <!-- Wolf -->
 
