@@ -6,7 +6,8 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.5.48", features = ["derive"] }
 log = "0.4.28"
-tree-sitter = "0.25.10"
+tree-sitter = "0.19.5"
+tree-sitter-markdown = "0.7.1"
 
 [build-dependencies]
 cc="*"

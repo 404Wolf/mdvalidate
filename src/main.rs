@@ -22,15 +22,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Handle the input source
     if args.input == "-" {
-        // Use stdin
-        println!("Reading from stdin...");
-        validate::validate::validate(schema_src, io::stdin())?;
+        validate::validate::validate(schema_src, &mut io::stdin())?;
     } else {
-        // Use file
-        println!("Reading from file: {}", args.input);
         let file = File::open(&args.input)?;
-        let reader = BufReader::new(file);
-        validate::validate::validate(schema_src, reader)?;
+        let mut reader = BufReader::new(file);
+        validate::validate::validate(schema_src, &mut reader)?;
     }
 
     Ok(())
