@@ -2,7 +2,7 @@
 title: "Software Requirements Specification for *MDvalidate*"
 author:
   - Wolf Mermelstein
-  - Alesandro Mason
+  - Alessandro Mason
 date: "September 22, 2025"
 affiliation: "Case Western Reserve University"
 toc: true
