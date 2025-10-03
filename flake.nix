@@ -32,11 +32,12 @@
               nil
               nixd
               nixfmt
-              quarto
-              texliveFull
+              typst
               cargo
               rustc
+              mermaid-cli
               rust-analyzer
+              fira-mono
             ]
           );
         };
@@ -47,7 +48,7 @@
               projectRootFile = "flake.nix";
               programs.nixfmt.enable = true;
               programs.yamlfmt.enable = true;
-              programs.prettier.enable = true;
+              programs.typstfmt.enable = true;
             };
           in
           treefmtconfig.config.build.wrapper;
