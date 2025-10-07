@@ -24,12 +24,11 @@
       left + horizon, block(
         width: 90%,
       )[
-        #v(-1.5in)
+        #v(-1.6in)
 
         #let v-space = v(2em, weak: true)
         #text(3em)[*#title*]
 
-        #v-space
         #text(1.6em, author)
 
         #if abstract != none {

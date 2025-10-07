@@ -343,3 +343,5 @@ TSWLatexianTemp*
 # Added by cargo
 
 /target
+
+**/*.quarto_ipynb
