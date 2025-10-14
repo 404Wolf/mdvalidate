@@ -43,6 +43,7 @@ Here’s a simple schema that will validate all grocery lists of a specific shap
 
 - `item:/[A-Z][a-z]+/`+         <!-- one or more items; each starts with a capital letter -->
   - `note:/\w+/`?{,2}           <!-- up to two optional sub-notes per item -->
+```
 
 A passing document:
 
