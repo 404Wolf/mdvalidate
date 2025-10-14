@@ -31,6 +31,7 @@ pub fn validate<R: Read>(schema_str: String, input: &mut R) -> Result<(), std::i
     validator
         .validate()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+
     let report = validator.report();
     match pretty_print_report(&report) {
         Ok(pretty) => {

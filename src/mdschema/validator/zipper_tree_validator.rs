@@ -172,7 +172,15 @@ mod tests {
         let validation_zipper_tree =
             ValidationZipperTree::new("# Heading\n\nSome **bold** text.", source).unwrap();
 
+        let state = validation_zipper_tree.state.lock().unwrap();
+        assert!(state.last_input_tree_offset == 0);
+        drop(state);
+
         validation_zipper_tree.validate().unwrap();
+
+        let state = validation_zipper_tree.state.lock().unwrap();
+        assert!(state.last_input_tree_offset == source.len());
+        drop(state);
 
         let report = validation_zipper_tree.report();
         assert!(report.errors.is_empty());
