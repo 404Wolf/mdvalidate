@@ -174,7 +174,7 @@ mod tests {
 
         let state = validation_zipper_tree.state.lock().unwrap();
         assert!(state.last_input_tree_offset == 0);
-        drop(state);
+        drop(state); // release lock so next call to validate doesn't deadlock
 
         validation_zipper_tree.validate().unwrap();
 
