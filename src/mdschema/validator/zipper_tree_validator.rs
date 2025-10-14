@@ -8,11 +8,24 @@ use crate::mdschema::{errors::ValidatorError, reports::ValidatorReport};
 /// A Validator implementation that uses a zipper tree approach to validate
 /// an input Markdown document against a markdown schema treesitter tree.
 pub struct ValidationZipperTree {
+    /// Internal state, protected by a mutex for thread safety. We acquire a
+    /// lock where we're waiting to instantly pick off where we left off in
+    /// validating an input stream.
+    ///
+    /// When you call `read_input`, we replace the input tree with a new tree.
+    /// When you call `validate`, we lock the state and validate from the last
+    /// offsets to the end of the input tree.
     state: Mutex<ValidationZipperTreeState>,
+    /// The full input string as last read. Not used internally but useful for
+    /// debugging or reporting.
     last_input_str: String,
 }
 
+/// Internal state "package" for the ValidationZipperTree.
+/// 
+/// Holds the input and schema trees, offsets, and any validation errors found.
 struct ValidationZipperTreeState {
+    /// The current input tree. When read_input is called, this is replaced with a new tree.
     input_tree: Tree,
     schema_tree: Tree,
     last_schema_tree_offset: usize,
