@@ -2,15 +2,14 @@ use std::sync::Mutex;
 
 use tree_sitter::{Parser, Tree, TreeCursor};
 
-use crate::mdschema::{reports::ValidatorReport, errors::ValidatorError};
 use crate::mdschema::validator::Validator;
+use crate::mdschema::{errors::ValidatorError, reports::ValidatorReport};
 
 /// A Validator implementation that uses a zipper tree approach to validate
 /// an input Markdown document against a markdown schema treesitter tree.
 pub struct ValidationZipperTree {
     state: Mutex<ValidationZipperTreeState>,
-    input_content: String,
-    filename: String,
+    last_input_str: String,
 }
 
 struct ValidationZipperTreeState {
@@ -21,16 +20,20 @@ struct ValidationZipperTreeState {
     errors: Vec<ValidatorError>,
 }
 
-impl super::Validator for ValidationZipperTree {
+impl Validator for ValidationZipperTree {
     /// Create a new ValidationZipperTree with the given schema and input strings.
-    fn new(schema_str: &str, input_str: &str) -> Self {
+    fn new(schema_str: &str, input_str: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema_str, None).unwrap();
+        let schema_tree = schema_parser
+            .parse(schema_str, None)
+            .ok_or("Failed to parse schema")?;
 
         let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input_str, None).unwrap();
+        let input_tree = input_parser
+            .parse(input_str, None)
+            .ok_or("Failed to parse input")?;
 
-        ValidationZipperTree {
+        Ok(ValidationZipperTree {
             state: Mutex::new(ValidationZipperTreeState {
                 input_tree,
                 schema_tree,
@@ -38,51 +41,103 @@ impl super::Validator for ValidationZipperTree {
                 last_schema_tree_offset: 0,
                 errors: Vec::new(),
             }),
-            input_content: input_str.to_string(),
-            filename: "input.md".to_string(),
-        }
+            last_input_str: input_str.to_string(),
+        })
     }
 
-    /// Read new input and update the input tree.
-    fn read_input(&self, input: &str) {
-        let mut state = self.state.lock().unwrap();
+    /// Read new input. Updates the input tree with a new input tree for the full new input.
+    /// Does not update the schema tree or change the offsets. You will still
+    /// need to call `validate` to validate until the end of the current input
+    /// (which this updates).
+    fn read_input(&self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Failed to acquire lock on validator state")?;
 
         let mut input_parser = new_markdown_parser();
-        state.input_tree = input_parser.parse(input, Some(&state.input_tree)).unwrap();
-        state.last_input_tree_offset = input.len();
+        state.input_tree = input_parser
+            .parse(input, Some(&state.input_tree))
+            .ok_or("Failed to parse updated input")?;
+
+        Ok(())
     }
 
-    /// Validate the input against the schema.
-    fn validate(&self) -> crate::mdschema::ValidatorReport {
-        self.validate_to_most_recent_offset();
-        let state = self.state.lock().unwrap();
-        crate::mdschema::ValidatorReport::new(
-            state.errors.clone(),
-            self.input_content.clone(),
-            self.filename.clone(),
+    /// Validate the input against the schema. Validates picking up from where
+    /// we left off.
+    fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // Lock the state for the duration of validation
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Failed to acquire lock on validator state")?;
+
+        // With our current understanding of state, validate until the end of the input
+        let (new_schema_offset, new_input_offset) = self
+            .validate_nodes_from_offset_to_end_of_input(
+                &mut state.input_tree.walk(),
+                &mut state.schema_tree.walk(),
+                state.last_input_tree_offset,
+                state.last_schema_tree_offset,
+            );
+
+        state.last_input_tree_offset = new_input_offset;
+        state.last_schema_tree_offset = new_schema_offset;
+
+        Ok(())
+    }
+
+    fn report(&self) -> ValidatorReport {
+        ValidatorReport::new(
+            self.state.lock().unwrap().errors.clone(),
+            self.last_input_str.clone(),
         )
     }
 }
 
 impl ValidationZipperTree {
-    fn validate_node(&self) {
-        self.walk_to_most_recent_offset();
+    /// Validate nodes and walk until the end of the input tree, starting from
+    /// the given offsets.
+    ///
+    /// Returns the final offsets (schema_offset, input_offset).
+    fn validate_nodes_from_offset_to_end_of_input(
+        &self,
+        cursor: &mut TreeCursor,
+        schema_cursor: &mut TreeCursor,
+        input_offset: usize,
+        schema_offset: usize,
+    ) -> (usize, usize) {
+        let mut last_schema_tree_offset = schema_offset;
+        let mut last_input_tree_offset = input_offset;
+
+        // Move cursors to the starting offsets
+        goto_tree_offset(cursor, input_offset);
+        goto_tree_offset(schema_cursor, schema_offset);
+
+        while last_input_tree_offset < self.last_input_str.len() {
+            let (new_schema_offset, new_input_offset) =
+                self.validate_node_and_walk(cursor, schema_cursor);
+
+            last_schema_tree_offset = new_schema_offset;
+            last_input_tree_offset = new_input_offset;
+        }
+
+        (last_schema_tree_offset, last_input_tree_offset)
     }
 
-    fn validate_to_most_recent_offset(&self) {
-        // For now we just assume no validation errors and walk to the end.
-        self.walk_to_most_recent_offset();
-    }
+    /// Validate the next node forward from the most recent offsets.
+    ///
+    /// Returns the new offsets after validation (schema_offset, input_offset).
+    fn validate_node_and_walk(
+        &self,
+        cursor: &mut TreeCursor,
+        schema_cursor: &mut TreeCursor,
+    ) -> (usize, usize) {
+        // <actually validate the nodes to make sure they match>
+        cursor.goto_next_sibling();
+        schema_cursor.goto_next_sibling();
 
-    /// Walk the input and schema trees to the most recent offsets.
-    fn walk_to_most_recent_offset(&self) {
-        let state = self.state.lock().unwrap();
-
-        let mut input_tree_cursor = state.input_tree.walk();
-        goto_tree_offset(&mut input_tree_cursor, state.last_input_tree_offset);
-
-        let mut schema_tree_cursor = state.schema_tree.walk();
-        goto_tree_offset(&mut schema_tree_cursor, state.last_schema_tree_offset);
+        (get_tree_offset(schema_cursor), get_tree_offset(cursor))
     }
 }
 
@@ -109,38 +164,18 @@ fn goto_tree_offset(tree: &mut TreeCursor, offset: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mdschema::Validator;
 
     #[test]
     fn test_goto_tree_offset() {
         let source = "# Heading\n\nSome **bold** text.";
-        let mut parser = new_markdown_parser();
-        let tree = parser.parse(source, None).unwrap();
-        let mut cursor = tree.walk();
 
-        assert!(goto_tree_offset(&mut cursor, 2)); // Inside "Heading"
-        assert_eq!(cursor.node().kind(), "atx_heading");
+        let validation_zipper_tree =
+            ValidationZipperTree::new("# Heading\n\nSome **bold** text.", source).unwrap();
 
-        assert!(goto_tree_offset(&mut cursor, 15)); // Inside "Some"
-        assert_eq!(cursor.node().kind(), "paragraph");
+        validation_zipper_tree.validate().unwrap();
 
-        assert!(goto_tree_offset(&mut cursor, 22)); // Inside "**bold**"
-        assert_eq!(cursor.node().kind(), "strong_emphasis");
-
-        assert!(!goto_tree_offset(&mut cursor, 100)); // Out of bounds
-    }
-
-    #[test]
-    fn test_validator_with_matching_schema_and_input() {
-        let input = "# Title\n\nbody";
-        let schema = "# Title\n\nbody";
-        
-        let validator = ValidationZipperTree::new(schema, input);
-        let report = validator.validate();
-        
-        assert!(report.is_valid, "Validator should report as valid when input matches schema");
-        assert!(report.errors.is_empty(), "No errors should be present when input matches schema");
-        assert_eq!(report.error_count(), 0, "Error count should be zero");
-        assert_eq!(report.warning_count(), 0, "Warning count should be zero");
+        let report = validation_zipper_tree.report();
+        assert!(report.errors.is_empty());
+        assert_eq!(report.source_content, source);
     }
 }

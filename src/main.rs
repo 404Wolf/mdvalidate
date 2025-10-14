@@ -3,7 +3,10 @@ use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::PathBuf;
 
+pub mod cmd;
 pub mod mdschema;
+
+use crate::cmd::validate;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Validate MDS files against a schema")]
@@ -22,11 +25,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Handle the input source
     if args.input == "-" {
-        mdschema::validate(schema_src, &mut io::stdin())?;
+        validate(schema_src, &mut io::stdin())?;
     } else {
         let file = File::open(&args.input)?;
         let mut reader = BufReader::new(file);
-        mdschema::validate(schema_src, &mut reader)?;
+        validate(schema_src, &mut reader)?;
     }
 
     Ok(())
