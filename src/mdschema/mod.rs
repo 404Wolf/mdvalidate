@@ -2,28 +2,17 @@ use std::io::Read;
 
 use tree_sitter::{InputEdit, Parser, Point, Tree};
 
+pub mod errors;
+pub mod reports;
 pub mod validator;
 
+pub use errors::{ErrorSeverity, ValidatorError};
+pub use reports::pretty_print::PrettyPrintReporter;
+pub use reports::ValidatorReport;
+pub use validator::zipper_tree_validator::ValidationZipperTree;
+
+
 static BUFFER_SIZE: usize = 3;
-
-pub trait Validator {
-    fn new(schema_str: &str, input_str: &str) -> Self;
-    fn validate(&self) -> ValidatorReport;
-    fn read_input(&self, input: &str);
-}
-
-#[derive(Debug, Clone)]
-pub struct ValidatorReport {
-    pub is_valid: bool,
-    pub errors: Vec<ValidatorError>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ValidatorError {
-    pub message: String,
-    pub line: usize,
-    pub column: usize,
-}
 
 /// Validate an input Markdown file stream against a Markdown schema.
 pub fn validate<R: Read>(schema: String, input: &mut R) -> Result<(), Box<dyn std::error::Error>> {

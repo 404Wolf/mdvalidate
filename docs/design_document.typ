@@ -2,29 +2,17 @@
 
 #let raw_block(raw: raw) = {
   block(
-    raw,
-    fill: rgb(250, 250, 250),
-    radius: 0.3em,
-    inset: 1.2em,
-    width: 100%,
+    raw, fill: rgb(250, 250, 250), radius: 0.3em, inset: 1.2em, width: 100%,
   )
 }
 
 #show: template.with(
-  title: [`mdvalidate`: \ Design Document],
-  author: "Wolf Mermelstein and Alessandro Mason",
+  title: [`mdvalidate`: \ Design Document], author: "Wolf Mermelstein and Alessandro Mason",
 )
 
 #let schema-block(title, stroke-color, content) = align(
-  center,
-  block(
-    stroke: stroke-color + 1pt,
-    inset: 8pt,
-    radius: 4pt,
-    fill: rgb(250, 250, 250),
-    breakable: false,
-    width: 70%,
-    align(left, [
+  center, block(
+    stroke: stroke-color + 1pt, inset: 8pt, radius: 4pt, fill: rgb(250, 250, 250), breakable: false, width: 70%, align(left, [
       #text(weight: "bold", fill: stroke-color)[#title]
       #content
     ]),
@@ -79,8 +67,7 @@ then update its AST dynamically as we learn of more (see
 @fig:treesitter-example). Even though treesitter is written in `C`, they provide
 a very nice `Rust` API.
 
-#figure(
-  raw_block(raw: ```rs
+#figure(raw_block(raw: ```rs
   let mut parser = Parser::new();
   parser.set_language(tree_sitter_markdown::language()).unwrap();
 
@@ -98,9 +85,7 @@ a very nice `Rust` API.
   tree.edit(&edit);
 
   let tree = parser.parse(&source, Some(&tree)).unwrap();
-  ```),
-  caption: "Incremental parsing with treesitter",
-) <fig:treesitter-example>
+  ```), caption: "Incremental parsing with treesitter") <fig:treesitter-example>
 
 === Schema Enforcement
 
@@ -120,8 +105,7 @@ We will walk down the AST for the schema file at the same rate that we walk the
 AST for the input file. For example, at a point in time when we are doing a
 validation check, we may have two ASTs that are iterated to this point:
 
-#figure(
-  raw_block(raw: ```
+#figure(raw_block(raw: ```
   Schema AST                     Input AST
   -----------                    -----------
   Root                           Root
@@ -129,13 +113,10 @@ validation check, we may have two ASTs that are iterated to this point:
    |    |-- Text("Title") <--    |    |-- Text("XTitle") <-- Error!
    |-- Paragraph                 |-- Paragraph
         |-- Text("...")
-  ```),
-  caption: [Walking two ASTs side by side],
-)
+  ```), caption: [Walking two ASTs side by side])
 
 We will design the `ZipperTree` to use treesitter's #link(
-  "https://docs.rs/tree-sitter/latest/tree_sitter/struct.TreeCursor.html",
-  `TreeCursor`,
+  "https://docs.rs/tree-sitter/latest/tree_sitter/struct.TreeCursor.html", `TreeCursor`,
 ) struct,
 
 As markdown flows in we will walk both the schema's AST and the input stream (so
@@ -152,15 +133,14 @@ for an example).
 
 #figure(
   raw_block(raw: `````
-    Schema AST                     Input AST
-    -----------                    -----------
-    Root                           Root
-     |-- Paragraph                 |-- Paragraph
-     |    |-- Code <--             |    |-- Text() <-- (the schema
-     |         |-- Text()          |                   does not contain
-                                                       the codeblock)
-  `````),
-  caption: [matcher code blocks (left) contain inner content we care about (right)],
+      Schema AST                     Input AST
+      -----------                    -----------
+      Root                           Root
+       |-- Paragraph                 |-- Paragraph
+       |    |-- Code <--             |    |-- Text() <-- (the schema
+       |         |-- Text()          |                   does not contain
+                                                         the codeblock)
+    `````), caption: [matcher code blocks (left) contain inner content we care about (right)],
 ) <fig:might-not-be-same-spot>
 
 To demonstrate our high level model, we present figure @fig:class-diagram, a
@@ -169,8 +149,7 @@ core logic organization for our actual validation logic, but does not include
 the actual public library or CLI interface.
 
 #figure(
-  image("images/classDiagram.png"),
-  caption: [Class diagram for `mdvalidate`],
+  image("images/classDiagram.png"), caption: [Class diagram for `mdvalidate`],
 ) <fig:class-diagram>
 
 === CLI component
@@ -215,8 +194,7 @@ There were a few considerations that went into this decision:
   that it will successfully validate.
 - There is already a great Treesitter
   #link(
-    "https://github.com/tree-sitter-grammars/tree-sitter-markdown",
-    "grammar",
+    "https://github.com/tree-sitter-grammars/tree-sitter-markdown", "grammar",
   )
   for Markdown. By having `mds` be valid Markdown, we are able to easily parse it
   with a regular `Markdown` parser without having to define our own (e.g. making a
@@ -242,12 +220,9 @@ a `mds` file!
 Test
 ```)
 
-#bad-example(
-  ```markdown
+#bad-example(```markdown
   # Hi
-  ```,
-  reason: [This does not match the exact contents of the schema],
-)
+  ```, reason: [This does not match the exact contents of the schema])
 
 #good-example(```markdown
 # Hi
@@ -357,8 +332,7 @@ But you can specify the depth with the suffix `dn`.
 </div>
 ```)
 
-#bad-example(
-  ```markdown
+#bad-example(```markdown
   <div>
     <div>
       <div>
@@ -366,9 +340,7 @@ But you can specify the depth with the suffix `dn`.
       </div>
     </div>
   </div>
-  ```,
-  reason: [Too deep],
-)
+  ```, reason: [Too deep])
 
 To be more specific, you can use #link("https://www.w3.org/TR/xmlschema11-1/", "W3 XML schema language").
 
@@ -387,12 +359,9 @@ To do so, in \`\`\`, use "mds"
 <h1> Hello, world! </h1>
 ```)
 
-#bad-example(
-  ```markdown
+#bad-example(```markdown
   <h2> Hello, world! </h2>
-  ```,
-  reason: [Doesn't match XML schema specified],
-)
+  ```, reason: [Doesn't match XML schema specified])
 
 XML schema is "hard" to read and more complicated, so we advise in all cases to
 prefer Markdown equivalents.
@@ -502,22 +471,16 @@ Lists are defined as a `matcher`, with a few special suffix options.
 - `grocery_list_item:/Hello \w+/`{1,2}
 ```)
 
-#bad-example(
-  ```markdown
+#bad-example(```markdown
   - Hello 12
   - Hello 1
   - Hello 233
-  ```,
-  reason: [Too many items],
-)
+  ```, reason: [Too many items])
 
-#bad-example(
-  ```markdown
+#bad-example(```markdown
   + Hello 12
   + Hello 22
-  ```,
-  reason: [Numbered list when bulleted list expected],
-)
+  ```, reason: [Numbered list when bulleted list expected])
 
 In a similar way is possible to define sublists. Use typical Markdown
 indentation for sublists, and the list prefix character, along with the same
@@ -558,24 +521,18 @@ string.
   - Hello Subitem 2
 ```)
 
-#bad-example(
-  ```markdown
+#bad-example(```markdown
   - Hello 12
     - Hello Subitem 1
       - Hello Deep item
         - Hello Too deep!
-  ```,
-  reason: [Exceeds maximum depth of 2],
-)
+  ```, reason: [Exceeds maximum depth of 2])
 
-#bad-example(
-  ```markdown
+#bad-example(```markdown
   - Hello 12
     - Hello Subitem 1
       - This doesn't start with hello
-  ```,
-  reason: [A sublist doesn't match the pattern of the `matcher`],
-)
+  ```, reason: [A sublist doesn't match the pattern of the `matcher`])
 
 == Optional Matcher Pattern
 
@@ -622,12 +579,9 @@ Some optional content here
 # Required Heading
 ```)
 
-#bad-example(
-  ```markdown
+#bad-example(```markdown
   Some optional content here
-  ```,
-  reason: [Missing required heading],
-)
+  ```, reason: [Missing required heading])
 
 = Glossary
 
@@ -652,7 +606,8 @@ Some optional content here
 - 10/3, Wolf Mermelstein, Document incremental parsing logic and TreeSitter
   integration
 - 10/3, Alessandro Mason, Define matcher syntax and validation rules
-- 10/2, Wolf Mermelstein, Design CLI component and command-line interface specifications
+- 10/2, Wolf Mermelstein, Design CLI component and command-line interface
+  specifications
 - 10/2, Wolf Mermelstein and Alessandro Mason, Begin working on Design Document
 - 10/1, Wolf Mermelstein, Draft initial system architecture overview on whiteboard
 - 10/1, Wolf Mermelstein, Research TreeSitter capabilities and Rust API

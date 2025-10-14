@@ -2,10 +2,15 @@ use std::sync::Mutex;
 
 use tree_sitter::{Parser, Tree, TreeCursor};
 
+use crate::mdschema::{reports::ValidatorReport, errors::ValidatorError};
+use crate::mdschema::validator::Validator;
+
 /// A Validator implementation that uses a zipper tree approach to validate
 /// an input Markdown document against a markdown schema treesitter tree.
-struct ValidationZipperTree {
+pub struct ValidationZipperTree {
     state: Mutex<ValidationZipperTreeState>,
+    input_content: String,
+    filename: String,
 }
 
 struct ValidationZipperTreeState {
@@ -13,10 +18,10 @@ struct ValidationZipperTreeState {
     schema_tree: Tree,
     last_schema_tree_offset: usize,
     last_input_tree_offset: usize,
-    errors: Vec<crate::validate::ValidatorError>,
+    errors: Vec<ValidatorError>,
 }
 
-impl crate::validate::Validator for ValidationZipperTree {
+impl super::Validator for ValidationZipperTree {
     /// Create a new ValidationZipperTree with the given schema and input strings.
     fn new(schema_str: &str, input_str: &str) -> Self {
         let mut schema_parser = new_markdown_parser();
@@ -33,6 +38,8 @@ impl crate::validate::Validator for ValidationZipperTree {
                 last_schema_tree_offset: 0,
                 errors: Vec::new(),
             }),
+            input_content: input_str.to_string(),
+            filename: "input.md".to_string(),
         }
     }
 
@@ -46,12 +53,14 @@ impl crate::validate::Validator for ValidationZipperTree {
     }
 
     /// Validate the input against the schema.
-    fn validate(&self) -> crate::validate::ValidatorReport {
+    fn validate(&self) -> crate::mdschema::ValidatorReport {
         self.validate_to_most_recent_offset();
-        crate::validate::ValidatorReport {
-            is_valid: self.state.lock().unwrap().errors.is_empty(),
-            errors: self.state.lock().unwrap().errors.clone(),
-        }
+        let state = self.state.lock().unwrap();
+        crate::mdschema::ValidatorReport::new(
+            state.errors.clone(),
+            self.input_content.clone(),
+            self.filename.clone(),
+        )
     }
 }
 
@@ -97,8 +106,10 @@ fn goto_tree_offset(tree: &mut TreeCursor, offset: usize) -> bool {
     tree.goto_first_child_for_byte(offset).is_some()
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mdschema::Validator;
 
     #[test]
     fn test_goto_tree_offset() {
@@ -117,5 +128,19 @@ mod tests {
         assert_eq!(cursor.node().kind(), "strong_emphasis");
 
         assert!(!goto_tree_offset(&mut cursor, 100)); // Out of bounds
+    }
+
+    #[test]
+    fn test_validator_with_matching_schema_and_input() {
+        let input = "# Title\n\nbody";
+        let schema = "# Title\n\nbody";
+        
+        let validator = ValidationZipperTree::new(schema, input);
+        let report = validator.validate();
+        
+        assert!(report.is_valid, "Validator should report as valid when input matches schema");
+        assert!(report.errors.is_empty(), "No errors should be present when input matches schema");
+        assert_eq!(report.error_count(), 0, "Error count should be zero");
+        assert_eq!(report.warning_count(), 0, "Warning count should be zero");
     }
 }
