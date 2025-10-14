@@ -45,6 +45,7 @@ impl Validator for ValidationZipperTree {
     }
 
     /// Read new input. Updates the input tree with a new input tree for the full new input.
+    ///
     /// Does not update the schema tree or change the offsets. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
@@ -86,7 +87,9 @@ impl ValidationZipperTree {
     /// Validate nodes and walk until the end of the input tree, starting from
     /// the given offsets.
     ///
-    /// Returns the final offsets (schema_offset, input_offset).
+    /// Uses `validate_node_and_walk` to validate each node and move the cursors forward.
+    ///
+    /// Returns the final offsets (schema_offset, input_offset) after the "walk".
     fn validate_nodes_from_offset_to_end_of_input(
         &self,
         cursor: &mut TreeCursor,
@@ -101,10 +104,13 @@ impl ValidationZipperTree {
         goto_tree_offset(cursor, input_offset);
         goto_tree_offset(schema_cursor, schema_offset);
 
+        // Walk up until the end. `self.last_input_str` will not change while
+        // this is running since this blocks the thread.
         while last_input_tree_offset < self.last_input_str.len() {
             let (new_schema_offset, new_input_offset) =
                 self.validate_node_and_walk(cursor, schema_cursor);
 
+            // Update the offsets as we make progress towards the end.
             last_schema_tree_offset = new_schema_offset;
             last_input_tree_offset = new_input_offset;
         }
@@ -114,13 +120,15 @@ impl ValidationZipperTree {
 
     /// Validate the next node forward from the most recent offsets.
     ///
-    /// Returns the new offsets after validation (schema_offset, input_offset).
+    /// Returns the new offsets after validation (schema_offset, input_offset)
+    /// after the "walk".
     fn validate_node_and_walk(
         &self,
         cursor: &mut TreeCursor,
         schema_cursor: &mut TreeCursor,
     ) -> (usize, usize) {
-        // <actually validate the nodes to make sure they match>
+        // TODO: Actually validate the nodes to make sure they match
+
         cursor.goto_next_sibling();
         schema_cursor.goto_next_sibling();
 
