@@ -1,8 +1,12 @@
-use crate::mdschema::errors::ErrorSeverity;
-use crate::mdschema::reports::ValidatorReport;
+use crate::mdschema::reports::{errors::ErrorSeverity, validation_report::ValidatorReport};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 
-pub fn pretty_print_report(report: &ValidatorReport) -> Result<String, String> {
+/// Pretty prints a ValidatorReport using
+/// [ariadne](https://github.com/zesterer/ariadne) for nice formatting.
+/// 
+/// Returns a String containing the formatted report, or an error message if
+/// formatting fails with a message.
+pub fn pretty_print_report(report: &ValidatorReport, filename: &str) -> Result<String, String> {
     let mut output = String::new();
 
     for error in &report.errors {
@@ -19,16 +23,16 @@ pub fn pretty_print_report(report: &ValidatorReport) -> Result<String, String> {
         };
 
         let mut buffer = Vec::new();
-        Report::build(report_kind, ("Markdown", error.byte_start..error.byte_end))
+        Report::build(report_kind, (filename, error.byte_start..error.byte_end))
             .with_message(error.message.clone())
             .with_label(
-                Label::new(("Markdown", error.byte_start..error.byte_end))
+                Label::new((filename, error.byte_start..error.byte_end))
                     .with_message(error.message.clone())
                     .with_color(color),
             )
             .finish()
             .write(
-                ("Markdown", Source::from(&report.source_content)),
+                (filename, Source::from(&report.source_content)),
                 &mut buffer,
             )
             .map_err(|e| e.to_string())?;

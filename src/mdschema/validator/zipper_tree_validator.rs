@@ -1,7 +1,6 @@
 use tree_sitter::{Parser, Tree, TreeCursor};
 
-use crate::mdschema::validator::Validator;
-use crate::mdschema::{errors::ValidatorError, reports::ValidatorReport};
+use crate::mdschema::{reports::{errors::ValidatorError, validation_report::ValidatorReport}, validator::validator::Validator};
 
 /// A Validator implementation that uses a zipper tree approach to validate
 /// an input Markdown document against a markdown schema treesitter tree.
@@ -77,10 +76,15 @@ impl Validator for ValidationZipperTree {
 
         Ok(())
     }
-
-    fn report(&self) -> ValidatorReport {
-        ValidatorReport::new(self.errors.clone(), self.last_input_str.clone())
+    
+    fn report(&self) -> crate::mdschema::reports::validation_report::ValidatorReport {
+        return ValidatorReport::new(
+            self.errors.clone(),
+            self.last_input_str.clone(),
+        );
     }
+
+
 }
 
 impl ValidationZipperTree {

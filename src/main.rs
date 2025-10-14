@@ -23,13 +23,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema_str = args.schema.to_str().ok_or("Invalid schema path")?;
     let schema_src = std::fs::read_to_string(schema_str)?;
 
+    let filename = {
+        if args.input == "-" {
+            "stdin"
+        } else {
+            args.input.as_str()
+        }
+    };
+
     // Handle the input source
     if args.input == "-" {
-        validate(schema_src, &mut io::stdin())?;
+        validate(schema_src, &mut io::stdin(), filename)?;
     } else {
         let file = File::open(&args.input)?;
         let mut reader = BufReader::new(file);
-        validate(schema_src, &mut reader)?;
+        validate(schema_src, &mut reader, filename)?;
     }
 
     Ok(())

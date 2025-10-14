@@ -1,12 +1,12 @@
 use std::io::Read;
 
 use crate::mdschema::{
-    reports::pretty_print::pretty_print_report, validator::Validator, ValidationZipperTree,
+    reports::pretty_print::pretty_print_report, validator::validator::Validator, ValidationZipperTree
 };
 
 static BUFFER_SIZE: usize = 3;
 
-pub fn validate<R: Read>(schema_str: String, input: &mut R) -> Result<(), std::io::Error> {
+pub fn validate<R: Read>(schema_str: String, input: &mut R, filename: &str) -> Result<(), std::io::Error> {
     let mut input_str = String::new();
     let mut buffer = [0; BUFFER_SIZE];
 
@@ -33,7 +33,7 @@ pub fn validate<R: Read>(schema_str: String, input: &mut R) -> Result<(), std::i
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
     let report = validator.report();
-    match pretty_print_report(&report) {
+    match pretty_print_report(&report, filename) {
         Ok(pretty) => {
             if !pretty.is_empty() {
                 println!("{}", pretty);
