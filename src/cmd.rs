@@ -10,7 +10,7 @@ pub fn validate<R: Read>(schema_str: String, input: &mut R) -> Result<(), std::i
     let mut input_str = String::new();
     let mut buffer = [0; BUFFER_SIZE];
 
-    let validator = ValidationZipperTree::new(schema_str.as_str(), input_str.as_str())
+    let mut validator = ValidationZipperTree::new(schema_str.as_str(), input_str.as_str())
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string()))?;
 
     loop {

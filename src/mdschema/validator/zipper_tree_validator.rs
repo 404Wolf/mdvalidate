@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use tree_sitter::{Parser, Tree, TreeCursor};
 
 use crate::mdschema::validator::Validator;
@@ -8,29 +6,19 @@ use crate::mdschema::{errors::ValidatorError, reports::ValidatorReport};
 /// A Validator implementation that uses a zipper tree approach to validate
 /// an input Markdown document against a markdown schema treesitter tree.
 pub struct ValidationZipperTree {
-    /// Internal state, protected by a mutex for thread safety. We acquire a
-    /// lock where we're waiting to instantly pick off where we left off in
-    /// validating an input stream.
-    ///
-    /// When you call `read_input`, we replace the input tree with a new tree.
-    /// When you call `validate`, we lock the state and validate from the last
-    /// offsets to the end of the input tree.
-    state: Mutex<ValidationZipperTreeState>,
+    /// The current input tree. When read_input is called, this is replaced with a new tree.
+    input_tree: Tree,
+    /// The schema tree, which does not change after initialization.
+    schema_tree: Tree,
+    /// The last byte offset we validated up to in the schema tree.
+    last_schema_tree_offset: usize,
+    /// The last byte offset we validated up to in the input tree.
+    last_input_tree_offset: usize,
+    /// Any errors encountered during validation.
+    errors: Vec<ValidatorError>,
     /// The full input string as last read. Not used internally but useful for
     /// debugging or reporting.
     last_input_str: String,
-}
-
-/// Internal state "package" for the ValidationZipperTree.
-/// 
-/// Holds the input and schema trees, offsets, and any validation errors found.
-struct ValidationZipperTreeState {
-    /// The current input tree. When read_input is called, this is replaced with a new tree.
-    input_tree: Tree,
-    schema_tree: Tree,
-    last_schema_tree_offset: usize,
-    last_input_tree_offset: usize,
-    errors: Vec<ValidatorError>,
 }
 
 impl Validator for ValidationZipperTree {
@@ -47,13 +35,11 @@ impl Validator for ValidationZipperTree {
             .ok_or("Failed to parse input")?;
 
         Ok(ValidationZipperTree {
-            state: Mutex::new(ValidationZipperTreeState {
-                input_tree,
-                schema_tree,
-                last_input_tree_offset: 0,
-                last_schema_tree_offset: 0,
-                errors: Vec::new(),
-            }),
+            input_tree,
+            schema_tree,
+            last_input_tree_offset: 0,
+            last_schema_tree_offset: 0,
+            errors: Vec::new(),
             last_input_str: input_str.to_string(),
         })
     }
@@ -62,15 +48,12 @@ impl Validator for ValidationZipperTree {
     /// Does not update the schema tree or change the offsets. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
-    fn read_input(&self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "Failed to acquire lock on validator state")?;
+    fn read_input(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.last_input_str = input.to_string();
 
         let mut input_parser = new_markdown_parser();
-        state.input_tree = input_parser
-            .parse(input, Some(&state.input_tree))
+        self.input_tree = input_parser
+            .parse(input, Some(&self.input_tree))
             .ok_or("Failed to parse updated input")?;
 
         Ok(())
@@ -78,33 +61,24 @@ impl Validator for ValidationZipperTree {
 
     /// Validate the input against the schema. Validates picking up from where
     /// we left off.
-    fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
-        // Lock the state for the duration of validation
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "Failed to acquire lock on validator state")?;
-
+    fn validate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // With our current understanding of state, validate until the end of the input
         let (new_schema_offset, new_input_offset) = self
             .validate_nodes_from_offset_to_end_of_input(
-                &mut state.input_tree.walk(),
-                &mut state.schema_tree.walk(),
-                state.last_input_tree_offset,
-                state.last_schema_tree_offset,
+                &mut self.input_tree.walk(),
+                &mut self.schema_tree.walk(),
+                self.last_input_tree_offset,
+                self.last_schema_tree_offset,
             );
 
-        state.last_input_tree_offset = new_input_offset;
-        state.last_schema_tree_offset = new_schema_offset;
+        self.last_input_tree_offset = new_input_offset;
+        self.last_schema_tree_offset = new_schema_offset;
 
         Ok(())
     }
 
     fn report(&self) -> ValidatorReport {
-        ValidatorReport::new(
-            self.state.lock().unwrap().errors.clone(),
-            self.last_input_str.clone(),
-        )
+        ValidatorReport::new(self.errors.clone(), self.last_input_str.clone())
     }
 }
 
@@ -182,18 +156,18 @@ mod tests {
     fn test_goto_tree_offset() {
         let source = "# Heading\n\nSome **bold** text.";
 
-        let validation_zipper_tree =
+        let mut validation_zipper_tree =
             ValidationZipperTree::new("# Heading\n\nSome **bold** text.", source).unwrap();
 
-        let state = validation_zipper_tree.state.lock().unwrap();
-        assert!(state.last_input_tree_offset == 0);
-        drop(state); // release lock so next call to validate doesn't deadlock
+        {
+            assert!(validation_zipper_tree.last_input_tree_offset == 0);
+        }
 
         validation_zipper_tree.validate().unwrap();
 
-        let state = validation_zipper_tree.state.lock().unwrap();
-        assert!(state.last_input_tree_offset == source.len());
-        drop(state);
+        {
+            assert!(validation_zipper_tree.last_input_tree_offset == source.len());
+        }
 
         let report = validation_zipper_tree.report();
         assert!(report.errors.is_empty());
