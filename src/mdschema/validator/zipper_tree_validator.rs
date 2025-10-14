@@ -161,23 +161,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_goto_tree_offset() {
+    fn test_walks_on_validate() {
         let source = "# Heading\n\nSome **bold** text.";
 
         let mut validation_zipper_tree =
             ValidationZipperTree::new("# Heading\n\nSome **bold** text.", source).unwrap();
 
-        {
-            assert!(validation_zipper_tree.last_input_tree_offset == 0);
-        }
+        assert!(validation_zipper_tree.last_input_tree_offset == 0);
 
         validation_zipper_tree.validate().unwrap();
 
-        {
-            assert!(validation_zipper_tree.last_input_tree_offset == source.len());
-        }
+        assert!(validation_zipper_tree.last_input_tree_offset == source.len());
 
         let report = validation_zipper_tree.report();
+
         assert!(report.errors.is_empty());
         assert_eq!(report.source_content, source);
     }
