@@ -1,8 +1,12 @@
-# 🧩 MDS (Markdown Schema) Language Specification
+# MDS (Markdown Schema) Language Specification
 
 MDS is a **tiny language for describing how Markdown *should look***. With
 `mdvalidate`, you write *schemas* that define what Markdown patterns are
 allowed, optional, or repeated,  and MDS checks real documents against them.
+
+It's designed for validating a stream of Markdown via stdin, so you can pipe
+LLM output and validate the shape of its response. `mdvalidate` is written in
+100% safe rust and is 🔥 blazingly fast 🔥.
 
 ---
 
