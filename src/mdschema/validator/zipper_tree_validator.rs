@@ -1,6 +1,9 @@
 use tree_sitter::{Parser, Tree, TreeCursor};
 
-use crate::mdschema::{reports::{errors::ValidatorError, validation_report::ValidatorReport}, validator::validator::Validator};
+use crate::mdschema::{
+    reports::{errors::ValidatorError, validation_report::ValidatorReport},
+    validator::validator::Validator,
+};
 
 /// A Validator implementation that uses a zipper tree approach to validate
 /// an input Markdown document against a markdown schema treesitter tree.
@@ -18,11 +21,20 @@ pub struct ValidationZipperTree {
     /// The full input string as last read. Not used internally but useful for
     /// debugging or reporting.
     last_input_str: String,
+    /// The full schema string. Does not change.
+    schema_str: String,
+    /// Whether we have received the end of the input. This means that last
+    /// input tree offset is at the end of the input.
+    got_eof: bool,
 }
 
 impl Validator for ValidationZipperTree {
     /// Create a new ValidationZipperTree with the given schema and input strings.
-    fn new(schema_str: &str, input_str: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    fn new(
+        schema_str: &str,
+        input_str: &str,
+        eof: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut schema_parser = new_markdown_parser();
         let schema_tree = schema_parser
             .parse(schema_str, None)
@@ -40,6 +52,8 @@ impl Validator for ValidationZipperTree {
             last_schema_tree_offset: 0,
             errors: Vec::new(),
             last_input_str: input_str.to_string(),
+            schema_str: schema_str.to_string(),
+            got_eof: eof,
         })
     }
 
@@ -48,8 +62,9 @@ impl Validator for ValidationZipperTree {
     /// Does not update the schema tree or change the offsets. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
-    fn read_input(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {
+    fn read_input(&mut self, input: &str, eof: bool) -> Result<(), Box<dyn std::error::Error>> {
         self.last_input_str = input.to_string();
+        self.got_eof = eof;
 
         let mut input_parser = new_markdown_parser();
         self.input_tree = input_parser
@@ -63,80 +78,87 @@ impl Validator for ValidationZipperTree {
     /// we left off.
     fn validate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // With our current understanding of state, validate until the end of the input
-        let (new_schema_offset, new_input_offset) = self
-            .validate_nodes_from_offset_to_end_of_input(
-                &mut self.input_tree.walk(),
-                &mut self.schema_tree.walk(),
-                self.last_input_tree_offset,
-                self.last_schema_tree_offset,
-            );
-
-        self.last_input_tree_offset = new_input_offset;
-        self.last_schema_tree_offset = new_schema_offset;
+        self.validate_nodes_from_offset_to_end_of_input(
+            &mut self.input_tree.clone().walk(),
+            &mut self.schema_tree.clone().walk(),
+        );
 
         Ok(())
     }
-    
+
     fn report(&self) -> crate::mdschema::reports::validation_report::ValidatorReport {
-        return ValidatorReport::new(
-            self.errors.clone(),
-            self.last_input_str.clone(),
-        );
+        return ValidatorReport::new(self.errors.clone(), self.last_input_str.clone());
     }
-
-
 }
 
 impl ValidationZipperTree {
     /// Validate nodes and walk until the end of the input tree, starting from
-    /// the given offsets.
+    /// the current offsets.
     ///
-    /// Uses `validate_node_and_walk` to validate each node and move the cursors forward.
-    ///
-    /// Returns the final offsets (schema_offset, input_offset) after the "walk".
+    /// Uses `validate_node` to validate each node and move the cursors forward.
+    /// Directly mutates the last_offsets in the struct.
     fn validate_nodes_from_offset_to_end_of_input(
-        &self,
-        cursor: &mut TreeCursor,
+        &mut self,
+        input_cursor: &mut TreeCursor,
         schema_cursor: &mut TreeCursor,
-        input_offset: usize,
-        schema_offset: usize,
-    ) -> (usize, usize) {
-        let mut last_schema_tree_offset = schema_offset;
-        let mut last_input_tree_offset = input_offset;
-
+    ) {
         // Move cursors to the starting offsets
-        goto_tree_offset(cursor, input_offset);
-        goto_tree_offset(schema_cursor, schema_offset);
+        _ = schema_cursor
+            .goto_first_child_for_byte(self.last_schema_tree_offset)
+            .is_some();
 
         // Walk up until the end. `self.last_input_str` will not change while
         // this is running since this blocks the thread.
-        while last_input_tree_offset < self.last_input_str.len() {
-            let (new_schema_offset, new_input_offset) =
-                self.validate_node_and_walk(cursor, schema_cursor);
+        while self.last_input_tree_offset < self.last_input_str.len() {
+            // We may cause a shift to the current treecursors inside ourself by
+            // calling this, but it is important that we "commit" the change by
+            // actually updating the offsets after validating.
+            self.validate_node(input_cursor, schema_cursor);
 
             // Update the offsets as we make progress towards the end.
-            last_schema_tree_offset = new_schema_offset;
-            last_input_tree_offset = new_input_offset;
+            self.last_schema_tree_offset = schema_cursor.node().byte_range().end;
+            self.last_input_tree_offset = input_cursor.node().byte_range().end;
         }
-
-        (last_schema_tree_offset, last_input_tree_offset)
     }
 
-    /// Validate the next node forward from the most recent offsets.
-    ///
-    /// Returns the new offsets after validation (schema_offset, input_offset)
-    /// after the "walk".
-    fn validate_node_and_walk(
-        &self,
-        cursor: &mut TreeCursor,
-        schema_cursor: &mut TreeCursor,
-    ) -> (usize, usize) {
-        // TODO: Actually validate the nodes to make sure they match
+    /// Validate a single node using the corresponding schema node.
+    /// Then walk the cursors to the next nodes. Mutates self to walk cursors
+    /// and record errors.
+    fn validate_node(&mut self, input_cursor: &mut TreeCursor, schema_cursor: &mut TreeCursor) {
+        println!("Validating node: {}", input_cursor.node().kind());
 
-        cursor.goto_next_sibling();
-        schema_cursor.goto_next_sibling();
+        let input_node = input_cursor.node();
+        let schema_node = schema_cursor.node();
 
-        (get_tree_offset(schema_cursor), get_tree_offset(cursor))
+        // If there are no children, check if the literal matches
+        if input_node.child_count() == 0 {
+            let input_literal = &self.last_input_str[input_node.byte_range()];
+            let schema_literal = &self.schema_str[schema_node.byte_range()];
+
+            if input_literal != schema_literal {
+                let error = ValidatorError::from_offset(
+                    format!(
+                        "Literal mismatch: expected '{}', found '{}'",
+                        schema_literal, input_literal
+                    ),
+                    input_node.start_byte(),
+                    input_node.end_byte(),
+                    &self.last_input_str,
+                );
+                self.errors.push(error);
+            }
+
+            // Move cursors to the next nodes
+            self.goto_next_node(input_cursor);
+            self.goto_next_node(schema_cursor);
+        }
+    }
+
+    fn goto_next_node(&self, cursor: &mut TreeCursor) {
+        if !cursor.goto_next_sibling() {
+            cursor.goto_parent();
+            cursor.goto_next_sibling();
+        }
     }
 }
 
@@ -149,17 +171,6 @@ fn new_markdown_parser() -> Parser {
     parser
 }
 
-/// Get the byte offset of the end of the current node.
-fn get_tree_offset(tree: &TreeCursor) -> usize {
-    tree.node().byte_range().end
-}
-
-/// Move the cursor to the node that contains the given byte offset.
-/// Returns true if the cursor was moved, false otherwise.
-fn goto_tree_offset(tree: &mut TreeCursor, offset: usize) -> bool {
-    tree.goto_first_child_for_byte(offset).is_some()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,7 +180,7 @@ mod tests {
         let source = "# Heading\n\nSome **bold** text.";
 
         let mut validation_zipper_tree =
-            ValidationZipperTree::new("# Heading\n\nSome **bold** text.", source).unwrap();
+            ValidationZipperTree::new("# Heading\n\nSome **bold** text.", source, true).unwrap();
 
         assert!(validation_zipper_tree.last_input_tree_offset == 0);
 
@@ -181,5 +192,41 @@ mod tests {
 
         assert!(report.errors.is_empty());
         assert_eq!(report.source_content, source);
+    }
+
+    #[test]
+    fn test_detects_literal_match() {
+        let schema_str = "**strong**";
+        let input_str = "**strong**";
+
+        let mut validation_zipper_tree =
+            ValidationZipperTree::new(schema_str, input_str, true).unwrap();
+        validation_zipper_tree.validate().unwrap();
+        let report = validation_zipper_tree.report();
+        assert!(report.errors.is_empty());
+    }
+
+    #[test]
+    fn test_detects_literal_mismatch() {
+        let schema_str = "**strong**";
+        let input_str = "**bold**";
+        let mut validation_zipper_tree =
+            ValidationZipperTree::new(schema_str, input_str, true).unwrap();
+
+        validation_zipper_tree.validate().unwrap();
+        let report = validation_zipper_tree.report();
+        assert!(!report.errors.is_empty());
+        assert_eq!(
+            report.errors[0].message,
+            "Literal mismatch: expected '**strong**', found '**bold**'"
+        );
+        assert_eq!(report.source_content, input_str);
+        assert_eq!(report.errors.len(), 1);
+        assert_eq!(report.errors[0].byte_start, 0);
+        assert_eq!(report.errors[0].byte_end, 8);
+        assert_eq!(
+            report.errors[0].message,
+            "Literal mismatch: expected '**strong**', found '**bold**'"
+        );
     }
 }
