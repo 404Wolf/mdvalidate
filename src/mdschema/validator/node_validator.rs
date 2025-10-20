@@ -1,5 +1,8 @@
-use crate::{cmd::validate, mdschema::reports::errors::ValidatorError};
-use tree_sitter::TreeCursor;
+use crate::{
+    cmd::validate,
+    mdschema::{reports::errors::ValidatorError, validator::utils::node_to_str},
+};
+use tree_sitter::{Node, TreeCursor};
 
 /// A validator for individual tree nodes that compares input nodes against schema nodes.
 pub struct BiNodeValidator<'a> {
@@ -50,7 +53,8 @@ impl<'a> BiNodeValidator<'a> {
             let schema_node = schema_cursor.node();
 
             if schema_node.kind() == "text" {
-                self.errors.extend(self.validate_text_node());
+                self.errors
+                    .extend(self.validate_text_node(&input_node, &schema_node));
             } else {
                 let input_node_children =
                     input_node.children(&mut input_cursor).collect::<Vec<_>>();
@@ -63,13 +67,14 @@ impl<'a> BiNodeValidator<'a> {
                     .filter(|n| n.kind() == "code_span")
                     .collect::<Vec<_>>();
 
-                println!("Schema node kind: {}", schema_node.kind());
-                println!("Input node kind: {}", input_node.kind());
-
                 if schema_node_code_children.is_empty() {
                     for (input_child, schema_child) in
+                        // Check that they are the same node type
                         input_node_children.iter().zip(schema_node_children.iter())
                     {
+                        self.errors
+                            .extend(self.validate_child_nodes(input_child, schema_child));
+
                         nodes_to_validate.push((input_child.walk(), schema_child.walk()));
                     }
                 } else {
@@ -84,11 +89,27 @@ impl<'a> BiNodeValidator<'a> {
         self.input_offset = input_node.byte_range().end;
     }
 
-    fn validate_text_node(&self) -> Vec<ValidatorError> {
+    fn validate_child_nodes(&self, input_node: &Node, schema_node: &Node) -> Vec<ValidatorError> {
         let mut errors = Vec::new();
 
-        let input_node = self.input_cursor.node();
-        let schema_node = self.schema_cursor.node();
+        if input_node.kind() != schema_node.kind() {
+            errors.push(ValidatorError::from_offset(
+                format!(
+                    "Node mismatch: expected '{}', found '{}'",
+                    schema_node.kind(),
+                    input_node.kind()
+                ),
+                input_node.byte_range().start,
+                input_node.byte_range().end,
+                self.input_str,
+            ));
+        }
+
+        errors
+    }
+
+    fn validate_text_node(&self, input_node: &Node, schema_node: &Node) -> Vec<ValidatorError> {
+        let mut errors = Vec::new();
 
         let schema_text = &self.schema_str[schema_node.byte_range()];
         let input_text = &self.input_str[input_node.byte_range()];
@@ -223,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_two_h1_h2_paragraph_with_same_text() {
+    fn test_validate_two_h1_paragraph_with_same_text() {
         let input = "# Heading\n\nThis is a paragraph.";
         let schema = "# Heading\n\nThis is a paragraph.";
 
@@ -253,5 +274,51 @@ mod tests {
 
         assert!(errors.is_empty());
         assert_eq!(input_offset, schema_offset);
+    }
+
+    #[test]
+    fn test_validate_two_different_headings_same_text() {
+        let input = "# Heading";
+        let schema = "## Heading";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser.parse(input, None).unwrap();
+        let input_node = input_tree.root_node().child(0).unwrap();
+        assert!(
+            input_node.kind() == "atx_heading",
+            "Got {}",
+            input_node.kind()
+        );
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser.parse(schema, None).unwrap();
+        let schema_node = schema_tree.root_node().child(0).unwrap();
+        assert!(
+            schema_node.kind() == "atx_heading",
+            "Got {}",
+            schema_node.kind()
+        );
+
+        let input_cursor = input_node.walk();
+        let schema_cursor = schema_node.walk();
+
+        let (errors, (input_offset, schema_offset)) =
+            validate_a_node(&input_cursor, &schema_cursor, input, schema);
+
+        println!("Errors: {:#?}", errors);
+
+        assert!(
+            !errors.is_empty(),
+            "Expected validation errors but found none"
+        );
+        assert_eq!(input_offset, input.len());
+        assert_eq!(schema_offset, schema.len());
+
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("Node mismatch")),
+            "Expected a node mismatch error but did not find one"
+        );
     }
 }
