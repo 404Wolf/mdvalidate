@@ -1,10 +1,14 @@
 use crate::mdschema::reports::validation_report::ValidatorReport;
 
 pub trait Validator {
-    fn new(schema_str: &str, input_str: &str, eof: bool) -> Result<Self, Box<dyn std::error::Error>>
+    fn new(
+        schema_str: &str,
+        input_str: &str,
+        eof: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>>
     where
         Self: Sized;
-    fn validate(&mut self) -> Result<(), Box<dyn std::error::Error>>;
-    fn read_input(&mut self, input: &str, eof: bool) -> Result<(), Box<dyn std::error::Error>>;
+    fn validate(&mut self);
+    fn read_input(&mut self, input: &str, eof: bool) -> bool;
     fn report(&self) -> ValidatorReport;
 }

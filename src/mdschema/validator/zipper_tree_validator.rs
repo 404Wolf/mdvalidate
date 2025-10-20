@@ -62,28 +62,36 @@ impl Validator for ValidationZipperTree {
     /// Does not update the schema tree or change the offsets. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
-    fn read_input(&mut self, input: &str, eof: bool) -> Result<(), Box<dyn std::error::Error>> {
+    fn read_input(&mut self, input: &str, eof: bool) -> bool {
+        // Update internal state of the last input string
         self.last_input_str = input.to_string();
+
+        // If we already got EOF, do not accept more input
+        if self.got_eof {
+            return false;
+        }
+
         self.got_eof = eof;
 
         let mut input_parser = new_markdown_parser();
-        self.input_tree = input_parser
-            .parse(input, Some(&self.input_tree))
-            .ok_or("Failed to parse updated input")?;
 
-        Ok(())
+        match input_parser.parse(input, Some(&self.input_tree)) {
+            Some(parse) => {
+                self.input_tree = parse;
+                true
+            }
+            None => false,
+        }
     }
 
     /// Validate the input against the schema. Validates picking up from where
     /// we left off.
-    fn validate(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn validate(&mut self) {
         // With our current understanding of state, validate until the end of the input
         self.validate_nodes_from_offset_to_end_of_input(
             &mut self.input_tree.clone().walk(),
             &mut self.schema_tree.clone().walk(),
         );
-
-        Ok(())
     }
 
     fn report(&self) -> crate::mdschema::reports::validation_report::ValidatorReport {
