@@ -5,7 +5,10 @@ use tree_sitter::{Tree, TreeCursor};
 
 use crate::mdschema::{
     reports::{errors::ValidatorError, validation_report::ValidatorReport},
-    validator::{binode_validator::validate_a_node, utils::new_markdown_parser},
+    validator::{
+        binode_validator::validate_a_node,
+        utils::{new_markdown_parser, node_to_str},
+    },
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -43,13 +46,7 @@ impl Validator {
 
         let mut schema_parser = new_markdown_parser();
         let schema_tree = match schema_parser.parse(schema_str, None) {
-            Some(tree) => {
-                debug!(
-                    "Schema tree parsed successfully with {} bytes",
-                    tree.root_node().byte_range().end
-                );
-                tree
-            }
+            Some(tree) => tree,
             None => {
                 debug!("Failed to parse schema tree");
                 return None;
@@ -71,7 +68,6 @@ impl Validator {
             }
         };
 
-        debug!("Validator created successfully");
         Some(Validator {
             input_tree,
             schema_tree,
@@ -178,18 +174,12 @@ impl Validator {
     fn validate_nodes_from_offset_to_end_of_input(&mut self) -> Result<()> {
         // Walk up until the end. `self.last_input_str` will not change while
         // this is running since this blocks the thread.
-        let last_input_str_len = self.last_input_str.len();
 
-        if self.last_input_tree_offset >= last_input_str_len {
+        if self.last_input_tree_offset >= self.input_tree.walk().node().end_byte() {
             // Nothing to do
             debug!("No validation needed - already at end of input");
             return Ok(());
         }
-
-        debug!(
-            "Starting validation loop: input_len={}, current_offset={}",
-            last_input_str_len, self.last_input_tree_offset
-        );
 
         let mut input_cursor =
             match Self::get_cursor_at_offset(&self.input_tree, self.last_input_tree_offset) {
@@ -216,14 +206,19 @@ impl Validator {
             };
 
         while self.last_input_tree_offset < input_cursor.node().end_byte() {
-            debug!(
-                "Validating at last_input_tree_offset={}, last_input_str_len={}",
-                self.last_input_tree_offset, last_input_str_len
-            );
-
             // We may cause a shift to the current treecursors inside ourself by
             // calling this, but it is important that we "commit" the change by
             // actually updating the offsets after validating.
+            // print the input cursor and schema cursor
+            print!(
+                "Schema cursor expr {}",
+                node_to_str(schema_cursor.node(), &self.schema_str)
+            );
+            print!(
+                "Input cursor expr {}",
+                node_to_str(input_cursor.node(), &self.last_input_str)
+            );
+
             let (errors, (last_input_tree_offset, last_schema_tree_offset)) = validate_a_node(
                 &mut input_cursor,
                 &mut schema_cursor,
@@ -243,6 +238,20 @@ impl Validator {
 
     /// Get a TreeCursor at the correct offset.
     fn get_cursor_at_offset(tree: &'_ Tree, offset: usize) -> Option<TreeCursor<'_>> {
+        // print the tree and offset
+        print!(
+            "Getting cursor at offset {} in tree: {}\n\n",
+            offset,
+            tree.root_node().to_sexp()
+        );
+
+        // The nested non root "first child for byte" for offset zero is the
+        // first "thing," like the first paragraph. We want it to be the actual
+        // root document.
+        if offset == 0 {
+            return Some(tree.walk());
+        }
+
         let mut cursor = tree.walk();
 
         // Move to the correct offset
@@ -314,6 +323,37 @@ mod tests {
     }
 
     #[test]
+    fn test_initially_empty_then_read_input_then_validate() {
+        let initial_input = "";
+        let schema = "Hello\n\nWorld";
+
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(schema, None).expect("Failed to parse schema");
+
+        let mut validator =
+            Validator::new(schema, initial_input, false).expect("Failed to create validator");
+
+        // First validate with empty input
+        validator.validate().expect("Failed to validate");
+        let report = validator.report();
+        assert!(report.errors.is_empty());
+        assert!(report.is_valid());
+
+        // Now read more input to complete it
+        validator
+            .read_input("Hello\n\nTEST World", true)
+            .expect("Failed to read input");
+
+        // Validate again
+        validator
+            .validate()
+            .expect("Failed to validate after reading input");
+
+        let report = validator.report();
+        assert!(!report.is_valid());
+    }
+
+    #[test]
     fn test_validate_then_read_input_then_validate_again() {
         let initial_input = "Hello Wo";
         let schema = "Hello World";
@@ -338,7 +378,44 @@ mod tests {
             .expect("Failed to validate after reading input");
 
         let report = validator.report();
-        assert!(report.errors.is_empty());
+        assert!(
+            report.errors.is_empty(),
+            "Expected no validation errors, but found {:?}",
+            report.errors
+        );
         assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_validation_should_fail_with_mismatched_content() {
+        let schema = "# Test
+
+    fooobar
+
+    test
+
+    ";
+        let input = "# Test
+
+    fooobar
+
+    testt
+
+    ";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate().expect("Failed to validate");
+
+        let report = validator.report();
+        assert!(
+            !report.errors.is_empty(),
+            "Expected validation errors but found none"
+        );
+        assert!(
+            !report.is_valid(),
+            "Expected validation to fail but it passed"
+        );
     }
 }

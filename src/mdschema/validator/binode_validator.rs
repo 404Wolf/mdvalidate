@@ -134,6 +134,14 @@ impl<'a> BiNodeValidator<'a> {
 
         self.input_offset = input_node.byte_range().end;
         self.schema_offset = schema_node.byte_range().end;
+        print!("Final offsets: input_offset={}, schema_offset={}\n", self.input_offset, self.schema_offset);
+
+        // If EOF is false, we should always tick back the schema offset by one
+        // node (sibling, or left parent)
+        // TODO: Is this right?
+        if !self.eof {
+            self.schema_offset = schema_cursor.node().start_byte();
+        }
     }
 
     fn validate_child_nodes(&self, input_node: &Node, schema_node: &Node) -> Vec<ValidatorError> {
@@ -156,7 +164,11 @@ impl<'a> BiNodeValidator<'a> {
     }
 
     fn validate_text_node(&self, input_node: &Node, schema_node: &Node) -> Vec<ValidatorError> {
-        if (input_node.byte_range().end == self.input_str.len()) && self.eof == false {
+        debug!("Validating text node content");
+
+        if (input_node.byte_range().end == self.initial_input_cursor.node().byte_range().end)
+            && self.eof == false
+        {
             // Incomplete text node, skip validation for now
             debug!("Skipping text validation - incomplete node at EOF");
             return Vec::new();
@@ -202,7 +214,9 @@ pub fn validate_a_node(
 ) -> (Vec<ValidatorError>, (usize, usize)) {
     let mut validator =
         BiNodeValidator::new(input_cursor, schema_cursor, last_input_str, schema_str, eof);
+
     validator.validate();
+
     (
         validator.errors,
         (validator.input_offset, validator.schema_offset),
@@ -401,13 +415,58 @@ mod tests {
             validate_a_node(&input_cursor, &schema_cursor, input, schema, false);
 
         assert!(errors.is_empty());
-        assert_eq!(input_offset.abs_diff(schema_offset), 2);
+        assert_eq!(input_offset.abs_diff(schema_offset), 17); // start of last node byte range and the input offset (input offset at very end)
 
         // And now pass with eof: true and make sure it fails
         let (errors, (input_offset, schema_offset)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(!errors.is_empty());
+        assert_eq!(input_offset, input.len());
+        assert_eq!(schema_offset, schema.len());
+        assert_eq!(input_offset.abs_diff(schema_offset), 2); // length difference between input and schema
+    }
+
+    #[test]
+    fn test_validate_a_node_with_mismatched_content() {
+        let schema = "# Test
+
+fooobar
+
+test
+
+";
+        let input = "fooobar
+
+testt
+
+";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser.parse(input, None).unwrap();
+        let input_node = input_tree.root_node();
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser.parse(schema, None).unwrap();
+        let schema_node = schema_tree.root_node();
+
+        let input_cursor = input_node.walk();
+        let schema_cursor = schema_node.walk();
+
+        let (errors, (input_offset, schema_offset)) =
+            validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
+
+        assert!(
+            !errors.is_empty(),
+            "Expected validation errors but found none"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.message.contains("mismatch")),
+            "Expected a mismatch error but did not find one. Errors: {:?}",
+            errors
+        );
         assert_eq!(input_offset, input.len());
         assert_eq!(schema_offset, schema.len());
     }

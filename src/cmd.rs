@@ -4,7 +4,7 @@ use crate::mdschema::{reports::pretty_print::pretty_print_report, Validator};
 use anyhow::Result;
 use log::{debug, info, trace};
 
-static BUFFER_SIZE: usize = 300;
+static BUFFER_SIZE: usize = 3000;
 
 pub fn validate<R: Read>(schema_str: String, input: &mut R, filename: &str) -> Result<()> {
     debug!("Starting validation for file: {}", filename);
@@ -78,5 +78,6 @@ pub fn validate<R: Read>(schema_str: String, input: &mut R, filename: &str) -> R
     }
 
     debug!("Validation function completed for file: {}", filename);
+
     Ok(())
 }
