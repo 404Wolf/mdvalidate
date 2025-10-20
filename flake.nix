@@ -26,6 +26,7 @@
         };
 
         devShells.default = pkgs.mkShell {
+          RUST_LOG = "trace";
           packages = (
             with pkgs;
             [

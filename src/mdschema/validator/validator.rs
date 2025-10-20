@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use line_col::LineColLookup;
+use log::debug;
 use tree_sitter::{Tree, TreeCursor};
 
 use crate::mdschema::{
@@ -33,18 +34,44 @@ pub struct Validator {
 impl Validator {
     /// Create a new ValidationZipperTree with the given schema and input strings.
     pub fn new(schema_str: &str, input_str: &str, eof: bool) -> Option<Self> {
+        debug!(
+            "Creating new Validator with schema length: {}, input length: {}, eof: {}",
+            schema_str.len(),
+            input_str.len(),
+            eof
+        );
+
         let mut schema_parser = new_markdown_parser();
         let schema_tree = match schema_parser.parse(schema_str, None) {
-            Some(tree) => tree,
-            None => return None,
+            Some(tree) => {
+                debug!(
+                    "Schema tree parsed successfully with {} bytes",
+                    tree.root_node().byte_range().end
+                );
+                tree
+            }
+            None => {
+                debug!("Failed to parse schema tree");
+                return None;
+            }
         };
 
         let mut input_parser = new_markdown_parser();
         let input_tree = match input_parser.parse(input_str, None) {
-            Some(tree) => tree,
-            None => return None,
+            Some(tree) => {
+                debug!(
+                    "Input tree parsed successfully with {} bytes",
+                    tree.root_node().byte_range().end
+                );
+                tree
+            }
+            None => {
+                debug!("Failed to parse input tree");
+                return None;
+            }
         };
 
+        debug!("Validator created successfully");
         Some(Validator {
             input_tree,
             schema_tree,
@@ -63,6 +90,13 @@ impl Validator {
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
     pub fn read_input(&mut self, input: &str, eof: bool) -> Result<()> {
+        debug!(
+            "Reading new input: length={}, eof={}, current_offset={}",
+            input.len(),
+            eof,
+            self.last_input_tree_offset
+        );
+
         // Update internal state of the last input string
         self.last_input_str = input.to_string();
 
@@ -80,8 +114,17 @@ impl Validator {
 
         // Only parse if there's actually new content
         if new_len <= old_len {
+            debug!(
+                "No new content to parse (new_len={}, old_len={})",
+                new_len, old_len
+            );
             return Ok(());
         }
+
+        debug!(
+            "Parsing incrementally: old_len={}, new_len={}",
+            old_len, new_len
+        );
 
         // Parse incrementally, providing the edit information
         let edit = tree_sitter::InputEdit {
@@ -111,8 +154,16 @@ impl Validator {
     /// Validate the input against the schema. Validates picking up from where
     /// we left off.
     pub fn validate(&mut self) -> Result<()> {
+        debug!(
+            "Starting validation from input_offset={}, schema_offset={}",
+            self.last_input_tree_offset, self.last_schema_tree_offset
+        );
+
         // With our current understanding of state, validate until the end of the input
-        self.validate_nodes_from_offset_to_end_of_input()
+        let result = self.validate_nodes_from_offset_to_end_of_input();
+
+        debug!("Validation completed. Errors found: {}", self.errors.len());
+        result
     }
 
     pub fn report(&self) -> crate::mdschema::reports::validation_report::ValidatorReport {
@@ -129,27 +180,56 @@ impl Validator {
         // this is running since this blocks the thread.
         let last_input_str_len = self.last_input_str.len();
 
+        if self.last_input_tree_offset >= last_input_str_len {
+            // Nothing to do
+            debug!("No validation needed - already at end of input");
+            return Ok(());
+        }
+
+        debug!(
+            "Starting validation loop: input_len={}, current_offset={}",
+            last_input_str_len, self.last_input_tree_offset
+        );
+
         let mut input_cursor =
             match Self::get_cursor_at_offset(&self.input_tree, self.last_input_tree_offset) {
                 Some(cursor) => cursor,
-                None => return Err(anyhow!("Failed to get input cursor at offset")),
+                None => {
+                    return Err(anyhow!(
+                        "Failed to get input cursor at offset {}. Input tree has {} bytes",
+                        self.last_input_tree_offset,
+                        self.input_tree.root_node().byte_range().end
+                    ))
+                }
             };
 
         let mut schema_cursor =
             match Self::get_cursor_at_offset(&self.schema_tree, self.last_schema_tree_offset) {
                 Some(cursor) => cursor,
-                None => return Err(anyhow!("Failed to get schema cursor at offset")),
+                None => {
+                    return Err(anyhow!(
+                        "Failed to get schema cursor at offset {}. Schema tree has {} bytes",
+                        self.last_schema_tree_offset,
+                        self.schema_tree.root_node().byte_range().end
+                    ))
+                }
             };
 
-        while self.last_input_tree_offset < last_input_str_len {
+        while self.last_input_tree_offset < input_cursor.node().end_byte() {
+            debug!(
+                "Validating at last_input_tree_offset={}, last_input_str_len={}",
+                self.last_input_tree_offset, last_input_str_len
+            );
+
             // We may cause a shift to the current treecursors inside ourself by
             // calling this, but it is important that we "commit" the change by
             // actually updating the offsets after validating.
-            let (errors, (last_schema_tree_offset, last_input_tree_offset)) = validate_a_node(
+            let (errors, (last_input_tree_offset, last_schema_tree_offset)) = validate_a_node(
                 &mut input_cursor,
                 &mut schema_cursor,
                 &self.last_input_str,
                 &self.schema_str,
+                self.got_eof,
             );
 
             self.last_schema_tree_offset = last_schema_tree_offset;
@@ -180,7 +260,10 @@ mod tests {
 
     #[test]
     fn test_read_input_updates_last_input_str() {
-        let mut validator = Validator::new("# Schema", "Initial input", false).unwrap();
+        // Check that read_input updates the last_input_str correctly
+        let mut validator =
+            Validator::new("# Schema", "Initial input", false).expect("Failed to create validator");
+
         assert_eq!(validator.last_input_str, "Initial input");
 
         validator
@@ -188,5 +271,74 @@ mod tests {
             .expect("Failed to read input");
 
         assert_eq!(validator.last_input_str, "Updated input");
+
+        // Check that it updates the tree correctly
+        assert_eq!(
+            validator
+                .input_tree
+                .root_node()
+                .utf8_text(&validator.last_input_str.as_bytes())
+                .expect("Failed to get input text"),
+            "Updated input"
+        );
+    }
+
+    #[test]
+    fn test_initial_validate_with_eof_works() {
+        let input = "Hello World";
+        let schema = "Hello World";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate().expect("Failed to validate");
+
+        let report = validator.report();
+        assert!(report.errors.is_empty());
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_initial_validate_without_eof_incomplete_text_node() {
+        let input = "Hello Wo";
+        let schema = "Hello World";
+
+        let mut validator =
+            Validator::new(schema, input, false).expect("Failed to create validator");
+
+        validator.validate().expect("Failed to validate");
+
+        let report = validator.report();
+        assert!(report.errors.is_empty());
+        assert!(report.is_valid());
+    }
+
+    #[test]
+    fn test_validate_then_read_input_then_validate_again() {
+        let initial_input = "Hello Wo";
+        let schema = "Hello World";
+
+        let mut validator =
+            Validator::new(schema, initial_input, false).expect("Failed to create validator");
+
+        // First validate with incomplete input
+        validator.validate().expect("Failed to validate");
+        let report = validator.report();
+        assert!(report.errors.is_empty());
+        assert!(report.is_valid());
+
+        // Now read more input to complete it
+        validator
+            .read_input("Hello World", true)
+            .expect("Failed to read input");
+
+        // Validate again
+        validator
+            .validate()
+            .expect("Failed to validate after reading input");
+
+        let report = validator.report();
+        assert!(report.errors.is_empty());
+        assert!(report.is_valid());
     }
 }
