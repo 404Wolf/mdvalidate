@@ -30,22 +30,20 @@ pub struct ValidationZipperTree {
 
 impl Validator for ValidationZipperTree {
     /// Create a new ValidationZipperTree with the given schema and input strings.
-    fn new(
-        schema_str: &str,
-        input_str: &str,
-        eof: bool,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    fn new(schema_str: &str, input_str: &str, eof: bool) -> Option<Self> {
         let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser
-            .parse(schema_str, None)
-            .ok_or("Failed to parse schema")?;
+        let schema_tree = match schema_parser.parse(schema_str, None) {
+            Some(tree) => tree,
+            None => return None,
+        };
 
         let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser
-            .parse(input_str, None)
-            .ok_or("Failed to parse input")?;
+        let input_tree = match input_parser.parse(input_str, None) {
+            Some(tree) => tree,
+            None => return None,
+        };
 
-        Ok(ValidationZipperTree {
+        Some(ValidationZipperTree {
             input_tree,
             schema_tree,
             last_input_tree_offset: 0,
@@ -86,12 +84,9 @@ impl Validator for ValidationZipperTree {
 
     /// Validate the input against the schema. Validates picking up from where
     /// we left off.
-    fn validate(&mut self) {
+    fn validate(&mut self) -> bool {
         // With our current understanding of state, validate until the end of the input
-        self.validate_nodes_from_offset_to_end_of_input(
-            &mut self.input_tree.clone().walk(),
-            &mut self.schema_tree.clone().walk(),
-        );
+        self.validate_nodes_from_offset_to_end_of_input()
     }
 
     fn report(&self) -> crate::mdschema::reports::validation_report::ValidatorReport {
@@ -105,43 +100,60 @@ impl ValidationZipperTree {
     ///
     /// Uses `validate_node` to validate each node and move the cursors forward.
     /// Directly mutates the last_offsets in the struct.
-    fn validate_nodes_from_offset_to_end_of_input(
-        &mut self,
-        input_cursor: &mut TreeCursor,
-        schema_cursor: &mut TreeCursor,
-    ) {
-        // Move cursors to the starting offsets
-        _ = schema_cursor
-            .goto_first_child_for_byte(self.last_schema_tree_offset)
-            .is_some();
-
+    fn validate_nodes_from_offset_to_end_of_input(&mut self) -> bool {
         // Walk up until the end. `self.last_input_str` will not change while
         // this is running since this blocks the thread.
-        while self.last_input_tree_offset < self.last_input_str.len() {
+        let last_input_str_len = self.last_input_str.len();
+
+        let mut input_cursor =
+            match Self::get_cursor_at_offset(&self.input_tree, self.last_input_tree_offset) {
+                Some(cursor) => cursor,
+                None => return false,
+            };
+
+        let mut schema_cursor =
+            match Self::get_cursor_at_offset(&self.schema_tree, self.last_schema_tree_offset) {
+                Some(cursor) => cursor,
+                None => return false,
+            };
+
+        while self.last_input_tree_offset < last_input_str_len {
             // We may cause a shift to the current treecursors inside ourself by
             // calling this, but it is important that we "commit" the change by
             // actually updating the offsets after validating.
-            self.validate_node(input_cursor, schema_cursor);
+            let (errors, (last_schema_tree_offset, last_input_tree_offset)) =
+                Self::validate_a_node(
+                    &mut input_cursor,
+                    &mut schema_cursor,
+                    &self.last_input_str.clone(),
+                    &self.schema_str.clone(),
+                );
 
-            // Update the offsets as we make progress towards the end.
-            self.last_schema_tree_offset = schema_cursor.node().byte_range().end;
-            self.last_input_tree_offset = input_cursor.node().byte_range().end;
+            self.last_schema_tree_offset = last_schema_tree_offset;
+            self.last_input_tree_offset = last_input_tree_offset;
+
+            self.errors.extend(errors);
         }
+
+        true
     }
 
     /// Validate a single node using the corresponding schema node.
-    /// Then walk the cursors to the next nodes. Mutates self to walk cursors
-    /// and record errors.
-    fn validate_node(&mut self, input_cursor: &mut TreeCursor, schema_cursor: &mut TreeCursor) {
-        println!("Validating node: {}", input_cursor.node().kind());
-
+    /// Then walk the cursors to the next nodes. Returns errors and new offsets.
+    fn validate_a_node(
+        input_cursor: &mut TreeCursor,
+        schema_cursor: &mut TreeCursor,
+        last_input_str: &str,
+        schema_str: &str,
+    ) -> (Vec<ValidatorError>, (usize, usize)) {
         let input_node = input_cursor.node();
         let schema_node = schema_cursor.node();
+        let mut errors = Vec::new();
 
         // If there are no children, check if the literal matches
         if input_node.child_count() == 0 {
-            let input_literal = &self.last_input_str[input_node.byte_range()];
-            let schema_literal = &self.schema_str[schema_node.byte_range()];
+            let input_literal = &last_input_str[input_node.byte_range()];
+            let schema_literal = &schema_str[schema_node.byte_range()];
 
             if input_literal != schema_literal {
                 let error = ValidatorError::from_offset(
@@ -151,21 +163,27 @@ impl ValidationZipperTree {
                     ),
                     input_node.start_byte(),
                     input_node.end_byte(),
-                    &self.last_input_str,
+                    &last_input_str,
                 );
-                self.errors.push(error);
+                errors.push(error);
             }
-
-            // Move cursors to the next nodes
-            self.goto_next_node(input_cursor);
-            self.goto_next_node(schema_cursor);
         }
+
+        let new_schema_offset = schema_node.byte_range().end;
+        let new_input_offset = input_node.byte_range().end;
+
+        (errors, (new_schema_offset, new_input_offset))
     }
 
-    fn goto_next_node(&self, cursor: &mut TreeCursor) {
-        if !cursor.goto_next_sibling() {
-            cursor.goto_parent();
-            cursor.goto_next_sibling();
+    /// Get a TreeCursor at the correct offset.
+    fn get_cursor_at_offset(tree: &Tree, offset: usize) -> Option<TreeCursor> {
+        let mut cursor = tree.walk();
+
+        // Move to the correct offset
+        if cursor.goto_first_child_for_byte(offset).is_some() {
+            Some(cursor)
+        } else {
+            None
         }
     }
 }
@@ -192,7 +210,7 @@ mod tests {
 
         assert!(validation_zipper_tree.last_input_tree_offset == 0);
 
-        validation_zipper_tree.validate().unwrap();
+        validation_zipper_tree.validate();
 
         assert!(validation_zipper_tree.last_input_tree_offset == source.len());
 
@@ -209,7 +227,7 @@ mod tests {
 
         let mut validation_zipper_tree =
             ValidationZipperTree::new(schema_str, input_str, true).unwrap();
-        validation_zipper_tree.validate().unwrap();
+        validation_zipper_tree.validate();
         let report = validation_zipper_tree.report();
         assert!(report.errors.is_empty());
     }
@@ -221,7 +239,7 @@ mod tests {
         let mut validation_zipper_tree =
             ValidationZipperTree::new(schema_str, input_str, true).unwrap();
 
-        validation_zipper_tree.validate().unwrap();
+        validation_zipper_tree.validate();
         let report = validation_zipper_tree.report();
         assert!(!report.errors.is_empty());
         assert_eq!(

@@ -5,10 +5,10 @@ pub trait Validator {
         schema_str: &str,
         input_str: &str,
         eof: bool,
-    ) -> Result<Self, Box<dyn std::error::Error>>
+    ) -> Option<Self>
     where
         Self: Sized;
-    fn validate(&mut self);
+    fn validate(&mut self) -> bool;
     fn read_input(&mut self, input: &str, eof: bool) -> bool;
     fn report(&self) -> ValidatorReport;
 }
