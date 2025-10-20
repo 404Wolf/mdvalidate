@@ -1,7 +1,4 @@
-use crate::{
-    cmd::validate,
-    mdschema::{reports::errors::ValidatorError, validator::utils::node_to_str},
-};
+use crate::mdschema::reports::errors::ValidatorError;
 use tree_sitter::{Node, TreeCursor};
 
 /// A validator for individual tree nodes that compares input nodes against schema nodes.

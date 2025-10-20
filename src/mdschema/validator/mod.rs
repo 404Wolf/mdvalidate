@@ -1,3 +1,3 @@
 pub mod validator;
-mod node_validator;
+mod binode_validator;
 mod utils;

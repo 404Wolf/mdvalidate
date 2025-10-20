@@ -4,7 +4,7 @@ use tree_sitter::{Tree, TreeCursor};
 
 use crate::mdschema::{
     reports::{errors::ValidatorError, validation_report::ValidatorReport},
-    validator::{node_validator::validate_a_node, utils::new_markdown_parser},
+    validator::{binode_validator::validate_a_node, utils::new_markdown_parser},
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -174,60 +174,19 @@ impl Validator {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-//     #[test]
-//     fn test_walks_on_validate() {
-//         let source = "# Heading\n\nSome **bold** text.";
+    #[test]
+    fn test_read_input_updates_last_input_str() {
+        let mut validator = Validator::new("# Schema", "Initial input", false).unwrap();
+        assert_eq!(validator.last_input_str, "Initial input");
 
-//         let mut validation_zipper_tree =
-//             Validator::new("# Heading\n\nSome **bold** text.", source, true).unwrap();
+        validator
+            .read_input("Updated input", false)
+            .expect("Failed to read input");
 
-//         assert!(validation_zipper_tree.last_input_tree_offset == 0);
-
-//         validation_zipper_tree.validate().unwrap();
-
-//         assert!(validation_zipper_tree.last_input_tree_offset == source.len());
-
-//         let report = validation_zipper_tree.report();
-
-//         assert!(report.errors.is_empty());
-//         assert_eq!(report.source_content, source);
-//     }
-
-//     #[test]
-//     fn test_detects_literal_match() {
-//         let schema_str = "**strong**";
-//         let input_str = "**strong**";
-
-//         let mut validation_zipper_tree = Validator::new(schema_str, input_str, true).unwrap();
-//         validation_zipper_tree.validate().unwrap();
-//         let report = validation_zipper_tree.report();
-//         assert!(report.errors.is_empty());
-//     }
-
-//     #[test]
-//     fn test_detects_literal_mismatch() {
-//         let schema_str = "**strong**";
-//         let input_str = "**bold**";
-//         let mut validation_zipper_tree = Validator::new(schema_str, input_str, true).unwrap();
-
-//         validation_zipper_tree.validate().unwrap();
-//         let report = validation_zipper_tree.report();
-//         assert!(!report.errors.is_empty());
-//         assert_eq!(
-//             report.errors[0].message,
-//             "Literal mismatch: expected '**strong**', found '**bold**'"
-//         );
-//         assert_eq!(report.source_content, input_str);
-//         assert_eq!(report.errors.len(), 1);
-//         assert_eq!(report.errors[0].byte_start, 0);
-//         assert_eq!(report.errors[0].byte_end, 8);
-//         assert_eq!(
-//             report.errors[0].message,
-//             "Literal mismatch: expected '**strong**', found '**bold**'"
-//         );
-//     }
-// }
+        assert_eq!(validator.last_input_str, "Updated input");
+    }
+}
