@@ -6,19 +6,19 @@ use crate::mdschema::{
 };
 use anyhow::Result;
 
-static BUFFER_SIZE: usize = 3;
+static BUFFER_SIZE: usize = 300;
 
 pub fn validate<R: Read>(schema_str: String, input: &mut R, filename: &str) -> Result<()> {
     let mut input_str = String::new();
     let mut buffer = [0; BUFFER_SIZE];
 
     let mut validator = ValidationZipperTree::new(schema_str.as_str(), input_str.as_str(), false)
-        .map_err(|e| anyhow::anyhow!("Failed to create validator: {}", e))?;
+        .ok_or_else(|| anyhow::anyhow!("Failed to create validator"))?;
 
     loop {
-        validator.validate();
-
         let bytes_read = input.read(&mut buffer)?;
+
+        // If we're done reading, mark EOF
         if bytes_read == 0 {
             if !validator.read_input(&input_str, true) {
                 return Err(anyhow::anyhow!("Failed to read final input"));
@@ -31,6 +31,11 @@ pub fn validate<R: Read>(schema_str: String, input: &mut R, filename: &str) -> R
 
         if !validator.read_input(&input_str, false) {
             return Err(anyhow::anyhow!("Failed to read input"));
+        }
+
+        let success = validator.validate();
+        if !success {
+            return Err(anyhow::anyhow!("Validation failed during input reading"));
         }
     }
 

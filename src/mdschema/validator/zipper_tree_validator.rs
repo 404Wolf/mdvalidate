@@ -1,8 +1,9 @@
+use line_col::LineColLookup;
 use tree_sitter::{Parser, Tree, TreeCursor};
 
 use crate::mdschema::{
     reports::{errors::ValidatorError, validation_report::ValidatorReport},
-    validator::validator::Validator,
+    validator::{node_validator::validate_a_node, validator::Validator},
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -72,6 +73,30 @@ impl Validator for ValidationZipperTree {
         self.got_eof = eof;
 
         let mut input_parser = new_markdown_parser();
+        // Calculate the range of new content
+        let old_len = self.input_tree.root_node().byte_range().end;
+        let new_len = input.len();
+
+        // Only parse if there's actually new content
+        if new_len <= old_len {
+            return self.got_eof == eof;
+        }
+
+        // Parse incrementally, providing the edit information
+        let edit = tree_sitter::InputEdit {
+            start_byte: old_len,
+            old_end_byte: old_len,
+            new_end_byte: new_len,
+            start_position: self.input_tree.root_node().end_position(),
+            old_end_position: self.input_tree.root_node().end_position(),
+            new_end_position: {
+                let lookup = LineColLookup::new(input);
+                let (row, col) = lookup.get(new_len);
+                tree_sitter::Point { row, column: col }
+            },
+        };
+
+        self.input_tree.edit(&edit);
 
         match input_parser.parse(input, Some(&self.input_tree)) {
             Some(parse) => {
@@ -121,13 +146,12 @@ impl ValidationZipperTree {
             // We may cause a shift to the current treecursors inside ourself by
             // calling this, but it is important that we "commit" the change by
             // actually updating the offsets after validating.
-            let (errors, (last_schema_tree_offset, last_input_tree_offset)) =
-                Self::validate_a_node(
-                    &mut input_cursor,
-                    &mut schema_cursor,
-                    &self.last_input_str.clone(),
-                    &self.schema_str.clone(),
-                );
+            let (errors, (last_schema_tree_offset, last_input_tree_offset)) = validate_a_node(
+                &mut input_cursor,
+                &mut schema_cursor,
+                &self.last_input_str,
+                &self.schema_str,
+            );
 
             self.last_schema_tree_offset = last_schema_tree_offset;
             self.last_input_tree_offset = last_input_tree_offset;
@@ -138,45 +162,8 @@ impl ValidationZipperTree {
         true
     }
 
-    /// Validate a single node using the corresponding schema node.
-    /// Then walk the cursors to the next nodes. Returns errors and new offsets.
-    fn validate_a_node(
-        input_cursor: &mut TreeCursor,
-        schema_cursor: &mut TreeCursor,
-        last_input_str: &str,
-        schema_str: &str,
-    ) -> (Vec<ValidatorError>, (usize, usize)) {
-        let input_node = input_cursor.node();
-        let schema_node = schema_cursor.node();
-        let mut errors = Vec::new();
-
-        // If there are no children, check if the literal matches
-        if input_node.child_count() == 0 {
-            let input_literal = &last_input_str[input_node.byte_range()];
-            let schema_literal = &schema_str[schema_node.byte_range()];
-
-            if input_literal != schema_literal {
-                let error = ValidatorError::from_offset(
-                    format!(
-                        "Literal mismatch: expected '{}', found '{}'",
-                        schema_literal, input_literal
-                    ),
-                    input_node.start_byte(),
-                    input_node.end_byte(),
-                    &last_input_str,
-                );
-                errors.push(error);
-            }
-        }
-
-        let new_schema_offset = schema_node.byte_range().end;
-        let new_input_offset = input_node.byte_range().end;
-
-        (errors, (new_schema_offset, new_input_offset))
-    }
-
     /// Get a TreeCursor at the correct offset.
-    fn get_cursor_at_offset(tree: &Tree, offset: usize) -> Option<TreeCursor> {
+    fn get_cursor_at_offset(tree: &'_ Tree, offset: usize) -> Option<TreeCursor<'_>> {
         let mut cursor = tree.walk();
 
         // Move to the correct offset
