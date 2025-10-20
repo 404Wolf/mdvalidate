@@ -17,23 +17,15 @@ pub fn validate<R: Read>(schema_str: String, input: &mut R, filename: &str) -> R
 
         // If we're done reading, mark EOF
         if bytes_read == 0 {
-            if !validator.read_input(&input_str, true) {
-                return Err(anyhow::anyhow!("Failed to read final input"));
-            }
+            validator.read_input(&input_str, true)?;
             break;
         }
 
         let new_text = std::str::from_utf8(&buffer[..bytes_read])?;
         input_str.push_str(new_text);
 
-        if !validator.read_input(&input_str, false) {
-            return Err(anyhow::anyhow!("Failed to read input"));
-        }
-
-        let success = validator.validate();
-        if !success {
-            return Err(anyhow::anyhow!("Validation failed during input reading"));
-        }
+        validator.read_input(&input_str, false)?;
+        validator.validate()?;
     }
 
     let report = validator.report();

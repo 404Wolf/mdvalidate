@@ -1,8 +1,7 @@
 #import "template.typ": *
 
 #show: template.with(
-  title: "Software Requirements Specification",
-  author: "Wolf Mermelstein and Alessandro Mason",
+  title: "Software Requirements Specification", author: "Wolf Mermelstein and Alessandro Mason",
 )
 
 = Introduction
@@ -377,8 +376,7 @@ command line. It will also offer a library interface for integration into other
 tools, and will expose itself as a simple Rust crate (library).
 
 #figure(
-  image("./images/interpreter.png", width: 80%),
-  caption: [MDValidate is like an interpreter],
+  image("./images/interpreter.png", width: 80%), caption: [MDValidate is like an interpreter],
 )
 
 You will use it by running commands that roughly look like
@@ -416,8 +414,7 @@ _Speed_
 
 Complete validation within 20ms for 1.3k characters (which is about twice as
 long as it takes for #link(
-  "the official `jsoncschema` validator",
-  "https://github.com/sourcemeta/jsonschema",
+  "the official `jsoncschema` validator", "https://github.com/sourcemeta/jsonschema",
 ) to validate a JSON schema of about 1k characters)
 
 _Reliability_

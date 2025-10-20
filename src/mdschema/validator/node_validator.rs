@@ -30,34 +30,13 @@ impl<'a> BiNodeValidator<'a> {
     pub fn validate(&self) -> (Vec<ValidatorError>, (usize, usize)) {
         let mut errors = Vec::new();
 
-        print!("{}", self);
-        // atx_heading[0..13]: "# Test `test`"
-        //   atx_h1_marker[0..1]: "#"
-        //   heading_content[1..13]: " Test `test`"
-        //     text[1..7]: " Test "
-        //     code_span[7..13]: "`test`"
-        //       text[8..12]: "test"
-
         // If the current node is "text" then we check for literal match
 
         let input_node = self.input_cursor.node();
         let schema_node = self.schema_cursor.node();
 
         if schema_node.kind() == "text" {
-            let schema_text = &self.schema_str[schema_node.byte_range()];
-            let input_text = &self.input_str[input_node.byte_range()];
-
-            if schema_text != input_text {
-                errors.push(ValidatorError::from_offset(
-                    format!(
-                        "Literal mismatch: expected '{}', found '{}'",
-                        schema_text, input_text
-                    ),
-                    input_node.byte_range().start,
-                    input_node.byte_range().end,
-                    self.input_str,
-                ));
-            }
+            errors.extend(self.validate_text_node());
         } else {
             // If the current node has children that include `code_span` AND
             // `text` then we must handle this specially.
@@ -69,54 +48,28 @@ impl<'a> BiNodeValidator<'a> {
         (errors, (new_input_offset, new_schema_offset))
     }
 
-    fn node_to_string_recursive(&self, node: tree_sitter::Node, depth: usize) -> String {
-        let indent = "  ".repeat(depth);
-        let mut result = format!(
-            "{}{}[{}..{}]",
-            indent,
-            node.kind(),
-            node.byte_range().start,
-            node.byte_range().end
-        );
+    fn validate_text_node(&self) -> Vec<ValidatorError> {
+        let mut errors = Vec::new();
 
-        if node.child_count() == 0 {
-            let text = &self.input_str[node.byte_range()];
-            result.push_str(&format!(": {:?}", text));
-        }
-
-        result.push('\n');
-
-        let mut cursor = node.walk();
-        if cursor.goto_first_child() {
-            loop {
-                result.push_str(&self.node_to_string_recursive(cursor.node(), depth + 1));
-                if !cursor.goto_next_sibling() {
-                    break;
-                }
-            }
-        }
-
-        result
-    }
-}
-
-impl std::fmt::Display for BiNodeValidator<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let input_node = self.input_cursor.node();
         let schema_node = self.schema_cursor.node();
 
-        writeln!(
-            f,
-            "Input Node:\n{}",
-            self.node_to_string_recursive(input_node, 0)
-        )?;
-        writeln!(
-            f,
-            "Schema Node:\n{}",
-            self.node_to_string_recursive(schema_node, 0)
-        )?;
+        let schema_text = &self.schema_str[schema_node.byte_range()];
+        let input_text = &self.input_str[input_node.byte_range()];
 
-        Ok(())
+        if schema_text != input_text {
+            errors.push(ValidatorError::from_offset(
+                format!(
+                    "Literal mismatch: expected '{}', found '{}'",
+                    schema_text, input_text
+                ),
+                input_node.byte_range().start,
+                input_node.byte_range().end,
+                self.input_str,
+            ));
+        }
+
+        errors
     }
 }
 
@@ -132,4 +85,36 @@ pub fn validate_a_node(
 ) -> (Vec<ValidatorError>, (usize, usize)) {
     let validator = BiNodeValidator::new(input_cursor, schema_cursor, last_input_str, schema_str);
     validator.validate()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mdschema::validator::utils::new_markdown_parser;
+
+    use super::*;
+
+    #[test]
+    fn test_validate_only_two_text_nodes() {
+        let input = "Hello, world!";
+        let schema = "Hello, world!";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser.parse(input, None).unwrap();
+        let input_node = input_tree.root_node().child(0).unwrap().child(0).unwrap();
+        assert!(input_node.kind() == "text", "Got {}", input_node.kind());
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser.parse(schema, None).unwrap();
+        let schema_node = schema_tree.root_node().child(0).unwrap().child(0).unwrap();
+        assert!(schema_node.kind() == "text", "Got {}", schema_node.kind());
+
+        let input_cursor = input_node.walk();
+        let schema_cursor = schema_node.walk();
+
+        let (errors, (input_offset, schema_offset)) =
+            validate_a_node(&input_cursor, &schema_cursor, input, schema);
+
+        assert!(errors.is_empty());
+        assert_eq!(input_offset, schema_offset);
+    }
 }

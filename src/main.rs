@@ -21,7 +21,7 @@ struct Args {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let schema_str = args.schema.to_str().ok_or("Invalid schema path")?;
-    let schema_src = std::fs::read_to_string(schema_str)?;
+    let schema_src = std::fs::read_to_string(schema_str)?.trim_end().to_string();
 
     let filename = {
         if args.input == "-" {
