@@ -11,30 +11,7 @@
 #let fill-color = luma(250)
 
 #let template(
-  title: [Your Title],
-  author: "Author",
-  paper-size: "a4",
-  date: none,
-  date-format: "[month repr:long] [day padding:zero], [year repr:full]",
-  abstract: none,
-  preface: none,
-  table-of-contents: outline(),
-  bibliography: none,
-  chapter-pagebreak: true,
-  external-link-circle: true,
-  figure-index: (
-    enabled: false,
-    title: "",
-  ),
-  table-index: (
-    enabled: false,
-    title: "",
-  ),
-  listing-index: (
-    enabled: false,
-    title: "",
-  ),
-  body,
+  title: [Your Title], author: "Author", paper-size: "a4", date: none, date-format: "[month repr:long] [day padding:zero], [year repr:full]", abstract: none, preface: none, table-of-contents: outline(), bibliography: none, chapter-pagebreak: true, external-link-circle: true, figure-index: (enabled: false, title: ""), table-index: (enabled: false, title: ""), listing-index: (enabled: false, title: ""), body,
 ) = {
   set document(title: title, author: author)
 
@@ -49,15 +26,13 @@
     }
   }
 
-  set page(
-    paper: paper-size,
-    margin: (bottom: 1.75cm, top: 2.25cm),
-  )
+  set page(paper: paper-size, margin: (bottom: 1.75cm, top: 2.25cm))
 
   page(
     align(
-      left + horizon,
-      block(width: 90%)[
+      left + horizon, block(
+        width: 90%,
+      )[
         #v(-1.5in)
 
         #let v-space = v(2em, weak: true)
@@ -68,7 +43,9 @@
 
         #if abstract != none {
           v-space
-          block(width: 80%)[
+          block(
+            width: 80%,
+          )[
             // Default leading is 0.65em.
             #par(leading: 0.78em, justify: true, linebreaks: "optimized", abstract)
           ]
@@ -82,7 +59,9 @@
     ),
   )
 
-  set par(leading: 0.7em, spacing: 1.35em, justify: true, linebreaks: "optimized")
+  set par(
+    leading: 0.7em, spacing: 1.35em, justify: true, linebreaks: "optimized",
+  )
 
   show heading: it => {
     it
@@ -96,7 +75,9 @@
       sym.wj
       h(1.6pt)
       sym.wj
-      super(box(height: 3.8pt, circle(radius: 1.2pt, stroke: 0.7pt + rgb("#993333"))))
+      super(
+        box(height: 3.8pt, circle(radius: 1.2pt, stroke: 0.7pt + rgb("#993333"))),
+      )
     }
   }
 
@@ -108,54 +89,46 @@
     table-of-contents
   }
 
-  set page(
-    footer: context {
-      let i = counter(page).at(here()).first()
+  set page(footer: context{
+    let i = counter(page).at(here()).first()
 
-      let is-odd = calc.odd(i)
-      let aln = if is-odd {
-        right
-      } else {
-        left
-      }
+    let is-odd = calc.odd(i)
+    let aln = if is-odd {
+      right
+    } else {
+      left
+    }
 
-      let target = heading.where(level: 1)
-      if query(target).any(it => it.location().page() == i) {
-        return align(aln)[#i]
-      }
+    let target = heading.where(level: 1)
+    if query(target).any(it => it.location().page() == i) {
+      return align(aln)[#i]
+    }
 
-      let before = query(target.before(here()))
-      if before.len() > 0 {
-        let current = before.last()
-        let gap = 1.75em
-        let chapter = upper(text(size: 0.68em, current.body))
-        if current.numbering != none {
-          if is-odd {
-            align(aln)[#chapter #h(gap) #i]
-          } else {
-            align(aln)[#i #h(gap) #chapter]
-          }
+    let before = query(target.before(here()))
+    if before.len() > 0 {
+      let current = before.last()
+      let gap = 1.75em
+      let chapter = upper(text(size: 0.68em, current.body))
+      if current.numbering != none {
+        if is-odd {
+          align(aln)[#chapter #h(gap) #i]
+        } else {
+          align(aln)[#i #h(gap) #chapter]
         }
       }
-    },
-  )
+    }
+  })
 
   set math.equation(numbering: "(1)")
 
   show raw.where(block: false): box.with(
-    fill: fill-color.darken(2%),
-    inset: (x: 3pt, y: 0pt),
-    outset: (y: 3pt),
-    radius: 2pt,
+    fill: fill-color.darken(2%), inset: (x: 3pt, y: 0pt), outset: (y: 3pt), radius: 2pt,
   )
 
   show raw.where(block: true): block.with(inset: (x: 5pt))
 
   show figure.where(kind: table): set block(breakable: true)
-  set table(
-    inset: 7pt,
-    stroke: (0.5pt + stroke-color),
-  )
+  set table(inset: 7pt, stroke: (0.5pt + stroke-color))
   show table.cell.where(y: 0): smallcaps
 
   {
@@ -191,20 +164,17 @@
 
       if imgs {
         outline(
-          title: figure-index.at("title", default: "Index of Figures"),
-          target: fig-t(image),
+          title: figure-index.at("title", default: "Index of Figures"), target: fig-t(image),
         )
       }
       if tbls {
         outline(
-          title: table-index.at("title", default: "Index of Tables"),
-          target: fig-t(table),
+          title: table-index.at("title", default: "Index of Tables"), target: fig-t(table),
         )
       }
       if lsts {
         outline(
-          title: listing-index.at("title", default: "Index of Listings"),
-          target: fig-t(raw),
+          title: listing-index.at("title", default: "Index of Listings"), target: fig-t(raw),
         )
       }
     }
@@ -213,10 +183,6 @@
 
 #let blockquote(body) = {
   block(
-    width: 100%,
-    fill: fill-color,
-    inset: 2em,
-    stroke: (y: 0.5pt + stroke-color),
-    body,
+    width: 100%, fill: fill-color, inset: 2em, stroke: (y: 0.5pt + stroke-color), body,
   )
 }

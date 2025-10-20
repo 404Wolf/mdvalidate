@@ -33,49 +33,27 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            nil
-            nixd
-            nixfmt
-            typst
-            cargo
-            rustc
-            mermaid-cli
-            rust-analyzer
-            fira-mono
-          ];
+          RUST_LOG = "trace";
+          packages = (
+            with pkgs;
+            [
+              nil
+              nixd
+              nixfmt
+              typst
+              cargo
+              rustc
+              mermaid-cli
+              rust-analyzer
+              fira-mono
+            ]
+          );
         };
 
         formatter = treefmtEval.config.build.wrapper;
 
         checks = {
-          # formatting = treefmtEval.config.build.check self;
-          clippy =
-            let
-              cargoVendorDeps = pkgs.rustPlatform.fetchCargoVendor {
-                name = "mdvalidate-vendor";
-                hash = "sha256-PFkpHwe/L7okA+p4Zzj917Wb5gNRJJ9Ei0MTg2xMlVI=";
-                src = ./.;
-              };
-            in
-            pkgs.runCommandLocal "clippy-check"
-              {
-                src = ./.;
-                nativeBuildInputs = with pkgs; [
-                  cargo
-                  rustc
-                  clippy
-                ];
-                CARGO_HOME = cargoVendorDeps;
-              }
-              ''
-                cp -r ${./.} .
-                cd *source
-                export CARGO_HOME=${cargoVendorDeps}
-                export CARGO_NET_OFFLINE=true
-                cargo clippy --all-targets --all-features -- -D warnings
-                mkdir $out
-              '';
+          formatting = treefmtEval.config.build.check self;
         };
       }
     );
