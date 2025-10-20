@@ -18,6 +18,13 @@
       system:
       let
         pkgs = import nixpkgs { inherit system; };
+
+        treefmtEval = treefmt.lib.evalModule pkgs {
+          projectRootFile = "flake.nix";
+          programs.nixfmt.enable = true;
+          programs.yamlfmt.enable = true;
+          programs.typstfmt.enable = true;
+        };
       in
       {
         packages = rec {
@@ -43,16 +50,11 @@
           );
         };
 
-        formatter =
-          let
-            treefmtconfig = treefmt.lib.evalModule pkgs {
-              projectRootFile = "flake.nix";
-              programs.nixfmt.enable = true;
-              programs.yamlfmt.enable = true;
-              programs.typstfmt.enable = true;
-            };
-          in
-          treefmtconfig.config.build.wrapper;
+        formatter = treefmtEval.config.build.wrapper;
+
+        checks = {
+          formatting = treefmtEval.config.build.check self;
+        };
       }
     );
 }
