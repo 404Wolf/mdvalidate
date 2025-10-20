@@ -327,9 +327,6 @@ mod tests {
         let initial_input = "";
         let schema = "Hello\n\nWorld";
 
-        let mut parser = new_markdown_parser();
-        let tree = parser.parse(schema, None).expect("Failed to parse schema");
-
         let mut validator =
             Validator::new(schema, initial_input, false).expect("Failed to create validator");
 

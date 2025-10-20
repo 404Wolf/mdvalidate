@@ -40,7 +40,7 @@ fn node_to_str_rec(node: tree_sitter::Node, input_str: &str, depth: usize) -> St
 pub fn new_markdown_parser() -> Parser {
     let mut parser = Parser::new();
     parser
-        .set_language(tree_sitter_markdown::language())
+        .set_language(&tree_sitter_markdown::language())
         .unwrap();
     parser
 }
