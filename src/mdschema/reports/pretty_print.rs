@@ -3,7 +3,7 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 
 /// Pretty prints a ValidatorReport using
 /// [ariadne](https://github.com/zesterer/ariadne) for nice formatting.
-/// 
+///
 /// Returns a String containing the formatted report, or an error message if
 /// formatting fails with a message.
 pub fn pretty_print_report(report: &ValidatorReport, filename: &str) -> Result<String, String> {

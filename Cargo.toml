@@ -4,11 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.100"
 ariadne = "0.5.1"
 clap = { version = "4.5.48", features = ["derive"] }
+env_logger = "0.10.0"
+line-col = "0.2.1"
 log = "0.4.28"
-tree-sitter = "0.19.5"
-tree-sitter-markdown = "0.7.1"
+tree-sitter = "0.25.10"
+tree-sitter-markdown = { git = "https://github.com/404wolf/tree-sitter-markdown.git" }
 
 [build-dependencies]
 cc="*"

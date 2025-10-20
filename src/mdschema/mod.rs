@@ -1,4 +1,4 @@
 pub mod reports;
 pub mod validator;
 
-pub use validator::zipper_tree_validator::ValidationZipperTree;
+pub use validator::validator::Validator;
