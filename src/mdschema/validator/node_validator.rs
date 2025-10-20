@@ -1,4 +1,4 @@
-use crate::mdschema::reports::errors::ValidatorError;
+use crate::{cmd::validate, mdschema::reports::errors::ValidatorError};
 use tree_sitter::TreeCursor;
 
 /// A validator for individual tree nodes that compares input nodes against schema nodes.
@@ -7,6 +7,9 @@ pub struct BiNodeValidator<'a> {
     schema_cursor: &'a TreeCursor<'a>,
     input_str: &'a str,
     schema_str: &'a str,
+    pub errors: Vec<ValidatorError>,
+    pub input_offset: usize,
+    pub schema_offset: usize,
 }
 
 impl<'a> BiNodeValidator<'a> {
@@ -22,30 +25,63 @@ impl<'a> BiNodeValidator<'a> {
             schema_cursor,
             input_str,
             schema_str,
+            errors: Vec::new(),
+            input_offset: input_cursor.node().byte_range().end,
+            schema_offset: schema_cursor.node().byte_range().end,
         }
     }
 
     /// Validate a single node using the corresponding schema node.
-    /// Returns validation errors and new byte offsets for both input and schema.
-    pub fn validate(&self) -> (Vec<ValidatorError>, (usize, usize)) {
-        let mut errors = Vec::new();
-
+    /// Mutates the internal errors and offset fields.
+    pub fn validate(&mut self) {
         // If the current node is "text" then we check for literal match
 
-        let input_node = self.input_cursor.node();
-        let schema_node = self.schema_cursor.node();
+        let input_cursor = self.input_cursor;
+        let schema_cursor = self.schema_cursor;
 
-        if schema_node.kind() == "text" {
-            errors.extend(self.validate_text_node());
-        } else {
-            // If the current node has children that include `code_span` AND
-            // `text` then we must handle this specially.
+        let input_node = input_cursor.node();
+        let schema_node = schema_cursor.node();
+
+        let mut nodes_to_validate: Vec<(TreeCursor, TreeCursor)> =
+            vec![(input_cursor.clone(), schema_cursor.clone())];
+
+        while let Some((mut input_cursor, mut schema_cursor)) = nodes_to_validate.pop() {
+            let input_node = input_cursor.node();
+            let schema_node = schema_cursor.node();
+
+            if schema_node.kind() == "text" {
+                self.errors.extend(self.validate_text_node());
+            } else {
+                let input_node_children =
+                    input_node.children(&mut input_cursor).collect::<Vec<_>>();
+
+                let schema_node_children =
+                    schema_node.children(&mut schema_cursor).collect::<Vec<_>>();
+
+                let schema_node_code_children = schema_node
+                    .children(&mut schema_cursor.clone())
+                    .filter(|n| n.kind() == "code_span")
+                    .collect::<Vec<_>>();
+
+                println!("Schema node kind: {}", schema_node.kind());
+                println!("Input node kind: {}", input_node.kind());
+
+                if schema_node_code_children.is_empty() {
+                    for (input_child, schema_child) in
+                        input_node_children.iter().zip(schema_node_children.iter())
+                    {
+                        nodes_to_validate.push((input_child.walk(), schema_child.walk()));
+                    }
+                } else {
+                    todo!(
+                        "Non-text node validation with code_span children is not yet implemented"
+                    );
+                }
+            }
         }
 
-        let new_schema_offset = schema_node.byte_range().end;
-        let new_input_offset = input_node.byte_range().end;
-
-        (errors, (new_input_offset, new_schema_offset))
+        self.schema_offset = schema_node.byte_range().end;
+        self.input_offset = input_node.byte_range().end;
     }
 
     fn validate_text_node(&self) -> Vec<ValidatorError> {
@@ -76,15 +112,20 @@ impl<'a> BiNodeValidator<'a> {
 /// Validate a single node using the corresponding schema node.
 /// Then walk the cursors to the next nodes. Returns errors and new offsets.
 ///
-/// This function is kept for backward compatibility. Consider using NodeValidator::validate() instead.
+/// This function is kept for backward compatibility. Consider using BiNodeValidator::validate() instead.
 pub fn validate_a_node(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
     last_input_str: &str,
     schema_str: &str,
 ) -> (Vec<ValidatorError>, (usize, usize)) {
-    let validator = BiNodeValidator::new(input_cursor, schema_cursor, last_input_str, schema_str);
-    validator.validate()
+    let mut validator =
+        BiNodeValidator::new(input_cursor, schema_cursor, last_input_str, schema_str);
+    validator.validate();
+    (
+        validator.errors,
+        (validator.input_offset, validator.schema_offset),
+    )
 }
 
 #[cfg(test)]
@@ -107,6 +148,102 @@ mod tests {
         let schema_tree = schema_parser.parse(schema, None).unwrap();
         let schema_node = schema_tree.root_node().child(0).unwrap().child(0).unwrap();
         assert!(schema_node.kind() == "text", "Got {}", schema_node.kind());
+
+        let input_cursor = input_node.walk();
+        let schema_cursor = schema_node.walk();
+
+        let (errors, (input_offset, schema_offset)) =
+            validate_a_node(&input_cursor, &schema_cursor, input, schema);
+
+        assert!(errors.is_empty());
+        assert_eq!(input_offset, schema_offset);
+    }
+
+    #[test]
+    fn test_validate_two_different_text_nodes() {
+        let input = "Hello, world!";
+        let schema = "Hello, everyone!";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser.parse(input, None).unwrap();
+        let input_node = input_tree.root_node().child(0).unwrap().child(0).unwrap();
+        assert!(input_node.kind() == "text", "Got {}", input_node.kind());
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser.parse(schema, None).unwrap();
+        let schema_node = schema_tree.root_node().child(0).unwrap().child(0).unwrap();
+        assert!(schema_node.kind() == "text", "Got {}", schema_node.kind());
+
+        let input_cursor = input_node.walk();
+        let schema_cursor = schema_node.walk();
+
+        let (errors, (input_offset, schema_offset)) =
+            validate_a_node(&input_cursor, &schema_cursor, input, schema);
+
+        assert!(!errors.is_empty());
+        assert_eq!(
+            errors[0].message,
+            "Literal mismatch: expected 'Hello, everyone!', found 'Hello, world!'"
+        );
+        assert_eq!(input_offset, input.len());
+        assert_eq!(schema_offset, schema.len());
+    }
+
+    #[test]
+    fn test_validate_two_paragraph_nodes_with_same_text() {
+        let input = "This is a paragraph.";
+        let schema = "This is a paragraph.";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser.parse(input, None).unwrap();
+        let input_node = input_tree.root_node().child(0).unwrap();
+        assert!(
+            input_node.kind() == "paragraph",
+            "Got {}",
+            input_node.kind()
+        );
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser.parse(schema, None).unwrap();
+        let schema_node = schema_tree.root_node().child(0).unwrap();
+        assert!(
+            schema_node.kind() == "paragraph",
+            "Got {}",
+            schema_node.kind()
+        );
+
+        let input_cursor = input_node.walk();
+        let schema_cursor = schema_node.walk();
+
+        let (errors, (input_offset, schema_offset)) =
+            validate_a_node(&input_cursor, &schema_cursor, input, schema);
+
+        assert!(errors.is_empty());
+        assert_eq!(input_offset, schema_offset);
+    }
+
+    #[test]
+    fn test_validate_two_h1_h2_paragraph_with_same_text() {
+        let input = "# Heading\n\nThis is a paragraph.";
+        let schema = "# Heading\n\nThis is a paragraph.";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser.parse(input, None).unwrap();
+        let input_node = input_tree.root_node().child(0).unwrap();
+        assert!(
+            input_node.kind() == "atx_heading",
+            "Got {}",
+            input_node.kind()
+        );
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser.parse(schema, None).unwrap();
+        let schema_node = schema_tree.root_node().child(0).unwrap();
+        assert!(
+            schema_node.kind() == "atx_heading",
+            "Got {}",
+            schema_node.kind()
+        );
 
         let input_cursor = input_node.walk();
         let schema_cursor = schema_node.walk();
