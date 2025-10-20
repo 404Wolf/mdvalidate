@@ -11,3 +11,5 @@ jobs:
         uses: cachix/install-nix-action@v31
       - name: Run flake check
         run: nix flake check
+      - name: Run cargo check
+        run: nix develop --command cargo check
