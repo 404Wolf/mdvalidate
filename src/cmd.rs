@@ -1,9 +1,6 @@
 use std::io::Read;
 
-use crate::mdschema::{
-    reports::pretty_print::pretty_print_report, validator::validator::Validator,
-    ValidationZipperTree,
-};
+use crate::mdschema::{reports::pretty_print::pretty_print_report, Validator};
 use anyhow::Result;
 
 static BUFFER_SIZE: usize = 300;
@@ -12,7 +9,7 @@ pub fn validate<R: Read>(schema_str: String, input: &mut R, filename: &str) -> R
     let mut input_str = String::new();
     let mut buffer = [0; BUFFER_SIZE];
 
-    let mut validator = ValidationZipperTree::new(schema_str.as_str(), input_str.as_str(), false)
+    let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
         .ok_or_else(|| anyhow::anyhow!("Failed to create validator"))?;
 
     loop {

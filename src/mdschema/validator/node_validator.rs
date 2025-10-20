@@ -2,14 +2,14 @@ use crate::mdschema::reports::errors::ValidatorError;
 use tree_sitter::TreeCursor;
 
 /// A validator for individual tree nodes that compares input nodes against schema nodes.
-pub struct NodeValidator<'a> {
+pub struct BiNodeValidator<'a> {
     input_cursor: &'a TreeCursor<'a>,
     schema_cursor: &'a TreeCursor<'a>,
     input_str: &'a str,
     schema_str: &'a str,
 }
 
-impl<'a> NodeValidator<'a> {
+impl<'a> BiNodeValidator<'a> {
     /// Create a new NodeValidator instance.
     pub fn new(
         input_cursor: &'a TreeCursor<'a>,
@@ -30,6 +30,7 @@ impl<'a> NodeValidator<'a> {
     pub fn validate(&self) -> (Vec<ValidatorError>, (usize, usize)) {
         let mut errors = Vec::new();
 
+        print!("{}", self);
         // atx_heading[0..13]: "# Test `test`"
         //   atx_h1_marker[0..1]: "#"
         //   heading_content[1..13]: " Test `test`"
@@ -67,6 +68,56 @@ impl<'a> NodeValidator<'a> {
 
         (errors, (new_input_offset, new_schema_offset))
     }
+
+    fn node_to_string_recursive(&self, node: tree_sitter::Node, depth: usize) -> String {
+        let indent = "  ".repeat(depth);
+        let mut result = format!(
+            "{}{}[{}..{}]",
+            indent,
+            node.kind(),
+            node.byte_range().start,
+            node.byte_range().end
+        );
+
+        if node.child_count() == 0 {
+            let text = &self.input_str[node.byte_range()];
+            result.push_str(&format!(": {:?}", text));
+        }
+
+        result.push('\n');
+
+        let mut cursor = node.walk();
+        if cursor.goto_first_child() {
+            loop {
+                result.push_str(&self.node_to_string_recursive(cursor.node(), depth + 1));
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+        }
+
+        result
+    }
+}
+
+impl std::fmt::Display for BiNodeValidator<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let input_node = self.input_cursor.node();
+        let schema_node = self.schema_cursor.node();
+
+        writeln!(
+            f,
+            "Input Node:\n{}",
+            self.node_to_string_recursive(input_node, 0)
+        )?;
+        writeln!(
+            f,
+            "Schema Node:\n{}",
+            self.node_to_string_recursive(schema_node, 0)
+        )?;
+
+        Ok(())
+    }
 }
 
 /// Validate a single node using the corresponding schema node.
@@ -79,6 +130,6 @@ pub fn validate_a_node(
     last_input_str: &str,
     schema_str: &str,
 ) -> (Vec<ValidatorError>, (usize, usize)) {
-    let validator = NodeValidator::new(input_cursor, schema_cursor, last_input_str, schema_str);
+    let validator = BiNodeValidator::new(input_cursor, schema_cursor, last_input_str, schema_str);
     validator.validate()
 }
