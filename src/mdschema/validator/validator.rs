@@ -18,9 +18,9 @@ pub struct Validator {
     input_tree: Tree,
     /// The schema tree, which does not change after initialization.
     schema_tree: Tree,
-    /// The last descendant index we validated up to in the schema tree.
+    /// The last descendant index we validated up to in the schema tree. In preorder.
     last_schema_descendant_index: usize,
-    /// The last descendant index we validated up to in the input tree.
+    /// The last descendant index we validated up to in the input tree. In preorder.
     last_input_descendant_index: usize,
     /// Any errors encountered during validation.
     errors: Vec<ValidatorError>,
