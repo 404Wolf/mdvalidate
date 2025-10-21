@@ -197,10 +197,10 @@ impl<'a> BiNodeValidator<'a> {
             debug!("Text mismatch found");
             errors.push(ValidatorError::from_offset(
                 format!(
-                    "Literal mismatch: expected '{}', found '{}'",
+                    "Literal mismatch: expected \"{}\", found \"{}\"",
                     schema_text, input_text
                 ),
-                input_node.byte_range().start,
+                input_node.byte_range().start + 1,
                 input_node.byte_range().end,
                 self.input_str,
             ));
