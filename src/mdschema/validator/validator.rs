@@ -7,7 +7,7 @@ use crate::mdschema::{
     reports::{errors::ValidatorError, validation_report::ValidatorReport},
     validator::{
         binode_validator::validate_a_node,
-        utils::{get_total_descendants, new_markdown_parser, node_to_str},
+        utils::{new_markdown_parser, node_to_str},
     },
 };
 
@@ -179,8 +179,8 @@ impl Validator {
         // Walk up until the end. `self.last_input_str` will not change while
         // this is running since this blocks the thread.
 
-        let input_tree_total_descendants = get_total_descendants(&self.input_tree);
-        let schema_tree_total_descendants = get_total_descendants(&self.schema_tree);
+        let input_tree_total_descendants = self.input_tree.root_node().descendant_count();
+        let schema_tree_total_descendants = self.schema_tree.root_node().descendant_count();
 
         // Check if we've already validated everything we can
         if self.last_input_descendant_index >= input_tree_total_descendants

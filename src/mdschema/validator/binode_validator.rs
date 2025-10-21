@@ -138,7 +138,10 @@ impl<'a> BiNodeValidator<'a> {
 
         self.input_descendant_index = last_input_cursor.descendant_index();
         self.schema_descendant_index = last_schema_cursor.descendant_index();
-        print!("Final indices: input_descendant_index={}, schema_descendant_index={}\n", self.input_descendant_index, self.schema_descendant_index);
+        print!(
+            "Final indices: input_descendant_index={}, schema_descendant_index={}\n",
+            self.input_descendant_index, self.schema_descendant_index
+        );
 
         // If EOF is false, we should move back to the previous descendant in the schema
         // TODO: Is this right?
@@ -225,7 +228,10 @@ pub fn validate_a_node(
 
     (
         validator.errors,
-        (validator.input_descendant_index, validator.schema_descendant_index),
+        (
+            validator.input_descendant_index,
+            validator.schema_descendant_index,
+        ),
     )
 }
 
