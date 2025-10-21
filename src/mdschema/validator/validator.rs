@@ -207,18 +207,17 @@ impl Validator {
             node_to_str(input_cursor.node(), &self.last_input_str)
         );
 
-        let (errors, (_last_input_descendant_index, _last_schema_descendant_index)) =
-            validate_a_node(
-                &mut input_cursor,
-                &mut schema_cursor,
-                &self.last_input_str,
-                &self.schema_str,
-                self.got_eof,
-            );
+        let (errors, (last_input_descendant_index, last_schema_descendant_index)) = validate_a_node(
+            &mut input_cursor,
+            &mut schema_cursor,
+            &self.last_input_str,
+            &self.schema_str,
+            self.got_eof,
+        );
 
         // Update to the end of the trees since we validated the entire tree
-        self.last_input_descendant_index = input_tree_total_descendants;
-        self.last_schema_descendant_index = schema_tree_total_descendants;
+        self.last_input_descendant_index = last_input_descendant_index;
+        self.last_schema_descendant_index = last_schema_descendant_index;
         self.errors.extend(errors);
 
         Ok(())
@@ -347,20 +346,51 @@ mod tests {
 
     #[test]
     fn test_validation_should_fail_with_mismatched_content() {
-        let schema = "# Test
+        let schema = "# Test\n\nfooobar\n\ntest\n";
+        let input = "# Test\n\nfooobar\n\ntestt\n";
 
-    fooobar
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
 
-    test
+        validator.validate().expect("Failed to validate");
 
-    ";
-        let input = "# Test
+        let report = validator.report();
+        assert!(
+            !report.errors.is_empty(),
+            "Expected validation errors but found none"
+        );
+        assert!(
+            !report.is_valid(),
+            "Expected validation to fail but it passed"
+        );
+    }
 
-    fooobar
+    #[test]
+    fn test_validation_passes_with_different_whitespace() {
+        let schema = "# Test\n\nfooobar\n\ntest\n";
+        let input = "# Test\n\n\nfooobar\n\n\n\ntest\n\n";
 
-    testt
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
 
-    ";
+        validator.validate().expect("Failed to validate");
+
+        let report = validator.report();
+        assert!(
+            report.errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            report.errors
+        );
+        assert!(
+            report.is_valid(),
+            "Expected validation to pass with different whitespace"
+        );
+    }
+
+    #[test]
+    fn test_validation_should_fail_with_mismatched_content_using_escaped_newlines() {
+        let schema = "# Test\n\nfooobar\n\ntest\n";
+        let input = "# Test\n\nfooobar\n\ntestt\n";
 
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
