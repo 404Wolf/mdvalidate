@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use line_col::LineColLookup;
 use log::debug;
-use tree_sitter::{Tree, TreeCursor};
+use tree_sitter::Tree;
 
 use crate::mdschema::{
     reports::{errors::ValidatorError, validation_report::ValidatorReport},
@@ -18,10 +18,10 @@ pub struct Validator {
     input_tree: Tree,
     /// The schema tree, which does not change after initialization.
     schema_tree: Tree,
-    /// The last byte offset we validated up to in the schema tree.
-    last_schema_tree_offset: usize,
-    /// The last byte offset we validated up to in the input tree.
-    last_input_tree_offset: usize,
+    /// The last descendant index we validated up to in the schema tree. In preorder.
+    last_schema_descendant_index: usize,
+    /// The last descendant index we validated up to in the input tree. In preorder.
+    last_input_descendant_index: usize,
     /// Any errors encountered during validation.
     errors: Vec<ValidatorError>,
     /// The full input string as last read. Not used internally but useful for
@@ -30,7 +30,7 @@ pub struct Validator {
     /// The full schema string. Does not change.
     schema_str: String,
     /// Whether we have received the end of the input. This means that last
-    /// input tree offset is at the end of the input.
+    /// input tree descendant index is at the end of the input.
     got_eof: bool,
 }
 
@@ -71,8 +71,8 @@ impl Validator {
         Some(Validator {
             input_tree,
             schema_tree,
-            last_input_tree_offset: 0,
-            last_schema_tree_offset: 0,
+            last_input_descendant_index: 0,
+            last_schema_descendant_index: 0,
             errors: Vec::new(),
             last_input_str: input_str.to_string(),
             schema_str: schema_str.to_string(),
@@ -82,15 +82,15 @@ impl Validator {
 
     /// Read new input. Updates the input tree with a new input tree for the full new input.
     ///
-    /// Does not update the schema tree or change the offsets. You will still
+    /// Does not update the schema tree or change the descendant indices. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
     pub fn read_input(&mut self, input: &str, eof: bool) -> Result<()> {
         debug!(
-            "Reading new input: length={}, eof={}, current_offset={}",
+            "Reading new input: length={}, eof={}, current_index={}",
             input.len(),
             eof,
-            self.last_input_tree_offset
+            self.last_input_descendant_index
         );
 
         // Update internal state of the last input string
@@ -141,6 +141,10 @@ impl Validator {
         match input_parser.parse(input, Some(&self.input_tree)) {
             Some(parse) => {
                 self.input_tree = parse;
+                // Reset both indices since the tree structure may have changed
+                // We need to re-validate from the beginning
+                self.last_input_descendant_index = 0;
+                self.last_schema_descendant_index = 0;
                 Ok(())
             }
             None => Err(anyhow!("Failed to parse input")),
@@ -151,8 +155,8 @@ impl Validator {
     /// we left off.
     pub fn validate(&mut self) -> Result<()> {
         debug!(
-            "Starting validation from input_offset={}, schema_offset={}",
-            self.last_input_tree_offset, self.last_schema_tree_offset
+            "Starting validation from input_index={}, schema_index={}",
+            self.last_input_descendant_index, self.last_schema_descendant_index
         );
 
         // With our current understanding of state, validate until the end of the input
@@ -167,99 +171,56 @@ impl Validator {
     }
 
     /// Validate nodes and walk until the end of the input tree, starting from
-    /// the current offsets.
+    /// the current descendant indices.
     ///
     /// Uses `validate_node` to validate each node and move the cursors forward.
-    /// Directly mutates the last_offsets in the struct.
+    /// Directly mutates the last_descendant_indices in the struct.
     fn validate_nodes_from_offset_to_end_of_input(&mut self) -> Result<()> {
         // Walk up until the end. `self.last_input_str` will not change while
         // this is running since this blocks the thread.
 
-        if self.last_input_tree_offset >= self.input_tree.walk().node().end_byte() {
+        let input_tree_total_descendants = self.input_tree.root_node().descendant_count();
+        let schema_tree_total_descendants = self.schema_tree.root_node().descendant_count();
+
+        // Check if we've already validated everything we can
+        if self.last_input_descendant_index >= input_tree_total_descendants
+            && self.last_schema_descendant_index >= schema_tree_total_descendants
+        {
             // Nothing to do
-            debug!("No validation needed - already at end of input");
+            debug!("No validation needed - already at end of both trees");
             return Ok(());
         }
 
-        let mut input_cursor =
-            match Self::get_cursor_at_offset(&self.input_tree, self.last_input_tree_offset) {
-                Some(cursor) => cursor,
-                None => {
-                    return Err(anyhow!(
-                        "Failed to get input cursor at offset {}. Input tree has {} bytes",
-                        self.last_input_tree_offset,
-                        self.input_tree.root_node().byte_range().end
-                    ))
-                }
-            };
+        let mut input_cursor = self.input_tree.walk();
+        input_cursor.goto_descendant(self.last_input_descendant_index);
 
-        let mut schema_cursor =
-            match Self::get_cursor_at_offset(&self.schema_tree, self.last_schema_tree_offset) {
-                Some(cursor) => cursor,
-                None => {
-                    return Err(anyhow!(
-                        "Failed to get schema cursor at offset {}. Schema tree has {} bytes",
-                        self.last_schema_tree_offset,
-                        self.schema_tree.root_node().byte_range().end
-                    ))
-                }
-            };
+        let mut schema_cursor = self.schema_tree.walk();
+        schema_cursor.goto_descendant(self.last_schema_descendant_index);
 
-        while self.last_input_tree_offset < input_cursor.node().end_byte() {
-            // We may cause a shift to the current treecursors inside ourself by
-            // calling this, but it is important that we "commit" the change by
-            // actually updating the offsets after validating.
-            // print the input cursor and schema cursor
-            print!(
-                "Schema cursor expr {}",
-                node_to_str(schema_cursor.node(), &self.schema_str)
-            );
-            print!(
-                "Input cursor expr {}",
-                node_to_str(input_cursor.node(), &self.last_input_str)
-            );
-
-            let (errors, (last_input_tree_offset, last_schema_tree_offset)) = validate_a_node(
-                &mut input_cursor,
-                &mut schema_cursor,
-                &self.last_input_str,
-                &self.schema_str,
-                self.got_eof,
-            );
-
-            self.last_schema_tree_offset = last_schema_tree_offset;
-            self.last_input_tree_offset = last_input_tree_offset;
-
-            self.errors.extend(errors);
-        }
-
-        Ok(())
-    }
-
-    /// Get a TreeCursor at the correct offset.
-    fn get_cursor_at_offset(tree: &'_ Tree, offset: usize) -> Option<TreeCursor<'_>> {
-        // print the tree and offset
+        // Validate once starting from the current position
         print!(
-            "Getting cursor at offset {} in tree: {}\n\n",
-            offset,
-            tree.root_node().to_sexp()
+            "Schema cursor expr {}",
+            node_to_str(schema_cursor.node(), &self.schema_str)
+        );
+        print!(
+            "Input cursor expr {}",
+            node_to_str(input_cursor.node(), &self.last_input_str)
         );
 
-        // The nested non root "first child for byte" for offset zero is the
-        // first "thing," like the first paragraph. We want it to be the actual
-        // root document.
-        if offset == 0 {
-            return Some(tree.walk());
-        }
+        let (errors, (last_input_descendant_index, last_schema_descendant_index)) = validate_a_node(
+            &mut input_cursor,
+            &mut schema_cursor,
+            &self.last_input_str,
+            &self.schema_str,
+            self.got_eof,
+        );
 
-        let mut cursor = tree.walk();
+        // Update to the end of the trees since we validated the entire tree
+        self.last_input_descendant_index = last_input_descendant_index;
+        self.last_schema_descendant_index = last_schema_descendant_index;
+        self.errors.extend(errors);
 
-        // Move to the correct offset
-        if cursor.goto_first_child_for_byte(offset).is_some() {
-            Some(cursor)
-        } else {
-            None
-        }
+        Ok(())
     }
 }
 
@@ -385,20 +346,51 @@ mod tests {
 
     #[test]
     fn test_validation_should_fail_with_mismatched_content() {
-        let schema = "# Test
+        let schema = "# Test\n\nfooobar\n\ntest\n";
+        let input = "# Test\n\nfooobar\n\ntestt\n";
 
-    fooobar
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
 
-    test
+        validator.validate().expect("Failed to validate");
 
-    ";
-        let input = "# Test
+        let report = validator.report();
+        assert!(
+            !report.errors.is_empty(),
+            "Expected validation errors but found none"
+        );
+        assert!(
+            !report.is_valid(),
+            "Expected validation to fail but it passed"
+        );
+    }
 
-    fooobar
+    #[test]
+    fn test_validation_passes_with_different_whitespace() {
+        let schema = "# Test\n\nfooobar\n\ntest\n";
+        let input = "# Test\n\n\nfooobar\n\n\n\ntest\n\n";
 
-    testt
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
 
-    ";
+        validator.validate().expect("Failed to validate");
+
+        let report = validator.report();
+        assert!(
+            report.errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            report.errors
+        );
+        assert!(
+            report.is_valid(),
+            "Expected validation to pass with different whitespace"
+        );
+    }
+
+    #[test]
+    fn test_validation_should_fail_with_mismatched_content_using_escaped_newlines() {
+        let schema = "# Test\n\nfooobar\n\ntest\n";
+        let input = "# Test\n\nfooobar\n\ntestt\n";
 
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
