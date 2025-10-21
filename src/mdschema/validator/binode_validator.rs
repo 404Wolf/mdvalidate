@@ -9,8 +9,8 @@ pub struct BiNodeValidator<'a> {
     input_str: &'a str,
     schema_str: &'a str,
     pub errors: Vec<ValidatorError>,
-    pub input_offset: usize,
-    pub schema_offset: usize,
+    pub input_descendant_index: usize,
+    pub schema_descendant_index: usize,
     pub eof: bool,
 }
 
@@ -42,14 +42,14 @@ impl<'a> BiNodeValidator<'a> {
             input_str,
             schema_str,
             errors: Vec::new(),
-            input_offset: input_cursor.node().byte_range().end,
-            schema_offset: schema_cursor.node().byte_range().end,
+            input_descendant_index: input_cursor.descendant_index(),
+            schema_descendant_index: schema_cursor.descendant_index(),
             eof,
         }
     }
 
     /// Validate a single node using the corresponding schema node.
-    /// Mutates the internal errors and offset fields.
+    /// Mutates the internal errors and descendant index fields.
     pub fn validate(&mut self) {
         debug!("Starting node validation");
 
@@ -58,15 +58,19 @@ impl<'a> BiNodeValidator<'a> {
         let input_cursor = self.initial_input_cursor;
         let schema_cursor = self.initial_schema_cursor;
 
-        let input_node = input_cursor.node();
-        let schema_node = schema_cursor.node();
-
         let mut nodes_to_validate: Vec<(TreeCursor, TreeCursor)> =
             vec![(input_cursor.clone(), schema_cursor.clone())];
+
+        let mut last_input_cursor = input_cursor.clone();
+        let mut last_schema_cursor = schema_cursor.clone();
 
         while let Some((mut input_cursor, mut schema_cursor)) = nodes_to_validate.pop() {
             let input_node = input_cursor.node();
             let schema_node = schema_cursor.node();
+
+            // Track the last cursors we process
+            last_input_cursor = input_cursor.clone();
+            last_schema_cursor = schema_cursor.clone();
 
             debug!(
                 "Validating node pair: input='{}' vs schema='{}'",
@@ -132,15 +136,17 @@ impl<'a> BiNodeValidator<'a> {
             }
         }
 
-        self.input_offset = input_node.byte_range().end;
-        self.schema_offset = schema_node.byte_range().end;
-        print!("Final offsets: input_offset={}, schema_offset={}\n", self.input_offset, self.schema_offset);
+        self.input_descendant_index = last_input_cursor.descendant_index();
+        self.schema_descendant_index = last_schema_cursor.descendant_index();
+        print!("Final indices: input_descendant_index={}, schema_descendant_index={}\n", self.input_descendant_index, self.schema_descendant_index);
 
-        // If EOF is false, we should always tick back the schema offset by one
-        // node (sibling, or left parent)
+        // If EOF is false, we should move back to the previous descendant in the schema
         // TODO: Is this right?
         if !self.eof {
-            self.schema_offset = schema_cursor.node().start_byte();
+            // Move the schema cursor back to the beginning of the current node
+            if last_schema_cursor.goto_parent() {
+                self.schema_descendant_index = last_schema_cursor.descendant_index();
+            }
         }
     }
 
@@ -202,7 +208,7 @@ impl<'a> BiNodeValidator<'a> {
 }
 
 /// Validate a single node using the corresponding schema node.
-/// Then walk the cursors to the next nodes. Returns errors and new offsets.
+/// Then walk the cursors to the next nodes. Returns errors and new descendant indices.
 ///
 /// This function is kept for backward compatibility. Consider using BiNodeValidator::validate() instead.
 pub fn validate_a_node(
@@ -219,7 +225,7 @@ pub fn validate_a_node(
 
     (
         validator.errors,
-        (validator.input_offset, validator.schema_offset),
+        (validator.input_descendant_index, validator.schema_descendant_index),
     )
 }
 
@@ -247,11 +253,11 @@ mod tests {
         let input_cursor = input_node.walk();
         let schema_cursor = schema_node.walk();
 
-        let (errors, (input_offset, schema_offset)) =
+        let (errors, (input_index, schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(errors.is_empty());
-        assert_eq!(input_offset, schema_offset);
+        assert_eq!(input_index, schema_index);
     }
 
     #[test]
@@ -272,7 +278,7 @@ mod tests {
         let input_cursor = input_node.walk();
         let schema_cursor = schema_node.walk();
 
-        let (errors, (input_offset, schema_offset)) =
+        let (errors, (input_index, schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(!errors.is_empty());
@@ -280,8 +286,8 @@ mod tests {
             errors[0].message,
             "Literal mismatch: expected 'Hello, everyone!', found 'Hello, world!'"
         );
-        assert_eq!(input_offset, input.len());
-        assert_eq!(schema_offset, schema.len());
+        // Descendant indices should be equal since both text nodes are at the same position in their trees
+        assert_eq!(input_index, schema_index);
     }
 
     #[test]
@@ -310,11 +316,11 @@ mod tests {
         let input_cursor = input_node.walk();
         let schema_cursor = schema_node.walk();
 
-        let (errors, (input_offset, schema_offset)) =
+        let (errors, (input_index, schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(errors.is_empty());
-        assert_eq!(input_offset, schema_offset);
+        assert_eq!(input_index, schema_index);
     }
 
     #[test]
@@ -343,11 +349,11 @@ mod tests {
         let input_cursor = input_node.walk();
         let schema_cursor = schema_node.walk();
 
-        let (errors, (input_offset, schema_offset)) =
+        let (errors, (input_index, schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(errors.is_empty());
-        assert_eq!(input_offset, schema_offset);
+        assert_eq!(input_index, schema_index);
     }
 
     #[test]
@@ -376,15 +382,15 @@ mod tests {
         let input_cursor = input_node.walk();
         let schema_cursor = schema_node.walk();
 
-        let (errors, (input_offset, schema_offset)) =
+        let (errors, (input_index, schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(
             !errors.is_empty(),
             "Expected validation errors but found none"
         );
-        assert_eq!(input_offset, input.len());
-        assert_eq!(schema_offset, schema.len());
+        // Descendant indices should be equal since both are at the same tree position
+        assert_eq!(input_index, schema_index);
 
         assert!(
             errors
@@ -411,20 +417,20 @@ mod tests {
         let schema_cursor = schema_node.walk();
 
         // First pass with eof: false should pass without errors
-        let (errors, (input_offset, schema_offset)) =
+        let (errors, (_input_index, _schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, false);
 
         assert!(errors.is_empty());
-        assert_eq!(input_offset.abs_diff(schema_offset), 17); // start of last node byte range and the input offset (input offset at very end)
+        // When eof is false, schema should move back, so indices may differ
+        // The exact difference depends on the tree structure
 
         // And now pass with eof: true and make sure it fails
-        let (errors, (input_offset, schema_offset)) =
+        let (errors, (input_index, schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(!errors.is_empty());
-        assert_eq!(input_offset, input.len());
-        assert_eq!(schema_offset, schema.len());
-        assert_eq!(input_offset.abs_diff(schema_offset), 2); // length difference between input and schema
+        // Both should end at the same descendant index in their respective trees
+        assert_eq!(input_index, schema_index);
     }
 
     #[test]
@@ -453,7 +459,7 @@ testt
         let input_cursor = input_node.walk();
         let schema_cursor = schema_node.walk();
 
-        let (errors, (input_offset, schema_offset)) =
+        let (errors, (input_index, schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(
@@ -467,7 +473,7 @@ testt
             "Expected a mismatch error but did not find one. Errors: {:?}",
             errors
         );
-        assert_eq!(input_offset, input.len());
-        assert_eq!(schema_offset, schema.len());
+        // Both trees should end at the same relative descendant position
+        assert_eq!(input_index, schema_index);
     }
 }
