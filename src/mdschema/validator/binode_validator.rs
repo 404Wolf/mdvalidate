@@ -288,9 +288,10 @@ mod tests {
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(!errors.is_empty());
+        println!("Errors: {:?}", errors);
         assert_eq!(
             errors[0].message,
-            "Literal mismatch: expected 'Hello, everyone!', found 'Hello, world!'"
+            "Literal mismatch: expected \"Hello, everyone!\", found \"Hello, world!\""
         );
         // Descendant indices should be equal since both text nodes are at the same position in their trees
         assert_eq!(input_index, schema_index);
