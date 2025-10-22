@@ -7,20 +7,22 @@ use crate::mdschema::{
 use anyhow::Result;
 use log::{debug, info, trace};
 
-static BUFFER_SIZE: usize = 3000;
+static DEFAULT_BUFFER_SIZE: usize = 2048;
 
 pub fn validate<R: Read>(
     schema_str: String,
     input: &mut R,
     filename: &str,
 ) -> Result<ValidatorReport> {
+    let buffer_size = get_buffer_size();
+
     debug!("Starting validation for file: {}", filename);
     debug!("Schema length: {} characters", schema_str.len());
 
     let mut input_str = String::new();
-    let mut buffer = [0; BUFFER_SIZE];
+    let mut buffer = vec![0; buffer_size];
 
-    debug!("Creating validator with buffer size: {}", BUFFER_SIZE);
+    debug!("Creating validator with buffer size: {}", buffer_size);
     let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
         .ok_or_else(|| anyhow::anyhow!("Failed to create validator"))?;
 
@@ -87,6 +89,13 @@ pub fn validate<R: Read>(
     debug!("Validation function completed for file: {}", filename);
 
     Ok(report)
+}
+
+fn get_buffer_size() -> usize {
+    std::env::var("BUFFER_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_BUFFER_SIZE)
 }
 
 #[cfg(test)]
