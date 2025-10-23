@@ -5,6 +5,7 @@ use crate::mdschema::{
     Validator,
 };
 use anyhow::Result;
+use colored::*;
 use log::{debug, info, trace};
 
 static DEFAULT_BUFFER_SIZE: usize = 2048;
@@ -82,8 +83,7 @@ pub fn validate<R: Read>(
         info!("Validation completed with issues found");
         println!("{}", pretty);
     } else {
-        info!("Validation completed successfully - no issues found");
-        println!("Validation success!");
+        println!("{}", "Validation success! Input matches schema.".green());
     }
 
     debug!("Validation function completed for file: {}", filename);
