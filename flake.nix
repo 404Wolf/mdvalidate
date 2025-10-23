@@ -32,8 +32,8 @@
           build = pkgs.callPackage ./nix/build.nix { };
         };
 
-        devShells.default = pkgs.mkShell {
-          packages = (
+          devShells.default = pkgs.mkShell {
+            packages = (
             with pkgs;
             [
               nil
@@ -49,6 +49,8 @@
           );
           shellHook = ''
             export PATH=$PATH:target/debug
+            export LLVM_COV=${pkgs.llvmPackages_latest.llvm}/bin/llvm-cov
+            export LLVM_PROFDATA=${pkgs.llvmPackages_latest.llvm}/bin/llvm-profdata
           '';
         };
 
