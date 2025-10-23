@@ -388,6 +388,29 @@ mod tests {
     }
 
     #[test]
+    fn test_validation_with_nested_list_and_mismatch() {
+        _ = env_logger::builder().is_test(true).try_init();
+
+        let schema = "# test  \n\n\n## This is a test\n\n- Test\n  - Test layer 2 a\n";
+        let input =  "# test  \n\n\n## This is a test\n\n- Test\n  - Test layer 2 a\n  - Test layer 2 b\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate().expect("Failed to validate");
+
+        let report = validator.report();
+        assert!(
+            !report.errors.is_empty(),
+            "Expected validation errors but found none"
+        );
+        assert!(
+            !report.is_valid(),
+            "Expected validation to fail due to nested list mismatch"
+        );
+    }
+
+    #[test]
     fn test_validation_should_fail_with_mismatched_content_using_escaped_newlines() {
         let schema = "# Test\n\nfooobar\n\ntest\n";
         let input = "# Test\n\nfooobar\n\ntestt\n";
