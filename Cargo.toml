@@ -1,5 +1,5 @@
 [package]
-name = "mdvalidate"
+name = "mdv"
 version = "0.1.0"
 edition = "2021"
 

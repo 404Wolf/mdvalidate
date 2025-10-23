@@ -48,6 +48,9 @@
               fira-mono
             ]
           );
+          shellHook = ''
+            export PATH=$PATH:target/debug
+          '';
         };
 
         formatter = treefmtEval.config.build.wrapper;
