@@ -14,7 +14,6 @@ use crate::cmd::validate;
 #[command(version, about = "Validate MDS files against a schema")]
 struct Args {
     /// Schema file (typically your .mds file)
-    #[arg(short, long)]
     schema: PathBuf,
     /// Input Markdown file or "-" for stdin
     input: String,
