@@ -36,6 +36,7 @@
             packages = (
             with pkgs;
             [
+              perf
               nil
               nixd
               nixfmt
