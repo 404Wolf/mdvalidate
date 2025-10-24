@@ -32,8 +32,8 @@
           build = pkgs.callPackage ./nix/build.nix { };
         };
 
-          devShells.default = pkgs.mkShell {
-            packages = (
+        devShells.default = pkgs.mkShell {
+          packages = (
             with pkgs;
             [
               perf

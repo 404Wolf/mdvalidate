@@ -133,7 +133,7 @@ impl<'a> BiNodeValidator<'a> {
                     }
                 } else {
                     self.errors
-                        .extend(self.validate_matcher_node(&input_node, &schema_node))
+                        .extend(self.validate_matcher_node(&input_node, &schema_node_code_children))
                 }
             }
         }
@@ -175,15 +175,27 @@ impl<'a> BiNodeValidator<'a> {
     /// A matcher node looks like `id:/pattern/` in the schema.
     ///
     /// Pass the parent of the matcher node, and the corresponding input node.
-    fn validate_matcher_node(&self, input_node: &Node, schema_node: &Node) -> Vec<ValidatorError> {
+    fn validate_matcher_node(&self, input_node: &Node, code_nodes: &[Node]) -> Vec<ValidatorError> {
         let input_node_text = &self.input_str[input_node.byte_range()];
         println!("Validating matcher node against input: {}", input_node_text);
 
-        let matcher_text = schema_node
-            .child(0)
-            .expect("Schema node should have had a child")
-            .utf8_text(self.schema_str.as_bytes())
-            .unwrap_or("");
+        // They can only have one matcher per node for now. For example:
+        // `a:/abc+/` cchi `b:hi`
+        if code_nodes.len() > 1 {
+            return vec![ValidatorError::from_offset(
+                format!(
+                    "Multiple matchers in a single node are not supported (found {})",
+                    code_nodes.len()
+                ),
+                input_node.byte_range().start,
+                input_node.byte_range().end,
+                self.input_str,
+            )];
+        }
+
+        let code_node = code_nodes[0];
+
+        let matcher_text = &self.schema_str[code_node.byte_range()];
 
         let matcher = Matcher::new(matcher_text);
 
@@ -204,8 +216,8 @@ impl<'a> BiNodeValidator<'a> {
             Err(e) => {
                 return vec![ValidatorError::from_offset(
                     format!("Invalid matcher pattern '{}': {}", matcher_text, e),
-                    schema_node.byte_range().start,
-                    schema_node.byte_range().end,
+                    code_node.byte_range().start,
+                    code_node.byte_range().end,
                     self.schema_str,
                 )];
             }

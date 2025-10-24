@@ -14,10 +14,12 @@ mod test {
         validator.report()
     }
 
-    pub fn report_has_error_with_str_includes(report: &ValidatorReport, search_str: &str) -> bool {
+    pub fn report_has_error_that_matches(report: &ValidatorReport, pattern: &str) -> bool {
+        let regex = regex::Regex::new(pattern).unwrap();
+
         report
             .errors
             .iter()
-            .any(|error| error.message.contains(search_str))
+            .any(|error| regex.is_match(&error.message))
     }
 }
