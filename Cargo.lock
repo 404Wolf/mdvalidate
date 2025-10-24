@@ -1169,6 +1169,7 @@ dependencies = [
  "flamegraph",
  "line-col",
  "log",
+ "regex",
  "tree-sitter",
  "tree-sitter-markdown",
 ]

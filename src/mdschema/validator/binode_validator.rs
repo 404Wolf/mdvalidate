@@ -1,4 +1,7 @@
-use crate::mdschema::{reports::errors::ValidatorError, validator::utils::node_to_str};
+use crate::mdschema::{
+    reports::errors::ValidatorError,
+    validator::{matcher::Matcher, utils::node_to_str},
+};
 use log::debug;
 use tree_sitter::{Node, TreeCursor};
 
@@ -129,9 +132,8 @@ impl<'a> BiNodeValidator<'a> {
                         nodes_to_validate.push((input_child.walk(), schema_child.walk()));
                     }
                 } else {
-                    todo!(
-                        "Non-text node validation with code_span children is not yet implemented"
-                    );
+                    self.errors
+                        .extend(self.validate_matcher_node(&input_node, &schema_node))
                 }
             }
         }
@@ -168,6 +170,54 @@ impl<'a> BiNodeValidator<'a> {
         errors
     }
 
+    /// Validate a matcher node against the input node.
+    ///
+    /// A matcher node looks like `id:/pattern/` in the schema.
+    ///
+    /// Pass the parent of the matcher node, and the corresponding input node.
+    fn validate_matcher_node(&self, input_node: &Node, schema_node: &Node) -> Vec<ValidatorError> {
+        let input_node_text = &self.input_str[input_node.byte_range()];
+        println!("Validating matcher node against input: {}", input_node_text);
+
+        let matcher_text = schema_node
+            .child(0)
+            .expect("Schema node should have had a child")
+            .utf8_text(self.schema_str.as_bytes())
+            .unwrap_or("");
+
+        let matcher = Matcher::new(matcher_text);
+
+        match matcher {
+            Ok(matcher) => {
+                if !matcher.is_match(input_node_text) {
+                    return vec![ValidatorError::from_offset(
+                        format!(
+                            "Matcher mismatch: input '{}' does not conform to {}",
+                            input_node_text, matcher
+                        ),
+                        input_node.byte_range().start,
+                        input_node.byte_range().end,
+                        self.input_str,
+                    )];
+                }
+            }
+            Err(e) => {
+                return vec![ValidatorError::from_offset(
+                    format!("Invalid matcher pattern '{}': {}", matcher_text, e),
+                    schema_node.byte_range().start,
+                    schema_node.byte_range().end,
+                    self.schema_str,
+                )];
+            }
+        }
+
+        Vec::new()
+    }
+
+    /// Validate a text node against the schema text node.
+    ///
+    /// This is a node that is just a simple literal text node. We validate that
+    /// the text content is identical.
     fn validate_text_node(&self, input_node: &Node, schema_node: &Node) -> Vec<ValidatorError> {
         debug!("Validating text node content");
 
@@ -284,6 +334,7 @@ mod tests {
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(!errors.is_empty());
+        println!("Errors: {:?}", errors);
         assert_eq!(
             errors[0].message,
             "Literal mismatch: expected \"Hello, everyone!\", found \"Hello, world!\""

@@ -11,6 +11,7 @@ colored = "3.0.0"
 env_logger = "0.10.0"
 line-col = "0.2.1"
 log = "0.4.28"
+regex = "1.12.2"
 tree-sitter = "0.25.10"
 tree-sitter-markdown = { git = "https://github.com/404wolf/tree-sitter-markdown.git" }
 
