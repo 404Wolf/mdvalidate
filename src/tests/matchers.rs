@@ -40,12 +40,39 @@ mod tests {
 
     #[test]
     fn test_matcher_for_single_list_item() {
-        let report = get_report("- item1\n- item2", "- `id:/item1/`\n- `id:/item2/`");
+        let report = get_report("- item1\n- item2", "- `id:/item\\d/`\n- `id:/item2/`");
 
         print!("{:?}", report);
         assert!(
             report.is_valid(),
             "Report should be valid for matching list items"
         );
+    }
+
+    #[test]
+    fn test_matcher_for_wrong_node_types() {
+        let report = get_report("- item1\n- item2", "`id:/item1/`\n- `id:/item3/`");
+
+        print!("{:?}", report);
+        assert!(
+            !report.is_valid(),
+            "Report should be invalid for mismatched list items"
+        );
+        assert!(report_has_error_that_matches(&report, "Node mismatch"));
+    }
+
+    #[test]
+    fn test_mismatched_list_items() {
+        let report = get_report("- item1\n- item2", "- `id:/item1/`\n- `id:/item3/`");
+
+        print!("{:?}", report);
+        assert!(
+            !report.is_valid(),
+            "Report should be invalid for mismatched list items"
+        );
+        assert!(report_has_error_that_matches(
+            &report,
+            "Matcher mismatch: input 'item2' does not"
+        ));
     }
 }
