@@ -32,11 +32,11 @@
           build = pkgs.callPackage ./nix/build.nix { };
         };
 
-        devShells.default = pkgs.mkShell {
-          RUST_LOG = "trace";
-          packages = (
+          devShells.default = pkgs.mkShell {
+            packages = (
             with pkgs;
             [
+              perf
               nil
               nixd
               nixfmt
@@ -48,6 +48,11 @@
               fira-mono
             ]
           );
+          shellHook = ''
+            export PATH=$PATH:target/debug
+            export LLVM_COV=${pkgs.llvmPackages_latest.llvm}/bin/llvm-cov
+            export LLVM_PROFDATA=${pkgs.llvmPackages_latest.llvm}/bin/llvm-profdata
+          '';
         };
 
         formatter = treefmtEval.config.build.wrapper;

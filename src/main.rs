@@ -9,23 +9,34 @@ pub mod cmd;
 pub mod mdschema;
 
 use crate::cmd::validate;
+use colored::Colorize;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Validate MDS files against a schema")]
 struct Args {
     /// Schema file (typically your .mds file)
-    #[arg(short, long)]
     schema: PathBuf,
     /// Input Markdown file or "-" for stdin
     input: String,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize the logger
     env_logger::init();
 
     info!("Starting mdvalidate application");
 
+    let result = validate_main();
+    if let Err(ref e) = result {
+        println!("{}", format!("Error! {}", e).red());
+    } else {
+        debug!("mdvalidate application finished without errors");
+    }
+
+    info!("mdvalidate application completed successfully");
+    Ok(())
+}
+
+fn validate_main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     debug!(
         "Parsed command line arguments: schema={:?}, input={:?}",
@@ -62,6 +73,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         validate(schema_src, &mut reader, filename)?;
     }
 
-    info!("mdvalidate application completed successfully");
     Ok(())
 }

@@ -5,10 +5,7 @@ use tree_sitter::Tree;
 
 use crate::mdschema::{
     reports::{errors::ValidatorError, validation_report::ValidatorReport},
-    validator::{
-        binode_validator::validate_a_node,
-        utils::{new_markdown_parser, node_to_str},
-    },
+    validator::{binode_validator::validate_a_node, utils::new_markdown_parser},
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -196,16 +193,6 @@ impl Validator {
 
         let mut schema_cursor = self.schema_tree.walk();
         schema_cursor.goto_descendant(self.last_schema_descendant_index);
-
-        // Validate once starting from the current position
-        print!(
-            "Schema cursor expr {}",
-            node_to_str(schema_cursor.node(), &self.schema_str)
-        );
-        print!(
-            "Input cursor expr {}",
-            node_to_str(input_cursor.node(), &self.last_input_str)
-        );
 
         let (errors, (last_input_descendant_index, last_schema_descendant_index)) = validate_a_node(
             &mut input_cursor,

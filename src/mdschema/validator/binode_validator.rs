@@ -138,10 +138,6 @@ impl<'a> BiNodeValidator<'a> {
 
         self.input_descendant_index = last_input_cursor.descendant_index();
         self.schema_descendant_index = last_schema_cursor.descendant_index();
-        print!(
-            "Final indices: input_descendant_index={}, schema_descendant_index={}\n",
-            self.input_descendant_index, self.schema_descendant_index
-        );
 
         // If EOF is false, we should move back to the previous descendant in the schema
         // TODO: Is this right?
@@ -288,7 +284,6 @@ mod tests {
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
         assert!(!errors.is_empty());
-        println!("Errors: {:?}", errors);
         assert_eq!(
             errors[0].message,
             "Literal mismatch: expected \"Hello, everyone!\", found \"Hello, world!\""
