@@ -37,4 +37,15 @@ mod tests {
             "Multiple matchers in a single node are not supported"
         ))
     }
+
+    #[test]
+    fn test_matcher_for_single_list_item() {
+        let report = get_report("- item1\n- item2", "- `id:/item1/`\n- `id:/item2/`");
+
+        print!("{:?}", report);
+        assert!(
+            report.is_valid(),
+            "Report should be valid for matching list items"
+        );
+    }
 }
