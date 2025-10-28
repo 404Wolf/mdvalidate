@@ -290,7 +290,6 @@ For all the following test cases the steps are:
     [*Test Case*], [*Test Data*], [*Result*],
   ),
 
-  [Validator correctly updates last_input_str and input_tree],
   
   [Initial validate with EOF works],
   [#schema(```markdown
