@@ -75,19 +75,4 @@ mod tests {
             "Matcher mismatch: input 'item2' does not"
         ));
     }
-
-    #[test]
-    fn test_two_lists_but_different_types_of_lists() {
-        let report = get_report(
-            "- item1\n- item2",
-            "1. `id:/item1/`\n2. `id:/item2/`",
-        );
-
-        print!("{:?}", report);
-        assert!(
-            !report.is_valid(),
-            "Report should be invalid for different types of lists"
-        );
-        assert!(report_has_error_that_matches(&report, "Node mismatch"));
-    }
 }

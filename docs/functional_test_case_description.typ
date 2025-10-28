@@ -61,24 +61,32 @@
 
 == Product Description
 
-`Mdvalidate` ia a tool that allows the user to validate the shape of a Markdown by
+`mdvalidate` ia a tool that allows the user to validate the shape of a Markdown by
 declaring a schema and an input Markdown file.
 
 == Testing Environment
 
-- Hardware: Development machines Linux x86_64 and Apple Silicon M3
-- Software Linux NixOS and MacOS Tahoe 26.0.1
+x86_64 Linux github action test runner in a Nix development environment
 
-- Build system Nix for reproducible builds with the following dependencies:
-```toml
+We are developing in a Nix development shell defined by the following (subject to change)
+
+```nix
 devShells.default = pkgs.mkShell {
-  packages = with pkgs; [
-    cargo rustc rust-analyzer
-    typst mermaid-cli
-    nil nixd nixfmt
-    perf
-    fira-mono
-  ];
+  packages = (
+    with pkgs;
+    [
+      perf
+      nil
+      nixd
+      nixfmt
+      typst
+      cargo
+      rustc
+      mermaid-cli
+      rust-analyzer
+      fira-mono
+    ]
+  );
   shellHook = ''
     export PATH=$PATH:target/debug
     export LLVM_COV=${pkgs.llvmPackages_latest.llvm}/bin/llvm-cov
@@ -86,9 +94,43 @@ devShells.default = pkgs.mkShell {
   '';
 };
 ```
-- Test frameworks Rust's built-in test framework (#[test] annotations) with following dependencies:
+
+We also properly build our program for production via the following `nix` builder
+
+```nix
+{ lib, rustPlatform }:
+rustPlatform.buildRustPackage {
+  pname = "mdvalidate";
+  version = "0.1.0";
+
+  src = ../.;
+
+  cargoHash = "sha256-cujUmddyLvt0gMNYFXug9jDN+D6QUyzYQ542mVEYYnE=";
+
+  meta = {
+    description = "Markdown Schema validator";
+    homepage = "https://github.com/404Wolf/mdvalidate";
+    license = lib.licenses.mit;
+  };
+}
+```
+
+
+We are using Rust's
+#link("https://doc.rust-lang.org/rust-by-example/testing/unit_testing.html", "standard practice") of defining a test module, with test functions like
+`#[test]` via their #link("https://doc.rust-lang.org/beta/test/index.html", "testing framework"), which we run with `cargo test`.
+
+For completeness, we provide our full `Cargo.toml`, but highly encourage that if
+you decide to build our project that you make use of our `Cargo.lock` to ensure
+reformability.
 
 ```toml
+[package]
+name = "mdv"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
 anyhow = "1.0.100"
 ariadne = "0.5.1"
 clap = { version = "4.5.48", features = ["derive"] }
@@ -99,15 +141,30 @@ log = "0.4.28"
 regex = "1.12.2"
 tree-sitter = "0.25.10"
 tree-sitter-markdown = { git = "https://github.com/404wolf/tree-sitter-markdown.git" }
+
+[build-dependencies]
+cc="*"
+
+[dev-dependencies]
+cargo-llvm-cov = "0.6.21"
+flamegraph = "0.6.9"
 ```
 
 == Record of Changes
 
-+ Intially we planned to have multiple matchers in the same line but later realized it would create ambiguity and decided to not support it. (test case: Multiple matchers in single node)
+Initially we planned to have multiple matchers in the same line, for example
+
+```markdown
+# Hi `matcher1:/test+/` t `matcher2:/test+/`
+```
+
+However, since this would create ambiguity we decided to not support it (and
+added a corresponding test case expecting it to fail).
 
 = Features to be Tested
 
 For all the following test cases the steps are:
+
 + Create schema with regex matcher
 + Validate against matching input
 
@@ -281,115 +338,112 @@ For all the following test cases the steps are:
 
 
 
-== EOF Handling Tests 
+== EOF Handling Tests
 
 #table(
   columns: (1fr, 1fr, 1.5fr),
   align: (left, left, left),
-  table.header(
-    [*Test Case*], [*Test Data*], [*Result*],
-  ),
+  table.header([*Test Case*], [*Test Data*], [*Result*]),
 
-  
   [Initial validate with EOF works],
   [#schema(```markdown
-Hello World
-```)
-#good-example(```markdown
-Hello World
-```)],
+    Hello World
+    ```)
+    #good-example(```markdown
+    Hello World
+    ```)],
   [Validation passes with no errors when EOF is true],
-  
+
   [Initial validate without EOF - incomplete text],
   [#schema(```markdown
-Hello World
-```)
-#good-example(```markdown
-Hello Wo
-```)],
+    Hello World
+    ```)
+    #good-example(```markdown
+    Hello Wo
+    ```)],
   [Validation passes with no errors when EOF is false (incomplete input allowed)],
-  
+
   [Initially empty then read input],
   [#schema(```markdown
-Hello
+    Hello
 
-World
-```)
-Initial: ```markdown
+    World
+    ```)
+    Initial: ```markdown
 
-```
-Updated: ```markdown
-Hello
+    ```
+    Updated: ```markdown
+    Hello
 
-TEST World
-```],
+    TEST World
+    ```],
   [Empty input passes, then after reading "Hello\n\nTEST World" validation fails],
-  
+
   [Validate, read input, validate again],
   [#schema(```markdown
-Hello World
-```)
-Initial (EOF: false): ```markdown
-Hello Wo
-```
-Updated (EOF: true): ```markdown
-Hello World
-```],
+    Hello World
+    ```)
+    Initial (EOF: false): ```markdown
+    Hello Wo
+    ```
+    Updated (EOF: true): ```markdown
+    Hello World
+    ```],
   [First validation passes with incomplete input, second validation passes with complete input],
-  
+
   [Validation fails with mismatched content],
   [#schema(```markdown
-# Test
+    # Test
 
-fooobar
+    fooobar
 
-test
-```)
-#bad-example(```markdown
-# Test
+    test
+    ```)
+    #bad-example(```markdown
+    # Test
 
-fooobar
+    fooobar
 
-testt
-```)],
+    testt
+    ```)],
   [Validation fails due to text mismatch ("test" vs "testt")],
-  
+
   [Validation passes with different whitespace],
   [#schema(```markdown
-# Test
+    # Test
 
-fooobar
+    fooobar
 
-test
-```)
-#good-example(```markdown
-# Test
-
-
-fooobar
+    test
+    ```)
+    #good-example(```markdown
+    # Test
 
 
+    fooobar
 
-test
 
-```)],
+
+    test
+
+    ```)],
   [Validation passes - extra whitespace is ignored],
-  
+
   [Validation fails with escaped newlines],
   [#schema(```markdown
-# Test
+    # Test
 
-fooobar
+    fooobar
 
-test
-```)
-#bad-example(```markdown
-# Test
+    test
+    ```)
+    #bad-example(```markdown
+    # Test
 
-fooobar
+    fooobar
 
-testt
-```)],
+    testt
+    ```)],
   [Validation fails due to text mismatch with escaped newlines],
 )
 
