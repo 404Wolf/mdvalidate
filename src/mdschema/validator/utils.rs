@@ -2,18 +2,21 @@ use tree_sitter::Parser;
 
 #[allow(dead_code)]
 pub fn node_to_str(node: tree_sitter::Node, input_str: &str) -> String {
-    node_to_str_rec(node, input_str, 0)
+    let mut cursor = node.walk();
+    node_to_str_rec(&mut cursor, input_str, 0)
 }
 
 #[allow(dead_code)]
-fn node_to_str_rec(node: tree_sitter::Node, input_str: &str, depth: usize) -> String {
+fn node_to_str_rec(cursor: &mut tree_sitter::TreeCursor, input_str: &str, depth: usize) -> String {
+    let node = cursor.node();
     let indent = "  ".repeat(depth);
     let mut result = format!(
-        "{}{}[{}..{}]",
+        "{}{}[{}..{}]({})",
         indent,
         node.kind(),
         node.byte_range().start,
-        node.byte_range().end
+        node.byte_range().end,
+        cursor.descendant_index()
     );
 
     if node.child_count() == 0 {
@@ -23,14 +26,14 @@ fn node_to_str_rec(node: tree_sitter::Node, input_str: &str, depth: usize) -> St
 
     result.push('\n');
 
-    let mut cursor = node.walk();
     if cursor.goto_first_child() {
         loop {
-            result.push_str(&node_to_str_rec(cursor.node(), input_str, depth + 1));
+            result.push_str(&node_to_str_rec(cursor, input_str, depth + 1));
             if !cursor.goto_next_sibling() {
                 break;
             }
         }
+        cursor.goto_parent();
     }
 
     result

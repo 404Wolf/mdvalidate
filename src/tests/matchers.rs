@@ -4,7 +4,7 @@ mod tests {
 
     #[test]
     fn test_single_matcher_matches_good_regex() {
-        assert!(get_report("test", "`id:/test/`").is_valid());
+        assert!(get_report("test", "`id:/test/`").is_empty());
     }
 
     #[test]
@@ -12,8 +12,8 @@ mod tests {
         let report = get_report("testttt", "`id:/test/`");
         print!("{:?}", report);
         assert!(
-            !report.is_valid(),
-            "Report should be invalid due to regex mismatch"
+            !report.is_empty(),
+            "Report should have errors due to regex mismatch"
         );
         assert!(report_has_error_that_matches(
             &report,
@@ -29,8 +29,8 @@ mod tests {
 
         print!("{:?}", report);
         assert!(
-            !report.is_valid(),
-            "Report should be invalid due to multiple matchers"
+            !report.is_empty(),
+            "Report should have errors due to multiple matchers"
         );
         assert!(report_has_error_that_matches(
             &report,
@@ -44,8 +44,8 @@ mod tests {
 
         print!("{:?}", report);
         assert!(
-            report.is_valid(),
-            "Report should be valid for matching list items"
+            report.is_empty(),
+            "Report should have no errors for matching list items"
         );
     }
 
@@ -55,8 +55,8 @@ mod tests {
 
         print!("{:?}", report);
         assert!(
-            !report.is_valid(),
-            "Report should be invalid for mismatched list items"
+            !report.is_empty(),
+            "Report should have errors for mismatched list items"
         );
         assert!(report_has_error_that_matches(&report, "Node mismatch"));
     }
@@ -67,8 +67,8 @@ mod tests {
 
         print!("{:?}", report);
         assert!(
-            !report.is_valid(),
-            "Report should be invalid for mismatched list items"
+            !report.is_empty(),
+            "Report should have errors for mismatched list items"
         );
         assert!(report_has_error_that_matches(
             &report,

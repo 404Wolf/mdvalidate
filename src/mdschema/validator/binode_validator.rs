@@ -1,8 +1,10 @@
+use core::panic;
+
 use crate::mdschema::{
-    reports::errors::ValidatorError,
-    validator::{matcher::Matcher, utils::node_to_str},
+    reports::errors::{Error, SchemaViolationError},
+    validator::utils::node_to_str,
 };
-use log::debug;
+use log::{debug, warn};
 use tree_sitter::{Node, TreeCursor};
 
 /// A validator for individual tree nodes that compares input nodes against schema nodes.
@@ -11,7 +13,7 @@ pub struct BiNodeValidator<'a> {
     initial_schema_cursor: &'a TreeCursor<'a>,
     input_str: &'a str,
     schema_str: &'a str,
-    pub errors: Vec<ValidatorError>,
+    pub errors: Vec<Error>,
     pub input_descendant_index: usize,
     pub schema_descendant_index: usize,
     pub eof: bool,
@@ -51,6 +53,10 @@ impl<'a> BiNodeValidator<'a> {
         }
     }
 
+    fn root_node(&self) -> Node<'a> {
+        self.initial_input_cursor.node()
+    }
+
     /// Validate a single node using the corresponding schema node.
     /// Mutates the internal errors and descendant index fields.
     pub fn validate(&mut self) {
@@ -58,184 +64,86 @@ impl<'a> BiNodeValidator<'a> {
 
         // If the current node is "text" then we check for literal match
 
-        let input_cursor = self.initial_input_cursor;
-        let schema_cursor = self.initial_schema_cursor;
+        let mut input_cursor = self.initial_input_cursor.clone();
+        let mut schema_cursor = self.initial_schema_cursor.clone();
 
-        let mut nodes_to_validate: Vec<(TreeCursor, TreeCursor)> =
-            vec![(input_cursor.clone(), schema_cursor.clone())];
+        let root_input_descendant_index = input_cursor.descendant_index();
+        let root_schema_descendant_index = schema_cursor.descendant_index();
 
-        let mut last_input_cursor = input_cursor.clone();
-        let mut last_schema_cursor = schema_cursor.clone();
+        let nodes_to_validate = Vec::new(); // index of nodes to validate
 
-        while let Some((mut input_cursor, mut schema_cursor)) = nodes_to_validate.pop() {
+        let input_str = self.input_str;
+        let schema_str = self.schema_str;
+        let eof = self.eof;
+
+        loop {
             let input_node = input_cursor.node();
             let schema_node = schema_cursor.node();
 
-            // Track the last cursors we process
-            last_input_cursor = input_cursor.clone();
-            last_schema_cursor = schema_cursor.clone();
-
-            debug!(
-                "Validating node pair: input='{}' vs schema='{}'",
-                input_node.kind(),
-                schema_node.kind()
-            );
-
+            // If they are both text, directly compare them
             if schema_node.kind() == "text" {
                 debug!("Validating text node");
-                self.errors
-                    .extend(self.validate_text_node(&input_node, &schema_node));
-            } else {
-                debug!(
-                    "Validating non-text node: {} children vs {} schema children",
-                    input_node.child_count(),
-                    schema_node.child_count()
-                );
+                self.errors.extend(Self::validate_text_node_static(
+                    &input_node,
+                    input_cursor.descendant_index(),
+                    &schema_node,
+                    input_str,
+                    schema_str,
+                    eof,
+                    &input_node,
+                ));
+            } else { // Otherwise, look at their children
+                 // If the children of the schema node contains a matcher among
+                 // text nodes, and the input node is just text, we validate the
+                 // matcher using our matcher helper. It takes care of prefix/suffix
+                 // matching as well.
 
-                let input_node_children =
-                    input_node.children(&mut input_cursor).collect::<Vec<_>>();
 
-                let schema_node_children =
-                    schema_node.children(&mut schema_cursor).collect::<Vec<_>>();
-
-                debug!(
-                    "Input node has {} children, schema node has {} children",
-                    input_node_children.len(),
-                    schema_node_children.len()
-                );
-
-                let schema_node_code_children = schema_node
-                    .children(&mut schema_cursor.clone())
-                    .filter(|n| n.kind() == "code_span")
-                    .collect::<Vec<_>>();
-
-                if schema_node_code_children.is_empty() {
-                    for (input_child, schema_child) in
-                        // Check that they are the same node type
-                        input_node_children.iter().zip(schema_node_children.iter())
-                    {
-                        debug!(
-                            "Validating child node pair: input='{}' vs schema='{}'",
-                            input_child.kind(),
-                            schema_child.kind()
-                        );
-
-                        debug!(
-                            "Current trees for nodes we are appending,\nINPUT:\n{}\nSCHEMA:\n{}\n",
-                            node_to_str(*input_child, self.input_str),
-                            node_to_str(*schema_child, self.schema_str)
-                        );
-
-                        self.errors
-                            .extend(self.validate_child_nodes(input_child, schema_child));
-
-                        nodes_to_validate.push((input_child.walk(), schema_child.walk()));
-                    }
-                } else {
-                    self.errors
-                        .extend(self.validate_matcher_node(&input_node, &schema_node_code_children))
-                }
+                 // If there are no code nodes in the schema children, then it
+                 // may be a mix of nodes we must recurse on.
+                 // iterate over the children of both the schema and input nodes
+                 // in order using the walker, and push them to 
             }
         }
 
-        self.input_descendant_index = last_input_cursor.descendant_index();
-        self.schema_descendant_index = last_schema_cursor.descendant_index();
-
-        // If EOF is false, we should move back to the previous descendant in the schema
-        // TODO: Is this right?
-        if !self.eof {
-            // Move the schema cursor back to the beginning of the current node
-            if last_schema_cursor.goto_parent() {
-                self.schema_descendant_index = last_schema_cursor.descendant_index();
-            }
-        }
+        // self.input_descendant_index = root_input_descendant_index + offset;
+        // self.schema_descendant_index = root_schema_descendant_index + offset;
     }
 
-    fn validate_child_nodes(&self, input_node: &Node, schema_node: &Node) -> Vec<ValidatorError> {
+    fn validate_child_nodes_static<'b>(
+        input_node: &Node<'b>,
+        schema_node: &Node<'b>,
+    ) -> Vec<Error> {
         let mut errors = Vec::new();
 
         if input_node.kind() != schema_node.kind() {
-            errors.push(ValidatorError::from_offset(
-                format!(
-                    "Node mismatch: expected '{}', found '{}'",
-                    schema_node.kind(),
-                    input_node.kind()
+            errors.push(Error::SchemaViolation(
+                SchemaViolationError::NodeTypeMismatch(
+                    input_node.descendant_count(),
+                    schema_node.descendant_count(),
                 ),
-                input_node.byte_range().start,
-                input_node.byte_range().end,
-                self.input_str,
             ));
         }
 
         errors
     }
 
-    /// Validate a matcher node against the input node.
-    ///
-    /// A matcher node looks like `id:/pattern/` in the schema.
-    ///
-    /// Pass the parent of the matcher node, and the corresponding input node.
-    fn validate_matcher_node(&self, input_node: &Node, code_nodes: &[Node]) -> Vec<ValidatorError> {
-        let input_node_text = &self.input_str[input_node.byte_range()];
-        println!("Validating matcher node against input: {}", input_node_text);
-
-        // They can only have one matcher per node for now. For example:
-        // `a:/abc+/` cchi `b:hi`
-        if code_nodes.len() > 1 {
-            return vec![ValidatorError::from_offset(
-                format!(
-                    "Multiple matchers in a single node are not supported (found {})",
-                    code_nodes.len()
-                ),
-                input_node.byte_range().start,
-                input_node.byte_range().end,
-                self.input_str,
-            )];
-        }
-
-        let code_node = code_nodes[0];
-
-        let matcher_text = &self.schema_str[code_node.byte_range()];
-
-        let matcher = Matcher::new(matcher_text);
-
-        match matcher {
-            Ok(matcher) => {
-                if !matcher.is_match(input_node_text) {
-                    return vec![ValidatorError::from_offset(
-                        format!(
-                            "Matcher mismatch: input '{}' does not conform to {}",
-                            input_node_text, matcher
-                        ),
-                        input_node.byte_range().start,
-                        input_node.byte_range().end,
-                        self.input_str,
-                    )];
-                }
-            }
-            Err(e) => {
-                return vec![ValidatorError::from_offset(
-                    format!("Invalid matcher pattern '{}': {}", matcher_text, e),
-                    code_node.byte_range().start,
-                    code_node.byte_range().end,
-                    self.schema_str,
-                )];
-            }
-        }
-
-        Vec::new()
-    }
-
     /// Validate a text node against the schema text node.
     ///
     /// This is a node that is just a simple literal text node. We validate that
     /// the text content is identical.
-    fn validate_text_node(&self, input_node: &Node, schema_node: &Node) -> Vec<ValidatorError> {
+    fn validate_text_node_static<'b>(
+        input_node: &Node<'b>,
+        input_node_descendant_index: usize,
+        schema_node: &Node<'b>,
+        input_str: &'b str,
+        schema_str: &'b str,
+        eof: bool,
+        initial_input_node: &Node<'b>,
+    ) -> Vec<Error> {
         debug!("Validating text node content");
 
-        if (input_node.byte_range().end == self.initial_input_cursor.node().byte_range().end)
-            && self.eof == false
-        {
+        if (input_node.byte_range().end == initial_input_node.byte_range().end) && eof == false {
             // Incomplete text node, skip validation for now
             debug!("Skipping text validation - incomplete node at EOF");
             return Vec::new();
@@ -243,8 +151,8 @@ impl<'a> BiNodeValidator<'a> {
 
         let mut errors = Vec::new();
 
-        let schema_text = &self.schema_str[schema_node.byte_range()];
-        let input_text = &self.input_str[input_node.byte_range()];
+        let schema_text = &schema_str[schema_node.byte_range()];
+        let input_text = &input_str[input_node.byte_range()];
 
         debug!(
             "Comparing text: schema='{}' vs input='{}'",
@@ -253,14 +161,11 @@ impl<'a> BiNodeValidator<'a> {
 
         if schema_text != input_text {
             debug!("Text mismatch found");
-            errors.push(ValidatorError::from_offset(
-                format!(
-                    "Literal mismatch: expected \"{}\", found \"{}\"",
-                    schema_text, input_text
+            errors.push(Error::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch(
+                    input_node_descendant_index,
+                    schema_text.into(),
                 ),
-                input_node.byte_range().start + 1,
-                input_node.byte_range().end,
-                self.input_str,
             ));
         }
 
@@ -272,13 +177,13 @@ impl<'a> BiNodeValidator<'a> {
 /// Then walk the cursors to the next nodes. Returns errors and new descendant indices.
 ///
 /// This function is kept for backward compatibility. Consider using BiNodeValidator::validate() instead.
-pub fn validate_a_node(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    last_input_str: &str,
-    schema_str: &str,
+pub fn validate_a_node<'a>(
+    input_cursor: &'a TreeCursor<'a>,
+    schema_cursor: &'a TreeCursor<'a>,
+    last_input_str: &'a str,
+    schema_str: &'a str,
     eof: bool,
-) -> (Vec<ValidatorError>, (usize, usize)) {
+) -> (Vec<Error>, (usize, usize)) {
     let mut validator =
         BiNodeValidator::new(input_cursor, schema_cursor, last_input_str, schema_str, eof);
 
@@ -347,10 +252,14 @@ mod tests {
 
         assert!(!errors.is_empty());
         println!("Errors: {:?}", errors);
-        assert_eq!(
-            errors[0].message,
-            "Literal mismatch: expected \"Hello, everyone!\", found \"Hello, world!\""
-        );
+        // Check that we have a NodeContentMismatch error
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(node, expected)) => {
+                assert_eq!(*expected, "Hello, everyone!");
+                assert_eq!(*node, input_index);
+            }
+            _ => std::panic!("Expected NodeContentMismatch error, got: {:?}", errors[0]),
+        }
         // Descendant indices should be equal since both text nodes are at the same position in their trees
         assert_eq!(input_index, schema_index);
     }
@@ -419,6 +328,7 @@ mod tests {
 
         assert!(errors.is_empty());
         assert_eq!(input_index, schema_index);
+        assert_eq!(input_index, 2); // We need to leave off at the next node
     }
 
     #[test]
@@ -457,11 +367,14 @@ mod tests {
         // Descendant indices should be equal since both are at the same tree position
         assert_eq!(input_index, schema_index);
 
+        // Check that we have a NodeTypeMismatch error
         assert!(
+            errors.iter().any(|error| matches!(
+                error,
+                Error::SchemaViolation(SchemaViolationError::NodeTypeMismatch(_, _))
+            )),
+            "Expected a node type mismatch error but did not find one. Errors: {:?}",
             errors
-                .iter()
-                .any(|error| error.message.contains("Node mismatch")),
-            "Expected a node mismatch error but did not find one"
         );
     }
 
@@ -482,10 +395,18 @@ mod tests {
         let schema_cursor = schema_node.walk();
 
         // First pass with eof: false should pass without errors
-        let (errors, (_input_index, _schema_index)) =
+        let (errors, (input_index, _schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, false);
+        let (_, (input_index_eof, _)) =
+            validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
+        assert_eq!(input_index, 2); // We asserted the first node, but need to re-assert the second
+        assert_eq!(input_index_eof, 3);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but found: {:?}",
+            errors
+        );
 
-        assert!(errors.is_empty());
         // When eof is false, schema should move back, so indices may differ
         // The exact difference depends on the tree structure
 
@@ -493,7 +414,11 @@ mod tests {
         let (errors, (input_index, schema_index)) =
             validate_a_node(&input_cursor, &schema_cursor, input, schema, true);
 
-        assert!(!errors.is_empty());
+        assert!(
+            !errors.is_empty(),
+            "Expected validation errors at EOF but found none: {:?}",
+            errors
+        );
         // Both should end at the same descendant index in their respective trees
         assert_eq!(input_index, schema_index);
     }
@@ -531,10 +456,13 @@ testt
             !errors.is_empty(),
             "Expected validation errors but found none"
         );
+        // Check for either NodeTypeMismatch or NodeContentMismatch errors
         assert!(
-            errors
-                .iter()
-                .any(|error| error.message.contains("mismatch")),
+            errors.iter().any(|error| matches!(
+                error,
+                Error::SchemaViolation(SchemaViolationError::NodeTypeMismatch(_, _))
+                    | Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _))
+            )),
             "Expected a mismatch error but did not find one. Errors: {:?}",
             errors
         );

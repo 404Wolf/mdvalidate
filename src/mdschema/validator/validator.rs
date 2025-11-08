@@ -1,10 +1,9 @@
-use anyhow::{anyhow, Result};
 use line_col::LineColLookup;
 use log::debug;
 use tree_sitter::Tree;
 
 use crate::mdschema::{
-    reports::{errors::ValidatorError, validation_report::ValidatorReport},
+    reports::errors::{Error, ParserError},
     validator::{binode_validator::validate_a_node, utils::new_markdown_parser},
 };
 
@@ -12,15 +11,15 @@ use crate::mdschema::{
 /// an input Markdown document against a markdown schema treesitter tree.
 pub struct Validator {
     /// The current input tree. When read_input is called, this is replaced with a new tree.
-    input_tree: Tree,
+    pub input_tree: Tree,
     /// The schema tree, which does not change after initialization.
-    schema_tree: Tree,
+    pub schema_tree: Tree,
     /// The last descendant index we validated up to in the schema tree. In preorder.
     last_schema_descendant_index: usize,
     /// The last descendant index we validated up to in the input tree. In preorder.
     last_input_descendant_index: usize,
     /// Any errors encountered during validation.
-    errors: Vec<ValidatorError>,
+    errors: Vec<Error>,
     /// The full input string as last read. Not used internally but useful for
     /// debugging or reporting.
     last_input_str: String,
@@ -77,12 +76,17 @@ impl Validator {
         })
     }
 
+    /// Get all the errors that we have encountered
+    pub fn errors(&self) -> Vec<Error> {
+        self.errors.clone()
+    }
+
     /// Read new input. Updates the input tree with a new input tree for the full new input.
     ///
     /// Does not update the schema tree or change the descendant indices. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
-    pub fn read_input(&mut self, input: &str, eof: bool) -> Result<()> {
+    pub fn read_input(&mut self, input: &str, eof: bool) -> Result<(), Error> {
         debug!(
             "Reading new input: length={}, eof={}, current_index={}",
             input.len(),
@@ -95,7 +99,7 @@ impl Validator {
 
         // If we already got EOF, do not accept more input
         if self.got_eof {
-            return Err(anyhow!("Cannot accept more input after EOF"));
+            return Err(Error::ParserError(ParserError::ReadAfterGotEOF));
         }
 
         self.got_eof = eof;
@@ -144,13 +148,13 @@ impl Validator {
                 self.last_schema_descendant_index = 0;
                 Ok(())
             }
-            None => Err(anyhow!("Failed to parse input")),
+            None => Err(Error::ParserError(ParserError::TreesitterError)),
         }
     }
 
     /// Validate the input against the schema. Validates picking up from where
     /// we left off.
-    pub fn validate(&mut self) -> Result<()> {
+    pub fn validate(&mut self) -> Result<(), Vec<Error>> {
         debug!(
             "Starting validation from input_index={}, schema_index={}",
             self.last_input_descendant_index, self.last_schema_descendant_index
@@ -159,12 +163,7 @@ impl Validator {
         // With our current understanding of state, validate until the end of the input
         let result = self.validate_nodes_from_offset_to_end_of_input();
 
-        debug!("Validation completed. Errors found: {}", self.errors.len());
         result
-    }
-
-    pub fn report(&self) -> crate::mdschema::reports::validation_report::ValidatorReport {
-        return ValidatorReport::new(self.errors.clone(), self.last_input_str.clone());
     }
 
     /// Validate nodes and walk until the end of the input tree, starting from
@@ -172,7 +171,7 @@ impl Validator {
     ///
     /// Uses `validate_node` to validate each node and move the cursors forward.
     /// Directly mutates the last_descendant_indices in the struct.
-    fn validate_nodes_from_offset_to_end_of_input(&mut self) -> Result<()> {
+    fn validate_nodes_from_offset_to_end_of_input(&mut self) -> Result<(), Vec<Error>> {
         // Walk up until the end. `self.last_input_str` will not change while
         // this is running since this blocks the thread.
 
@@ -188,11 +187,18 @@ impl Validator {
             return Ok(());
         }
 
+        // Important! These are constructed from the root, so if we get
+        // descendant index off of them, it should be 0.
+
         let mut input_cursor = self.input_tree.walk();
+        assert!(input_cursor.descendant_index() == 0);
         input_cursor.goto_descendant(self.last_input_descendant_index);
+        assert!(input_cursor.descendant_index() == self.last_input_descendant_index);
 
         let mut schema_cursor = self.schema_tree.walk();
+        assert!(schema_cursor.descendant_index() == 0);
         schema_cursor.goto_descendant(self.last_schema_descendant_index);
+        assert!(schema_cursor.descendant_index() == self.last_schema_descendant_index);
 
         let (errors, (last_input_descendant_index, last_schema_descendant_index)) = validate_a_node(
             &mut input_cursor,
@@ -202,10 +208,11 @@ impl Validator {
             self.got_eof,
         );
 
+        self.errors.extend(errors.iter().cloned());
+
         // Update to the end of the trees since we validated the entire tree
         self.last_input_descendant_index = last_input_descendant_index;
         self.last_schema_descendant_index = last_schema_descendant_index;
-        self.errors.extend(errors);
 
         Ok(())
     }
@@ -250,9 +257,8 @@ mod tests {
 
         validator.validate().expect("Failed to validate");
 
-        let report = validator.report();
-        assert!(report.errors.is_empty());
-        assert!(report.is_valid());
+        let errors = validator.errors();
+        assert!(errors.is_empty());
     }
 
     #[test]
@@ -265,9 +271,8 @@ mod tests {
 
         validator.validate().expect("Failed to validate");
 
-        let report = validator.report();
-        assert!(report.errors.is_empty());
-        assert!(report.is_valid());
+        let errors = validator.errors();
+        assert!(errors.is_empty());
     }
 
     #[test]
@@ -280,9 +285,8 @@ mod tests {
 
         // First validate with empty input
         validator.validate().expect("Failed to validate");
-        let report = validator.report();
-        assert!(report.errors.is_empty());
-        assert!(report.is_valid());
+        let errors = validator.errors();
+        assert!(errors.is_empty());
 
         // Now read more input to complete it
         validator
@@ -294,8 +298,11 @@ mod tests {
             .validate()
             .expect("Failed to validate after reading input");
 
-        let report = validator.report();
-        assert!(!report.is_valid());
+        let report = validator.errors();
+        assert!(
+            !report.is_empty(),
+            "Expected validation errors, but found none"
+        );
     }
 
     #[test]
@@ -308,9 +315,8 @@ mod tests {
 
         // First validate with incomplete input
         validator.validate().expect("Failed to validate");
-        let report = validator.report();
-        assert!(report.errors.is_empty());
-        assert!(report.is_valid());
+        let report = validator.errors();
+        assert!(report.is_empty());
 
         // Now read more input to complete it
         validator
@@ -322,13 +328,12 @@ mod tests {
             .validate()
             .expect("Failed to validate after reading input");
 
-        let report = validator.report();
+        let errors = validator.errors();
         assert!(
-            report.errors.is_empty(),
+            errors.is_empty(),
             "Expected no validation errors, but found {:?}",
-            report.errors
+            errors
         );
-        assert!(report.is_valid());
     }
 
     #[test]
@@ -341,14 +346,10 @@ mod tests {
 
         validator.validate().expect("Failed to validate");
 
-        let report = validator.report();
+        let errors = validator.errors();
         assert!(
-            !report.errors.is_empty(),
+            !errors.is_empty(),
             "Expected validation errors but found none"
-        );
-        assert!(
-            !report.is_valid(),
-            "Expected validation to fail but it passed"
         );
     }
 
@@ -362,15 +363,11 @@ mod tests {
 
         validator.validate().expect("Failed to validate");
 
-        let report = validator.report();
+        let errors = validator.errors();
         assert!(
-            report.errors.is_empty(),
+            errors.is_empty(),
             "Expected no validation errors but found {:?}",
-            report.errors
-        );
-        assert!(
-            report.is_valid(),
-            "Expected validation to pass with different whitespace"
+            errors
         );
     }
 
@@ -384,14 +381,10 @@ mod tests {
 
         validator.validate().expect("Failed to validate");
 
-        let report = validator.report();
+        let errors = validator.errors();
         assert!(
-            !report.errors.is_empty(),
+            !errors.is_empty(),
             "Expected validation errors but found none"
-        );
-        assert!(
-            !report.is_valid(),
-            "Expected validation to fail but it passed"
         );
     }
 }

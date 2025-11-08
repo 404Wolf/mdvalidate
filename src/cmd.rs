@@ -1,7 +1,7 @@
 use std::io::Read;
 
 use crate::mdschema::{
-    reports::{pretty_print::pretty_print_report, validation_report::ValidatorReport},
+    reports::{errors::Error, pretty_print::pretty_print_error},
     Validator,
 };
 use anyhow::Result;
@@ -14,7 +14,7 @@ pub fn validate<R: Read>(
     schema_str: String,
     input: &mut R,
     filename: &str,
-) -> Result<ValidatorReport> {
+) -> Result<Vec<Error>> {
     let buffer_size = get_buffer_size();
 
     debug!("Starting validation for file: {}", filename);
@@ -47,7 +47,9 @@ pub fn validate<R: Read>(
         // If we're done reading, mark EOF
         if bytes_read == 0 {
             debug!("Reached EOF, processing final input");
-            validator.read_input(&input_str, true)?;
+            if let Err(e) = validator.read_input(&input_str, true) {
+                return Err(anyhow::anyhow!("Error reading input at EOF: {:?}", e));
+            }
             break;
         }
 
@@ -60,8 +62,12 @@ pub fn validate<R: Read>(
             "Processing input for validation (iteration #{})",
             iteration_count
         );
-        validator.read_input(&input_str, false)?;
-        validator.validate()?;
+        if let Err(e) = validator.read_input(&input_str, false) {
+            return Err(anyhow::anyhow!("Error reading input: {:?}", e));
+        }
+        if let Err(e) = validator.validate() {
+            return Err(anyhow::anyhow!("Validation errors: {:?}", e));
+        }
         trace!(
             "Validation step completed for iteration #{}",
             iteration_count
@@ -75,20 +81,26 @@ pub fn validate<R: Read>(
     debug!("Total bytes processed: {}", total_bytes_read);
 
     debug!("Generating validation report");
-    let report = validator.report();
-    let pretty = pretty_print_report(&report, filename)
-        .map_err(|e| anyhow::anyhow!("Error generating report: {}", e))?;
+    let errors = validator.errors();
+    let input_tree = validator.input_tree.clone();
 
-    if !pretty.is_empty() {
+    let mut pretty_output = String::new();
+    for error in &errors {
+        let pretty = pretty_print_error(input_tree.clone(), error, &input_str, filename)
+            .map_err(|e| anyhow::anyhow!("Error generating report: {}", e))?;
+        pretty_output.push_str(&pretty);
+    }
+
+    if !pretty_output.is_empty() {
         info!("Validation completed with issues found");
-        println!("{}", pretty);
+        println!("{}", pretty_output);
     } else {
         println!("{}", "Validation success! Input matches schema.".green());
     }
 
     debug!("Validation function completed for file: {}", filename);
 
-    Ok(report)
+    Ok(errors)
 }
 
 fn get_buffer_size() -> usize {
@@ -170,8 +182,8 @@ mod tests {
 
         let result = validate(schema_str, &mut reader, "test_file.md");
 
-        let report = result.unwrap();
-        assert!(report.is_valid(), "Report should be valid");
+        let errors = result.unwrap();
+        assert!(errors.is_empty(), "Should have no errors");
     }
 
     #[test]
@@ -185,10 +197,10 @@ mod tests {
         let result = validate(schema_str, &mut reader, "test_file.md");
 
         // The validation should succeed (no errors in the function execution)
-        let report = result.expect("Validation should complete without errors");
+        let errors = result.expect("Validation should complete without errors");
         assert!(
-            report.is_valid(),
-            "Report should be valid for matching content"
+            errors.is_empty(),
+            "Should have no errors for matching content"
         );
     }
 
@@ -203,10 +215,10 @@ mod tests {
         let result = validate(schema_str, &mut reader, "test_file.md");
 
         // The validation should succeed (no errors in the function execution)
-        let report = result.expect("Validation should complete without errors");
+        let errors = result.expect("Validation should complete without errors");
         assert!(
-            report.is_valid(),
-            "Report should be valid for matching content"
+            errors.is_empty(),
+            "Should have no errors for matching content"
         );
     }
 }
