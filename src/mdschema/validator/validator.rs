@@ -3,8 +3,8 @@ use log::debug;
 use tree_sitter::Tree;
 
 use crate::mdschema::{
-    reports::errors::{Error, ParserError},
-    validator::{binode_validator::validate_a_node, utils::new_markdown_parser},
+    reports::errors::{Error, ParserError, SchemaViolationError},
+    validator::{node_validators::validate_text_node, utils::new_markdown_parser},
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -115,6 +115,14 @@ impl Validator {
                 "No new content to parse (new_len={}, old_len={})",
                 new_len, old_len
             );
+            // If we're now at EOF, reset indices so we re-validate text nodes
+            // that were previously skipped due to not being at EOF
+            if eof {
+                // TODO: This feels wrong
+                debug!("EOF reached with no new content, resetting indices for final validation");
+                self.last_input_descendant_index = 0;
+                self.last_schema_descendant_index = 0;
+            }
             return Ok(());
         }
 
@@ -152,69 +160,155 @@ impl Validator {
         }
     }
 
-    /// Validate the input against the schema. Validates picking up from where
-    /// we left off.
-    pub fn validate(&mut self) -> Result<(), Vec<Error>> {
-        debug!(
-            "Starting validation from input_index={}, schema_index={}",
-            self.last_input_descendant_index, self.last_schema_descendant_index
-        );
-
-        // With our current understanding of state, validate until the end of the input
-        let result = self.validate_nodes_from_offset_to_end_of_input();
-
-        result
-    }
-
-    /// Validate nodes and walk until the end of the input tree, starting from
-    /// the current descendant indices.
+    /// Validates the input markdown against the schema by traversing both trees
+    /// in parallel to the ends.
     ///
-    /// Uses `validate_node` to validate each node and move the cursors forward.
-    /// Directly mutates the last_descendant_indices in the struct.
-    fn validate_nodes_from_offset_to_end_of_input(&mut self) -> Result<(), Vec<Error>> {
-        // Walk up until the end. `self.last_input_str` will not change while
-        // this is running since this blocks the thread.
-
-        let input_tree_total_descendants = self.input_tree.root_node().descendant_count();
-        let schema_tree_total_descendants = self.schema_tree.root_node().descendant_count();
-
-        // Check if we've already validated everything we can
-        if self.last_input_descendant_index >= input_tree_total_descendants
-            && self.last_schema_descendant_index >= schema_tree_total_descendants
-        {
-            // Nothing to do
-            debug!("No validation needed - already at end of both trees");
-            return Ok(());
-        }
-
+    /// This method performs a breadth-first traversal of both the input and
+    /// schema trees simultaneously, comparing nodes at each level. It uses a
+    /// work queue of (input_index, schema_index) pairs to track which nodes
+    /// need validation. For each pair:
+    ///
+    /// 1. **Text nodes** (base case): If schema node is text, directly compare it with input using `validate_text_node`
+    /// 2. **Parent nodes**: Collect all child pairs and add them to the validation queue
+    /// 3. **Mismatch detection**: Reports errors when child counts differ (only if EOF received)
+    /// 4. **Progressive validation**: Starts from the last validated position (`last_input_descendant_index`,
+    ///    `last_schema_descendant_index`) and continues until all nodes are processed
+    ///
+    /// The method mutates `self.errors` to accumulate validation errors and updates the descendant
+    /// indices to track validation progress, enabling incremental validation on subsequent calls.
+    ///
+    /// - Uses tree cursors positioned at the last validated descendant indices
+    /// - Maintains a stack of (input_idx, schema_idx) pairs representing nodes to validate
+    /// - When child counts mismatch, only reports error if `got_eof` is true (allowing partial validation)
+    /// - Updates `last_input_descendant_index` and `last_schema_descendant_index` after completion
+    pub fn validate(&mut self) {
         // Important! These are constructed from the root, so if we get
         // descendant index off of them, it should be 0.
-
         let mut input_cursor = self.input_tree.walk();
-        assert!(input_cursor.descendant_index() == 0);
         input_cursor.goto_descendant(self.last_input_descendant_index);
-        assert!(input_cursor.descendant_index() == self.last_input_descendant_index);
 
         let mut schema_cursor = self.schema_tree.walk();
-        assert!(schema_cursor.descendant_index() == 0);
         schema_cursor.goto_descendant(self.last_schema_descendant_index);
-        assert!(schema_cursor.descendant_index() == self.last_schema_descendant_index);
 
-        let (errors, (last_input_descendant_index, last_schema_descendant_index)) = validate_a_node(
-            &mut input_cursor,
-            &mut schema_cursor,
-            &self.last_input_str,
-            &self.schema_str,
-            self.got_eof,
-        );
+        // Start with the root nodes
+        let mut child_pairs_to_validate = vec![(
+            input_cursor.descendant_index(),
+            schema_cursor.descendant_index(),
+        )];
 
-        self.errors.extend(errors.iter().cloned());
+        while let Some((input_idx, schema_idx)) = child_pairs_to_validate.pop() {
+            input_cursor.goto_descendant(input_idx);
+            schema_cursor.goto_descendant(schema_idx);
 
-        // Update to the end of the trees since we validated the entire tree
-        self.last_input_descendant_index = last_input_descendant_index;
-        self.last_schema_descendant_index = last_schema_descendant_index;
+            let input_node = input_cursor.node();
+            let schema_node = schema_cursor.node();
 
-        Ok(())
+            // If they are both text, directly compare them. This is a "base
+            // case," where we do not need to do any special logic.
+            if schema_node.kind() == "text" {
+                self.errors.extend(validate_text_node(
+                    &input_node,
+                    input_cursor.descendant_index(),
+                    &schema_node,
+                    &self.last_input_str,
+                    &self.schema_str,
+                    self.got_eof,
+                    &input_node,
+                ));
+
+                continue;
+            }
+
+            // Otherwise, look at their children;
+            // If the children of the schema node contains a matcher among
+            // text nodes, and the input node is just text, we validate the
+            // matcher using our matcher helper. It takes care of prefix/suffix
+            // matching as well.
+
+            // If there are no code nodes in the schema children, then it
+            // may be a mix of nodes we must recurse on.
+            // iterate over the children of both the schema and input nodes
+            // in order using the walker, and push them to
+
+            // Note that we crawl the input and schema nodes at the same
+            // pace, and can zip them since we made sure the schema node
+            // had no matchers in it.
+
+            // We store the descendant indices of the nodes we will need to
+            // validate, relative to the root nodes.
+
+            // At this point, if the number of children differ, we can already
+            // raise an error - but only if we've received EOF. Otherwise, we're
+            // still waiting for more input.
+            if input_node.child_count() != schema_node.child_count() {
+                if self.got_eof {
+                    self.errors.push(Error::SchemaViolation(
+                        SchemaViolationError::ChildrenLengthMismatch(
+                            input_cursor.descendant_index(),
+                            schema_cursor.descendant_index(),
+                        ),
+                    ));
+                }
+                // But we can still try to validate the common children
+            }
+
+            // Collect children to validate
+            if input_cursor.goto_first_child() {
+                if !schema_cursor.goto_first_child() {
+                    debug!(
+                        "Schema node has no children while input node does at input_index={}, schema_index={}",
+                        input_cursor.descendant_index(),
+                        schema_cursor.descendant_index()
+                    );
+                    // Schema has no children but input does - error if EOF
+                    if self.got_eof {
+                        self.errors.push(Error::SchemaViolation(
+                            SchemaViolationError::ChildrenLengthMismatch(
+                                input_cursor.descendant_index(),
+                                schema_cursor.descendant_index(),
+                            ),
+                        ));
+                    }
+                    continue;
+                }
+
+                // Add first child pair
+                child_pairs_to_validate.push((
+                    input_cursor.descendant_index(),
+                    schema_cursor.descendant_index(),
+                ));
+
+                // Then crawl their siblings and collect pairs
+                loop {
+                    let input_had_sibling = input_cursor.goto_next_sibling();
+                    let schema_had_sibling = schema_cursor.goto_next_sibling();
+
+                    if input_had_sibling && schema_had_sibling {
+                        child_pairs_to_validate.push((
+                            input_cursor.descendant_index(),
+                            schema_cursor.descendant_index(),
+                        ));
+                        debug!(
+                            "Queued child pair for validation: input_index={}, schema_index={}",
+                            input_cursor.descendant_index(),
+                            schema_cursor.descendant_index()
+                        );
+                    } else {
+                        // One or both have no more siblings, stop
+                        debug!("No more siblings to process in current nodes");
+                        break;
+                    }
+                }
+
+                // Go back to parent for next iteration
+                input_cursor.goto_parent();
+                schema_cursor.goto_parent();
+            }
+        }
+
+        // Update the last descendant indices to the end of the trees
+        self.last_input_descendant_index = input_cursor.descendant_index();
+        self.last_schema_descendant_index = schema_cursor.descendant_index();
     }
 }
 
@@ -255,7 +349,7 @@ mod tests {
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
 
-        validator.validate().expect("Failed to validate");
+        validator.validate();
 
         let errors = validator.errors();
         assert!(errors.is_empty());
@@ -269,7 +363,7 @@ mod tests {
         let mut validator =
             Validator::new(schema, input, false).expect("Failed to create validator");
 
-        validator.validate().expect("Failed to validate");
+        validator.validate();
 
         let errors = validator.errors();
         assert!(errors.is_empty());
@@ -284,8 +378,12 @@ mod tests {
             Validator::new(schema, initial_input, false).expect("Failed to create validator");
 
         // First validate with empty input
-        validator.validate().expect("Failed to validate");
+        validator.validate();
         let errors = validator.errors();
+        eprintln!(
+            "Errors after first validate (should be empty): {:?}",
+            errors
+        );
         assert!(errors.is_empty());
 
         // Now read more input to complete it
@@ -294,11 +392,13 @@ mod tests {
             .expect("Failed to read input");
 
         // Validate again
-        validator
-            .validate()
-            .expect("Failed to validate after reading input");
+        validator.validate();
 
         let report = validator.errors();
+        eprintln!(
+            "Errors after second validate (should have errors): {:?}",
+            report
+        );
         assert!(
             !report.is_empty(),
             "Expected validation errors, but found none"
@@ -314,7 +414,7 @@ mod tests {
             Validator::new(schema, initial_input, false).expect("Failed to create validator");
 
         // First validate with incomplete input
-        validator.validate().expect("Failed to validate");
+        validator.validate();
         let report = validator.errors();
         assert!(report.is_empty());
 
@@ -324,9 +424,7 @@ mod tests {
             .expect("Failed to read input");
 
         // Validate again
-        validator
-            .validate()
-            .expect("Failed to validate after reading input");
+        validator.validate();
 
         let errors = validator.errors();
         assert!(
@@ -344,13 +442,13 @@ mod tests {
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
 
-        validator.validate().expect("Failed to validate");
+        validator.validate();
 
         let errors = validator.errors();
-        assert!(
-            !errors.is_empty(),
-            "Expected validation errors but found none"
-        );
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
+            _ => panic!("Expected TextMismatch error, got {:?}", errors[0]),
+        }
     }
 
     #[test]
@@ -361,7 +459,7 @@ mod tests {
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
 
-        validator.validate().expect("Failed to validate");
+        validator.validate();
 
         let errors = validator.errors();
         assert!(
@@ -379,12 +477,46 @@ mod tests {
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
 
-        validator.validate().expect("Failed to validate");
+        validator.validate();
 
         let errors = validator.errors();
         assert!(
             !errors.is_empty(),
             "Expected validation errors but found none"
         );
+    }
+
+    #[test]
+    fn test_when_different_node_counts_and_got_eof_reports_error() {
+        let schema = "# Test\n\nfooobar\n\ntest\n";
+        let input = "# Test\n\nfooobar\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(_, _)) => {}
+            _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),
+        }
+    }
+
+    #[test]
+    fn test_two_lists_where_second_item_has_different_content_than_schema() {
+        let schema = "- Item 1\n- Item 2\n";
+        let input = "- Item 1\n- Item X\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
+            _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
+        }
     }
 }

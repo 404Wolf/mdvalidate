@@ -1,20 +1,13 @@
 use std::io::Read;
 
-use crate::mdschema::{
-    reports::{errors::Error, pretty_print::pretty_print_error},
-    Validator,
-};
+use crate::mdschema::{reports::{errors::Error, pretty_print::pretty_print_error}, validator::validator::Validator};
 use anyhow::Result;
 use colored::*;
 use log::{debug, info, trace};
 
 static DEFAULT_BUFFER_SIZE: usize = 2048;
 
-pub fn validate<R: Read>(
-    schema_str: String,
-    input: &mut R,
-    filename: &str,
-) -> Result<Vec<Error>> {
+pub fn validate<R: Read>(schema_str: String, input: &mut R, filename: &str) -> Result<Vec<Error>> {
     let buffer_size = get_buffer_size();
 
     debug!("Starting validation for file: {}", filename);
@@ -50,6 +43,9 @@ pub fn validate<R: Read>(
             if let Err(e) = validator.read_input(&input_str, true) {
                 return Err(anyhow::anyhow!("Error reading input at EOF: {:?}", e));
             }
+            // CRITICAL: Must validate again after marking EOF to catch any
+            // text nodes that were skipped during incremental validation
+            validator.validate();
             break;
         }
 
@@ -65,9 +61,7 @@ pub fn validate<R: Read>(
         if let Err(e) = validator.read_input(&input_str, false) {
             return Err(anyhow::anyhow!("Error reading input: {:?}", e));
         }
-        if let Err(e) = validator.validate() {
-            return Err(anyhow::anyhow!("Validation errors: {:?}", e));
-        }
+        validator.validate();
         trace!(
             "Validation step completed for iteration #{}",
             iteration_count
