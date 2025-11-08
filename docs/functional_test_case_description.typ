@@ -331,14 +331,152 @@ For all the following test cases the steps are:
     - item2
     ```)],
   [Validation fails with "Node mismatch" error],
+
+  [Bad schema file],
+  [#schema(```markdown
+  # `
+  ```)],
+  [The validation does not even begin because the schema is invalid],
+
+  [Bad input file],
+  [#schema(```markdown
+  # `
+  ```)],
+  [The validation does not even begin because the input is invalid],
 )
 
+We will also have a small test to make sure that we can generate JSON output based on labels:
+
+#schema(
+  ```markdown
+  # Hello
+  `test:/\d+/`
+  ```
+)
+
+#good-example(
+  ```markdown
+  # Hello
+  123
+  ```
+)
+
+Should produce the following JSON:
+
+```json
+{
+  "test": "123"
+}
+```
+
+As an end to end test using the CLI. All of the above tests in our table will
+also have their output key-value verified.
 
 #pagebreak()
 
 
+== End to End CLI testing
+
+We will also have a overall end to end test to actually ensure the functionality of the command line tool. This will take the form of a simple test script that executes `mdv` on a schema file and conforming input file:
+
+#schema(
+  ```markdown
+  # CSDS 999 Assignment `assignment_number:\d`
+
+  # `title:(([A-Z][a-z]+ )|and |the )+([A-Z][a-z]+)`
+
+  ## `first_name:[A-Z][a-z]+`
+  ## `last_name:[A-Z][a-z]+`
+
+  Example code:
+
+  `m!foo = 12`!
+
+  This is a shopping list:
+
+  - `grocery_list_item:/Hello \w+/`+
+      - `grocery_item_notes:text`?{,3}
+  ```,
+)
+
+#good-example(```markdown
+# CSDS 999 Assignment 5
+
+# Test Test
+
+## Wolf
+## Alessandro
+
+Example code:
+
+`m!foo = 12`
+
+This is a shopping list:
+
+- Eggs
+    - Avocados
+```)
+
+We will run the command with:
+- `mdv schema.md input.md` (where `schema.md` is the schema file, shown above,
+  and `input.md` the input file, also shown above).
+- `mdv foobar` (making sure that the program exits with code `1` and terminates).
+
+We will also test it with this input file and the above schema:
+
+#bad-example(```markdown
+# CSDS 999 Assignment 5
+
+# Test Test
+
+## Wolf
+## Alessandro
+
+Example code:
+
+`m!foo = 12`
+
+This is a shopping list:
+
+- Eggs
++ Avocados
+```)
+
+Making sure there is an error on the last line (since the list type is
+mismatched), making sure the error is accurate. We will test it on an empty
+Markdown file and also assert failure.
+
+Finally, we will have one end-to-end streaming example. In this example we will
+use the following nodejs program to pipe input to `mdvalidate` via standard in,
+which we will validate.
+
+```js
+const data = "# Hi there\n";
+let i = 0;
+
+function writeNext() {
+  if (i < data.length) {
+    const chunk = data.slice(i, i + 2);
+    process.stdout.write(chunk);
+    console.error(chunk);
+    i += 2;
+    setTimeout(writeNext, 250);
+  }
+}
+
+writeNext();
+```
+
+And we will also test to make sure that the errors are accurate, and for valid
+and invalid input, a broken input, and with a broken schema.
+
 
 == EOF Handling Tests
+
+EOF tests are to make sure that streaming works properly. Streaming is an
+important core feature of `mdvalidate` that lets us read Markdown input
+incrementally. In order to make streaming possible we need to be able to read
+input that is "partial" --- that does not include an EOF.
 
 #table(
   columns: (1fr, 1fr, 1.5fr),
@@ -447,8 +585,6 @@ For all the following test cases the steps are:
   [Validation fails due to text mismatch with escaped newlines],
 )
 
-
-
 == Command Line Streaming
 
 // Table 1: Reader/IO Tests
@@ -495,24 +631,167 @@ For all the following test cases the steps are:
 )
 
 
-
-
-
-
 #pagebreak()
 
 == Language Server (LSP) Integration Tests
 
-#set text(size: 9pt)
+We haven't implemented an LSP for `mdvalidate` yet, but when we do, we will
+expect to incorporate the following tests:
 
+#table(
+  columns: (1fr, 2fr),
+  align: (left, left),
+  table.header([*LSP Method*], [*Test Description*]),
+
+  [`textDocument/didOpen`],
+  [
+    Server receives document open notification and begins validation. Initial diagnostics are computed and published for the opened document.
+
+    - Opening a blank file
+    - Opening a file with just one line of valid Markdown
+    - Opening a file with just one line of invalid Markdown
+    - Opening and closing a file rapidly (sending many `textDocument/didOpen`s for the same file in quick succession).
+  ],
+
+  [`textDocument/didChange`],
+  [
+    Server receives incremental changes to document content. Validation is re-run on each change and updated diagnostics are published. Tests include adding characters incrementally, deleting content, and making multi-line edits.
+
+    - User is typing at the top of the file letter by letter
+    - User is typing at the bottom of the file letter by letter
+    - User is typing at the middle of the file letter by letter
+    - User deletes a chunk of text all of a sudden and the remaining text is invalid Markdown (*does not* conform to schema but also just is bad Markdown)
+    - User deletes a chunk of text all of a sudden and the remaining text is valid Markdown (*does not* conform to schema but is bad Markdown)
+    - User deletes a chunk of text all of a sudden and the remaining text is valid Markdown (*does* conform to schema but is bad Markdown)
+    - User adds a chunk of text all of a sudden and the remaining text is invalid Markdown (*does not* conform to schema but also just is bad Markdown)
+    - User adds a chunk of text all of a sudden and the remaining text is valid Markdown (*does not* conform to schema but is bad Markdown)
+    - User adds a chunk of text all of a sudden and the remaining text is valid Markdown (*does* conform to schema but is bad Markdown)
+  ],
+
+  [`textDocument/didClose`],
+  [
+    Server receives document close notification and cleans up resources. Diagnostics are cleared for the closed document.
+
+    - User closes a file that has invalid Markdown (*does not* conform to schema but also just is bad Markdown)
+    - User closes a file that has valid Markdown (*does not* conform to schema but is bad Markdown)
+    - User closes a file that has valid Markdown (*does* conform to schema but is bad Markdown)
+    - User tries to close a file that has already been closed
+    - User tries to close a file that has never even been opened
+  ],
+
+  [`textDocument/publishDiagnostics`],
+  [
+    Server publishes diagnostics (errors/warnings) to client. Tests verify correct error positions, messages, and severity levels. Includes testing red squiggles for schema violations, matcher mismatches, and structural errors.
+
+    - Publishing diagnostics for a schema violation (literal text mismatch)
+    - Publishing diagnostics for a matcher regex mismatch
+    - Publishing diagnostics for a node type mismatch (e.g., expected heading, found paragraph)
+    - Publishing diagnostics for multiple errors in a single document
+    - Publishing diagnostics with correct line and column positions
+    - Publishing diagnostics with correct severity levels (error vs warning)
+    - Clearing diagnostics when document becomes valid after edit
+    - Publishing diagnostics when document becomes invalid after edit
+    - Publishing diagnostics for nested structural errors (e.g., list item within wrong list type)
+    - Publishing diagnostics for EOF-related errors when streaming is disabled
+  ],
+)
+
+We will also add a performance test for the LSP, where we simulate very fast
+typing into a document that is about 2,000 lines, and make sure that
+`mdvalidate` is able to keep up at under `50ms` per keystroke and `100ms` at the
+end.
+
+= Performance testing
+
+We will will also create `json schema` examples
+
+In our initial SRS we stated that we would like to be able to validate 1.3k
+characters of Markdown Input in 20ms. We will make a Markdown file that has 1.3k
+lines of literal headings:
+
+#schema(
+  ```markdown
+  # `testing:Testing\d`+
+  ```,
+)
+
+#good-example(
+  ```markdown
+  # Testing 1
+  # Testing 2
+  # Testing 3
+  # Testing 4
+  ```,
+)
+
+#bad-example(
+  ```markdown
+  # Testing one
+  # Testing two
+  # Testing three
+  # Testing four
+  ```,
+)
+
+We will make sure that validation for valid input and failure for bad input is
+correct and accurate during this stress test.
+
+We will run our stress tests via the command line so we have an accurate picture
+of overhead, and with a release build.
 
 = Structural Testing
 
 We also implemented structural testing to ensure that the codebase is covered by tests.
 
-//! insert image and subsequent explanation
+We set up code coverage checking using
+#link("https://llvm.org/docs/CommandGuide/llvm-cov.html", "llvm-cov").
 
+You can run the code coverage checking by using
 
-= Summary
+```bash
+./scripts/coverage.sh
+```
 
+The current code coverage is shown in @fig:code-coverage.
 
+#figure(
+  table(
+    columns: (2fr, 1fr, 1fr, 1fr),
+    align: (left, center, center, center),
+    table.header([*Filename*], [*Function Coverage*], [*Line Coverage*], [*Region Coverage*]),
+    [build/rustc-1.89.0-src/library/std/src/sys/thread_local/native/mod.rs],
+    [66.67% (2/3)],
+    [66.67% (2/3)],
+    [57.14% (4/7)],
+    [mdvalidate/src/cmd.rs], [72.73% (8/11)], [91.20% (114/125)], [85.99% (221/257)],
+    [mdvalidate/src/main.rs], [0.00% (0/2)], [0.00% (0/35)], [0.00% (0/69)],
+    [mdvalidate/src/mdschema/reports/errors.rs], [75.00% (3/4)], [87.50% (28/32)], [87.88% (29/33)],
+    [mdvalidate/src/mdschema/reports/pretty_print.rs], [50.00% (1/2)], [17.86% (5/28)], [13.04% (6/46)],
+    [mdvalidate/src/mdschema/reports/validation_report.rs],
+    [100.00% (3/3)],
+    [100.00% (13/13)],
+    [100.00% (9/9)],
+    [mdvalidate/src/mdschema/validator/binode_validator.rs],
+    [100.00% (16/16)],
+    [87.14% (305/350)],
+    [86.55% (579/669)],
+    [mdvalidate/src/mdschema/validator/matcher.rs], [85.71% (6/7)], [71.43% (25/35)], [85.92% (61/71)],
+    [mdvalidate/src/mdschema/validator/utils.rs], [33.33% (1/3)], [22.58% (7/31)], [16.36% (9/55)],
+    [mdvalidate/src/mdschema/validator/validator.rs],
+    [100.00% (13/13)],
+    [88.18% (194/220)],
+    [90.70% (351/387)],
+    table.cell(colspan: 4, []),
+    [*Totals*], [*82.81% (53/64)*], [*79.47% (693/872)*], [*79.16% (1269/1603)*],
+  ),
+) <fig:code-coverage>
+
+We also began adding some performance tests, starting with a flame graph, so
+that we would be better able to find bottlenecks in `mdvalidate`'s performance.
+We set up a flamegraph using
+#link("https://github.com/flamegraph-rs/flamegraph", "rust flamegraph"), and our
+current flamegraph can be seen in @fig:flamegraph.
+
+#figure(
+  image("images/flamegraph.svg"),
+) <fig:flamegraph>
