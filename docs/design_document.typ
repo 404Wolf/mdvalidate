@@ -132,15 +132,17 @@ the AST representation are an inner paragraph (see @fig:might-not-be-same-spot
 for an example).
 
 #figure(
-  raw_block(raw: `````
-      Schema AST                     Input AST
-      -----------                    -----------
-      Root                           Root
-       |-- Paragraph                 |-- Paragraph
-       |    |-- Code <--             |    |-- Text() <-- (the schema
-       |         |-- Text()          |                   does not contain
-                                                         the codeblock)
-    `````), caption: [matcher code blocks (left) contain inner content we care about (right)],
+  raw_block(
+    raw: `````
+          Schema AST                     Input AST
+          -----------                    -----------
+          Root                           Root
+           |-- Paragraph                 |-- Paragraph
+           |    |-- Code <--             |    |-- Text() <-- (the schema
+           |         |-- Text()          |                   does not contain
+                                                             the codeblock)
+        `````,
+  ), caption: [matcher code blocks (left) contain inner content we care about (right)],
 ) <fig:might-not-be-same-spot>
 
 To demonstrate our high level model, we present figure @fig:class-diagram, a
