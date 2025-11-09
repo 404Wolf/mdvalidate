@@ -1416,7 +1416,6 @@ Content for section 3."#;
                 .read_input(chunk, is_eof)
                 .expect("Failed to read input");
             validator.validate();
-            validation_count += 1;
 
             let indices_after = (
                 validator.last_input_descendant_index,
