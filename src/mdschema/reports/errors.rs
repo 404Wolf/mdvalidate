@@ -1,53 +1,35 @@
 #[derive(Debug, Clone)]
-pub struct ValidatorError {
-    pub message: String,
-    pub line: usize,
-    pub column: usize,
-    pub byte_start: usize,
-    pub byte_end: usize,
-    pub severity: ErrorSeverity,
+pub enum Error {
+    SchemaViolation(SchemaViolationError),
+    SchemaError(SchemaError),
+    ParserError(ParserError),
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ErrorSeverity {
-    Error,
-    Warning,
-    Info,
+#[derive(Debug, Clone)]
+pub enum ParserError {
+    ReadAfterGotEOF,
+    InvalidUTF8,
+    TreesitterError,
 }
 
-impl ValidatorError {
-    pub fn new(
-        message: String,
-        line: usize,
-        column: usize,
-        byte_start: usize,
-        byte_end: usize,
-    ) -> Self {
-        Self {
-            message,
-            line,
-            column,
-            byte_start,
-            byte_end,
-            severity: ErrorSeverity::Error,
-        }
-    }
+#[derive(Debug, Clone)]
+pub enum SchemaError {
+    MultipleMatchersInNodeChildren(usize),
+}
 
-    pub fn from_offset(
-        message: String,
-        byte_start: usize,
-        byte_end: usize,
-        input_str: &str,
-    ) -> Self {
-        let prefix = &input_str[..byte_start];
-        let line = prefix.lines().count();
-        let column = prefix.lines().last().map(|l| l.len()).unwrap_or(0) + 1;
+#[derive(Debug, Clone)]
+pub enum SchemaViolationError {
+    /// Mismatch between schema definition and actual node
+    NodeTypeMismatch(usize, usize),
+    /// Text content of node does not match expected value
+    NodeContentMismatch(usize, String),
+    /// Nodes have different numbers of children
+    ChildrenLengthMismatch(usize, usize),
+}
 
-        Self::new(message, line, column, byte_start, byte_end)
-    }
-
-    pub fn with_severity(mut self, severity: ErrorSeverity) -> Self {
-        self.severity = severity;
-        self
-    }
+pub enum NodeContentMismatchError {
+    /// A node's text content doesn't match expected literal text
+    Text(String),
+    /// A matcher's pattern doesn't match
+    Matcher(usize),
 }
