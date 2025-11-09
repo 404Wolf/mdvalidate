@@ -5,7 +5,6 @@ use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::PathBuf;
 
-mod tests;
 pub mod cmd;
 pub mod mdschema;
 
@@ -19,6 +18,9 @@ struct Args {
     schema: PathBuf,
     /// Input Markdown file or "-" for stdin
     input: String,
+    /// Whether to stop validation on the first error encountered
+    #[arg(short, long)]
+    fast_fail: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -66,12 +68,12 @@ fn validate_main() -> Result<(), Box<dyn std::error::Error>> {
     // Handle the input source
     if args.input == "-" {
         debug!("Reading from stdin");
-        validate(schema_src, &mut io::stdin(), filename)?;
+        validate(schema_src, &mut io::stdin(), filename, args.fast_fail)?;
     } else {
         debug!("Opening file: {}", args.input);
         let file = File::open(&args.input)?;
         let mut reader = BufReader::new(file);
-        validate(schema_src, &mut reader, filename)?;
+        validate(schema_src, &mut reader, filename, args.fast_fail)?;
     }
 
     Ok(())

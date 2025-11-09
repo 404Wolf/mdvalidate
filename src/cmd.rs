@@ -1,8 +1,8 @@
 use std::io::Read;
 
 use crate::mdschema::{
-    reports::{pretty_print::pretty_print_report, validation_report::ValidatorReport},
-    Validator,
+    reports::{errors::Error, pretty_print::pretty_print_error},
+    validator::validator::Validator,
 };
 use anyhow::Result;
 use colored::*;
@@ -14,7 +14,8 @@ pub fn validate<R: Read>(
     schema_str: String,
     input: &mut R,
     filename: &str,
-) -> Result<ValidatorReport> {
+    fast_fail: bool,
+) -> Result<Vec<Error>> {
     let buffer_size = get_buffer_size();
 
     debug!("Starting validation for file: {}", filename);
@@ -47,7 +48,10 @@ pub fn validate<R: Read>(
         // If we're done reading, mark EOF
         if bytes_read == 0 {
             debug!("Reached EOF, processing final input");
-            validator.read_input(&input_str, true)?;
+            if let Err(e) = validator.read_input(&input_str, true) {
+                return Err(anyhow::anyhow!("Error reading input at EOF: {:?}", e));
+            }
+            validator.validate();
             break;
         }
 
@@ -60,12 +64,20 @@ pub fn validate<R: Read>(
             "Processing input for validation (iteration #{})",
             iteration_count
         );
-        validator.read_input(&input_str, false)?;
-        validator.validate()?;
+        if let Err(e) = validator.read_input(&input_str, false) {
+            return Err(anyhow::anyhow!("Error reading input: {:?}", e));
+        }
+        validator.validate();
         trace!(
             "Validation step completed for iteration #{}",
             iteration_count
         );
+
+        // Check for fast-fail AFTER validation
+        if fast_fail && !validator.errors().is_empty() {
+            debug!("Fast-fail enabled and errors found, exiting validation loop early");
+            break;
+        }
     }
 
     debug!(
@@ -75,20 +87,26 @@ pub fn validate<R: Read>(
     debug!("Total bytes processed: {}", total_bytes_read);
 
     debug!("Generating validation report");
-    let report = validator.report();
-    let pretty = pretty_print_report(&report, filename)
-        .map_err(|e| anyhow::anyhow!("Error generating report: {}", e))?;
+    let errors = validator.errors();
+    let input_tree = validator.input_tree.clone();
 
-    if !pretty.is_empty() {
+    let mut pretty_output = String::new();
+    for error in &errors {
+        let pretty = pretty_print_error(input_tree.clone(), error, &input_str, filename)
+            .map_err(|e| anyhow::anyhow!("Error generating report: {}", e))?;
+        pretty_output.push_str(&pretty);
+    }
+
+    if !pretty_output.is_empty() {
         info!("Validation completed with issues found");
-        println!("{}", pretty);
+        println!("{}", pretty_output);
     } else {
         println!("{}", "Validation success! Input matches schema.".green());
     }
 
     debug!("Validation function completed for file: {}", filename);
 
-    Ok(report)
+    Ok(errors)
 }
 
 fn get_buffer_size() -> usize {
@@ -168,10 +186,10 @@ mod tests {
         let input_data = "# Hi there!";
         let mut reader = Cursor::new(input_data.as_bytes());
 
-        let result = validate(schema_str, &mut reader, "test_file.md");
+        let result = validate(schema_str, &mut reader, "test_file.md", false);
 
-        let report = result.unwrap();
-        assert!(report.is_valid(), "Report should be valid");
+        let errors = result.unwrap();
+        assert!(errors.is_empty(), "Should have no errors");
     }
 
     #[test]
@@ -182,13 +200,13 @@ mod tests {
         let mut reader = LimitedReader::new(cursor, 2);
 
         // This test should not panic and should complete successfully
-        let result = validate(schema_str, &mut reader, "test_file.md");
+        let result = validate(schema_str, &mut reader, "test_file.md", false);
 
         // The validation should succeed (no errors in the function execution)
-        let report = result.expect("Validation should complete without errors");
+        let errors = result.expect("Validation should complete without errors");
         assert!(
-            report.is_valid(),
-            "Report should be valid for matching content"
+            errors.is_empty(),
+            "Should have no errors for matching content"
         );
     }
 
@@ -200,13 +218,69 @@ mod tests {
         let mut reader = LimitedReader::new(cursor, 1000);
 
         // This test should not panic and should complete successfully
-        let result = validate(schema_str, &mut reader, "test_file.md");
+        let result = validate(schema_str, &mut reader, "test_file.md", false);
 
         // The validation should succeed (no errors in the function execution)
-        let report = result.expect("Validation should complete without errors");
+        let errors = result.expect("Validation should complete without errors");
         assert!(
-            report.is_valid(),
-            "Report should be valid for matching content"
+            errors.is_empty(),
+            "Should have no errors for matching content"
+        );
+    }
+
+    #[test]
+    fn test_validate_stream_input_against_matcher() {
+        let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d/`
+
+# `title:/(([A-Z][a-z]+ )|and |the )+([A-Z][a-z]+)/`
+
+## `first_name:/[A-Z][a-z]+/`
+## `last_name:/[A-Z][a-z]+/`
+
+This is a shopping list:
+
+- `grocery_list_item:/Hello \w+/`
+    - `grocery_item_notes:/.*/`"#
+            .to_string();
+
+        let input_data = r#"# CSDS 999 Assignment 7
+
+# The Curious and Practical Garden
+
+## Wolf
+## Mermelstein
+
+This is a shopping list:
+
+- Hello Apples
+    - Fresh from market"#;
+
+        let cursor = Cursor::new(input_data.as_bytes());
+        let mut reader = LimitedReader::new(cursor, 2);
+
+        let result = validate(schema_str, &mut reader, "test_file.md", false);
+
+        let errors = result.expect("Validation should complete without errors");
+        assert!(
+            errors.is_empty(),
+            "Should have no errors for matching content with matchers"
+        );
+    }
+
+    #[test]
+    fn test_streaming_input_with_errors() {
+        let schema_str = r#"# CSDS"#.to_string();
+        let input_data = r#"# JSDS"#;
+
+        let cursor = Cursor::new(input_data.as_bytes());
+        let mut reader = LimitedReader::new(cursor, 2);
+
+        let result = validate(schema_str, &mut reader, "test_file.md", false);
+
+        let errors = result.expect("Validation should complete without errors");
+        assert!(
+            !errors.is_empty(),
+            "Expected validation errors for mismatched input but found none."
         );
     }
 }

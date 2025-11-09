@@ -1,4 +1,4 @@
-mod binode_validator;
 mod matcher;
 mod utils;
+mod node_validators;
 pub mod validator;
