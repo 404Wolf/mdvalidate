@@ -21,7 +21,7 @@ Markdown file.
 
 ---
 
-## ✨ Some examples of what you can match 
+## Some examples of what you can match 
 
 - **Literal Matching:** Regular Markdown stays literal — if it says `# Title`,
   it must match exactly.
