@@ -185,9 +185,11 @@ impl Validator {
         // Important! These are constructed from the root, so if we get
         // descendant index off of them, it should be 0.
         let mut input_cursor = self.input_tree.walk();
+        let input_root_node = input_cursor.node();
         input_cursor.goto_descendant(self.last_input_descendant_index);
 
         let mut schema_cursor = self.schema_tree.walk();
+        let schema_root_node = schema_cursor.node();
         schema_cursor.goto_descendant(self.last_schema_descendant_index);
 
         // Start with the root nodes
@@ -197,8 +199,19 @@ impl Validator {
         )];
 
         while let Some((input_idx, schema_idx)) = child_pairs_to_validate.pop() {
+            input_cursor.reset(input_root_node);
+            schema_cursor.reset(schema_root_node);
+
             input_cursor.goto_descendant(input_idx);
             schema_cursor.goto_descendant(schema_idx);
+
+            debug!(
+                "Validating node pair: input_index={} [{}], schema_index={} [{}]",
+                input_cursor.descendant_index(),
+                input_cursor.node().kind(),
+                schema_cursor.descendant_index(),
+                schema_cursor.node().kind()
+            );
 
             let input_node = input_cursor.node();
             let schema_node = schema_cursor.node();
@@ -224,6 +237,34 @@ impl Validator {
             // text nodes, and the input node is just text, we validate the
             // matcher using our matcher helper. It takes care of prefix/suffix
             // matching as well.
+            let schema_children_has_code_node = schema_node
+                .children(&mut schema_cursor.clone())
+                .any(|child| child.kind() == "code_span");
+
+            if schema_children_has_code_node && input_node.kind() == "text" {
+                debug!(
+                    "Validating matcher node at input_index={}, schema_index={}",
+                    input_cursor.descendant_index(),
+                    schema_cursor.descendant_index()
+                );
+
+                // Collect schema node children for validation
+                let schema_children: Vec<_> = schema_node.children(&mut schema_cursor.clone()).collect();
+                schema_cursor.goto_parent(); // Reset cursor after children iteration
+
+                // Validate the input text against the matchers in the schema
+                self.errors.extend(
+                    crate::mdschema::validator::node_validators::validate_matcher_node(
+                        &input_node,
+                        input_cursor.descendant_index(),
+                        &schema_children,
+                        &self.last_input_str,
+                        &self.schema_str,
+                    ),
+                );
+
+                continue;
+            }
 
             // If there are no code nodes in the schema children, then it
             // may be a mix of nodes we must recurse on.
@@ -252,25 +293,21 @@ impl Validator {
                 // But we can still try to validate the common children
             }
 
+            debug!(
+                "Currently at input_index={}, schema_index={}: input_child_count={}, schema_child_count={}",
+                input_cursor.descendant_index(),
+                schema_cursor.descendant_index(),
+                input_node.child_count(),
+                schema_node.child_count()
+            );
+
             // Collect children to validate
-            if input_cursor.goto_first_child() {
-                if !schema_cursor.goto_first_child() {
-                    debug!(
-                        "Schema node has no children while input node does at input_index={}, schema_index={}",
-                        input_cursor.descendant_index(),
-                        schema_cursor.descendant_index()
-                    );
-                    // Schema has no children but input does - error if EOF
-                    if self.got_eof {
-                        self.errors.push(Error::SchemaViolation(
-                            SchemaViolationError::ChildrenLengthMismatch(
-                                input_cursor.descendant_index(),
-                                schema_cursor.descendant_index(),
-                            ),
-                        ));
-                    }
-                    continue;
-                }
+            if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
+                debug!(
+                    "Queued first child pair for validation: input_index={}, schema_index={}",
+                    input_cursor.descendant_index(),
+                    schema_cursor.descendant_index()
+                );
 
                 // Add first child pair
                 child_pairs_to_validate.push((
