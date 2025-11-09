@@ -6,7 +6,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const inputPath = join(__dirname, './input.md');
-const stream = createReadStream(inputPath, { encoding: 'utf8', highWaterMark: 2 });
+const stream = createReadStream(inputPath, { encoding: 'utf8', highWaterMark: 2});
 
 stream.on('data', (chunk) => {
   process.stdout.write(chunk);

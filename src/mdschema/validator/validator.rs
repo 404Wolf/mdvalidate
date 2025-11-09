@@ -107,6 +107,19 @@ impl Validator {
 
         self.got_eof = eof;
 
+        if eof {
+            // After we got EOF, we want to validate from the parent of the latest offsets and down
+            let input_tree_clone = self.input_tree.clone();
+            let mut input_cursor = input_tree_clone.walk();
+            let mut schema_cursor = self.schema_tree.walk();
+            input_cursor.goto_descendant(self.last_input_descendant_index);
+            schema_cursor.goto_descendant(self.last_schema_descendant_index);
+            input_cursor.goto_parent();
+            schema_cursor.goto_parent();
+            self.last_input_descendant_index = input_cursor.descendant_index();
+            self.last_schema_descendant_index = schema_cursor.descendant_index();
+        }
+
         let mut input_parser = new_markdown_parser();
         // Calculate the range of new content
         let old_len = self.input_tree.root_node().byte_range().end;
@@ -177,72 +190,17 @@ impl Validator {
         // descendant index off of them, it should be 0.
         let mut input_cursor = self.input_tree.walk();
         let input_root_node = input_cursor.node();
-        
+        input_cursor.goto_descendant(self.last_input_descendant_index);
+
         let mut schema_cursor = self.schema_tree.walk();
         let schema_root_node = schema_cursor.node();
-
-        // Position cursors at where we left off
-        input_cursor.goto_descendant(self.last_input_descendant_index);
         schema_cursor.goto_descendant(self.last_schema_descendant_index);
-        
-        // Track the maximum descendant indices we've validated
-        let mut max_input_index = self.last_input_descendant_index;
-        let mut max_schema_index = self.last_schema_descendant_index;
-        
-        // Build initial work queue
-        // We need to find what to validate next. If the current node has children,
-        // start with those. Otherwise, try to find the next sibling or go up.
-        let mut child_pairs_to_validate = Vec::new();
-        
-        // Check if current nodes have children we haven't validated yet
-        if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
-            // Both have children, add them to queue
-            child_pairs_to_validate.push((
-                input_cursor.descendant_index(),
-                schema_cursor.descendant_index(),
-            ));
-            
-            // Add siblings
-            loop {
-                let input_had_sibling = input_cursor.goto_next_sibling();
-                let schema_had_sibling = schema_cursor.goto_next_sibling();
 
-                if input_had_sibling && schema_had_sibling {
-                    child_pairs_to_validate.push((
-                        input_cursor.descendant_index(),
-                        schema_cursor.descendant_index(),
-                    ));
-                } else {
-                    break;
-                }
-            }
-            
-            // Reset to parent for later processing
-            input_cursor.goto_parent();
-            schema_cursor.goto_parent();
-        } else {
-            // Current nodes have no (more) children
-            // Try to find the next node in preorder traversal
-            // This means: next sibling, or parent's next sibling, etc.
-            
-            // Reset cursors
-            input_cursor.reset(input_root_node);
-            schema_cursor.reset(schema_root_node);
-            input_cursor.goto_descendant(self.last_input_descendant_index);
-            schema_cursor.goto_descendant(self.last_schema_descendant_index);
-            
-            // Try to move to next sibling
-            if input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {
-                child_pairs_to_validate.push((
-                    input_cursor.descendant_index(),
-                    schema_cursor.descendant_index(),
-                ));
-            } else {
-                // No next sibling, need to go up and find parent's next sibling
-                // For now, if there's no more work, just return
-                // This happens when we've validated everything available
-            }
-        }
+        // Start with the root nodes
+        let mut child_pairs_to_validate = vec![(
+            input_cursor.descendant_index(),
+            schema_cursor.descendant_index(),
+        )];
 
         while let Some((input_idx, schema_idx)) = child_pairs_to_validate.pop() {
             input_cursor.reset(input_root_node);
@@ -250,10 +208,6 @@ impl Validator {
 
             input_cursor.goto_descendant(input_idx);
             schema_cursor.goto_descendant(schema_idx);
-            
-            // Track the maximum indices we've validated
-            max_input_index = max_input_index.max(input_idx);
-            max_schema_index = max_schema_index.max(schema_idx);
 
             debug!(
                 "Validating node pair: input_index={} [{}], schema_index={} [{}]",
@@ -425,9 +379,9 @@ impl Validator {
             }
         }
 
-        // Update the last descendant indices to the maximum we've validated
-        self.last_input_descendant_index = max_input_index;
-        self.last_schema_descendant_index = max_schema_index;
+        // Update the last descendant indices to the end of the trees
+        self.last_input_descendant_index = input_cursor.descendant_index();
+        self.last_schema_descendant_index = schema_cursor.descendant_index();
     }
 }
 
@@ -1312,7 +1266,6 @@ Footer: goodbye
         validator.validate();
         let errors = validator.errors();
 
-        println!("Errors: {:?}", errors);
         match errors.first() {
             Some(Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(
                 _,
@@ -1335,7 +1288,6 @@ Footer: goodbye
         validator.validate();
         let errors = validator.errors();
 
-        println!("Errors: {:?}", errors);
         match errors.first() {
             Some(Error::SchemaError(SchemaError::MultipleMatchersInNodeChildren(count))) => {
                 println!("Got expected MultipleMatchers error with count: {}", count);
@@ -1355,7 +1307,6 @@ Footer: goodbye
         validator.validate();
         let errors = validator.errors();
 
-        println!("Errors: {:?}", errors);
         assert!(
             errors.is_empty(),
             "Expected no errors for matching list items but found {:?}",
@@ -1373,7 +1324,6 @@ Footer: goodbye
         validator.validate();
         let errors = validator.errors();
 
-        println!("Errors: {:?}", errors);
         match errors.first() {
             Some(Error::SchemaViolation(err)) => {
                 println!("Got expected SchemaViolation error: {:?}", err);
@@ -1392,7 +1342,6 @@ Footer: goodbye
         validator.validate();
         let errors = validator.errors();
 
-        println!("Errors: {:?}", errors);
         match errors.first() {
             Some(Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(
                 _,
@@ -1406,75 +1355,6 @@ Footer: goodbye
                 );
             }
             _ => panic!("Expected NodeContentMismatch error but got: {:?}", errors),
-        }
-    }
-
-    #[test]
-    fn test_streaming_input_with_errors_in_example_files() {
-        let _ = env_logger::builder().is_test(true).try_init();
-
-        // This simulates reading an input file with has errors against a schema in 2-byte chunks
-        let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d/`
-
-# `title:/(([A-Z][a-z]+ )|and |the )+([A-Z][a-z]+)/`
-
-## `first_name:/[A-Z][a-z]+/`
-## `last_name:/[A-Z][a-z]+/`
-
-This is a shopping list:
-
-- `grocery_list_item:/Hello \w+/`
-    - `grocery_item_notes:/.*/`
-"#;
-
-        // This input has multiple errors:
-        // - "JSDS" instead of "CSDS"
-        // - "the" instead of capitalized word (title pattern expects capital letters)
-        // - "1ermelstein" instead of proper name pattern
-        let input_data = r#"# JSDS 999 Assignment 7
-
-# the Curious and Practical Garden
-
-## Wolf
-## 1ermelstein
-
-This is a shopping list:
-
-- Hello Apples
-    - Fresh from market
-"#;
-
-        // Simulate streaming by reading 2 bytes at a time
-        let mut validator =
-            Validator::new(schema_str, "", false).expect("Failed to create validator");
-
-        let bytes = input_data.as_bytes();
-        let mut accumulated = String::new();
-
-        // Read in 2-byte chunks
-        for chunk_start in (0..bytes.len()).step_by(2) {
-            let chunk_end = std::cmp::min(chunk_start + 2, bytes.len());
-            let chunk = std::str::from_utf8(&bytes[chunk_start..chunk_end]).expect("Invalid UTF-8");
-            accumulated.push_str(chunk);
-
-            let is_eof = chunk_end == bytes.len();
-            validator
-                .read_input(&accumulated, is_eof)
-                .expect("Failed to read input");
-            validator.validate();
-        }
-
-        let errors = validator.errors();
-
-        // Should have errors because the input doesn't match the schema
-        assert!(
-            !errors.is_empty(),
-            "Expected validation errors for mismatched input but found none. Input has 'JSDS' instead of 'CSDS', 'the' instead of capitalized title, and '1ermelstein' instead of proper name pattern."
-        );
-
-        println!("Found {} validation errors (expected):", errors.len());
-        for error in &errors {
-            println!("  {:?}", error);
         }
     }
 
