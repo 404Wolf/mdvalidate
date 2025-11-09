@@ -3,8 +3,11 @@ use log::debug;
 use tree_sitter::Tree;
 
 use crate::mdschema::{
-    reports::errors::{Error, ParserError, SchemaViolationError},
-    validator::{node_validators::validate_text_node, utils::new_markdown_parser},
+    reports::errors::{Error, ParserError, SchemaError, SchemaViolationError},
+    validator::{
+        node_validators::{validate_matcher_node, validate_text_node},
+        utils::new_markdown_parser,
+    },
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -216,9 +219,75 @@ impl Validator {
             let input_node = input_cursor.node();
             let schema_node = schema_cursor.node();
 
+            // Otherwise, look at their children;
+            // If the children of the schema node contains a matcher among
+            // text nodes, and the input node is just text OR the input node
+            // has only text children, we validate the matcher using our matcher
+            // helper. It takes care of prefix/suffix matching as well.
+            let schema_children_code_node_count = schema_node
+                .children(&mut schema_cursor.clone())
+                .filter(|child| child.kind() == "code_span")
+                .count();
+
+            // We don't allow multiple code_span children for the schema
+            // since it would lead to ambiguity
+            if schema_children_code_node_count > 1 {
+                self.errors.push(Error::SchemaError(
+                    SchemaError::MultipleMatchersInNodeChildren(schema_children_code_node_count),
+                ));
+                continue;
+            }
+
+            // Check if input node is text or only has text children
+            let input_is_text_only = input_node.kind() == "text"
+                || (input_node.child_count() == 1
+                    && input_node
+                        .child(0)
+                        .map(|c| c.kind() == "text")
+                        .unwrap_or(false));
+
+            // If the schema's current level's child nodes have a code node (a matcher)
+            if schema_children_code_node_count == 1 && input_is_text_only {
+                debug!(
+                    "Validating matcher node at input_index={}, schema_index={}",
+                    input_cursor.descendant_index(),
+                    schema_cursor.descendant_index()
+                );
+
+                // Collect schema node children for validation
+                let schema_children: Vec<_> =
+                    schema_node.children(&mut schema_cursor.clone()).collect();
+                schema_cursor.goto_parent(); // Reset cursor after children iteration
+
+                // Get the actual text node to validate
+                let text_node_to_validate = if input_node.kind() == "text" {
+                    input_node
+                } else {
+                    input_node.child(0).unwrap()
+                };
+
+                // Validate the input text against the matchers in the schema
+                self.errors.extend(validate_matcher_node(
+                    &text_node_to_validate,
+                    input_cursor.descendant_index(),
+                    &schema_children,
+                    &self.last_input_str,
+                    &self.schema_str,
+                    self.got_eof,
+                    &input_root_node,
+                ));
+
+                continue;
+            }
             // If they are both text, directly compare them. This is a "base
             // case," where we do not need to do any special logic.
-            if schema_node.kind() == "text" {
+            else if schema_node.kind() == "text" {
+                debug!(
+                    "Validating text node at input_index={}, schema_index={}",
+                    input_cursor.descendant_index(),
+                    schema_cursor.descendant_index()
+                );
+
                 self.errors.extend(validate_text_node(
                     &input_node,
                     input_cursor.descendant_index(),
@@ -228,40 +297,6 @@ impl Validator {
                     self.got_eof,
                     &input_node,
                 ));
-
-                continue;
-            }
-
-            // Otherwise, look at their children;
-            // If the children of the schema node contains a matcher among
-            // text nodes, and the input node is just text, we validate the
-            // matcher using our matcher helper. It takes care of prefix/suffix
-            // matching as well.
-            let schema_children_has_code_node = schema_node
-                .children(&mut schema_cursor.clone())
-                .any(|child| child.kind() == "code_span");
-
-            if schema_children_has_code_node && input_node.kind() == "text" {
-                debug!(
-                    "Validating matcher node at input_index={}, schema_index={}",
-                    input_cursor.descendant_index(),
-                    schema_cursor.descendant_index()
-                );
-
-                // Collect schema node children for validation
-                let schema_children: Vec<_> = schema_node.children(&mut schema_cursor.clone()).collect();
-                schema_cursor.goto_parent(); // Reset cursor after children iteration
-
-                // Validate the input text against the matchers in the schema
-                self.errors.extend(
-                    crate::mdschema::validator::node_validators::validate_matcher_node(
-                        &input_node,
-                        input_cursor.descendant_index(),
-                        &schema_children,
-                        &self.last_input_str,
-                        &self.schema_str,
-                    ),
-                );
 
                 continue;
             }
@@ -555,5 +590,615 @@ mod tests {
             Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
             _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
         }
+    }
+
+    // ========== Matcher Tests ==========
+
+    #[test]
+    fn test_simple_matcher_validates_correctly() {
+        let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
+        let input = "# Hi Wolf\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_different_valid_name() {
+        let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
+        let input = "# Hi Alice\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_fails_with_invalid_name() {
+        let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
+        let input = "# Hi wolf\n"; // lowercase first letter
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for lowercase name"
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_numbers() {
+        let schema = r"Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
+";
+        let input = "Version: 1.2.3\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_numbers_fails_on_invalid_format() {
+        let schema = r"Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
+";
+        let input = "Version: 1.2\n"; // missing third number
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for incomplete version"
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_prefix_and_suffix() {
+        let schema = "Hello `name:/[A-Z][a-z]+/`, welcome!\n";
+        let input = "Hello Alice, welcome!\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_wrong_prefix() {
+        let schema = "Hello `name:/[A-Z][a-z]+/`, welcome!\n";
+        let input = "Hi Alice, welcome!\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for wrong prefix"
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_wrong_suffix() {
+        let schema = "Hello `name:/[A-Z][a-z]+/`, welcome!\n";
+        let input = "Hello Alice, goodbye!\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for wrong suffix"
+        );
+    }
+
+    #[test]
+    fn test_matcher_in_heading_with_other_text() {
+        let schema = "# Section `num:/[0-9]+/`: Introduction\n";
+        let input = "# Section 42: Introduction\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_word_pattern() {
+        let schema = r"Contact: `word:/[a-z]+/`
+";
+        let input = "Contact: hello\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_invalid_word() {
+        let schema = r"Contact: `word:/[a-z]+/`
+";
+        let input = "Contact: Hello123\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for invalid word"
+        );
+    }
+
+    // ========== Complex Structure Tests ==========
+
+    #[test]
+    fn test_nested_lists_validate() {
+        let schema = "- Item 1\n  - Nested 1\n  - Nested 2\n- Item 2\n";
+        let input = "- Item 1\n  - Nested 1\n  - Nested 2\n- Item 2\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_nested_lists_with_mismatch() {
+        let schema = "- Item 1\n  - Nested 1\n  - Nested 2\n- Item 2\n";
+        let input = "- Item 1\n  - Nested 1\n  - Nested X\n- Item 2\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for nested list mismatch"
+        );
+    }
+
+    #[test]
+    fn test_multiple_headings() {
+        let schema = "# Heading 1\n\n## Heading 2\n\n### Heading 3\n";
+        let input = "# Heading 1\n\n## Heading 2\n\n### Heading 3\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_code_block_validation() {
+        let schema = "```rust\nfn main() {}\n```\n";
+        let input = "```rust\nfn main() {}\n```\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_code_block_with_different_content_fails() {
+        let schema = "```rust\nfn main() {}\n```\n";
+        let input = "```rust\nfn test() {}\n```\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for different code content"
+        );
+    }
+
+    #[test]
+    fn test_blockquote_validation() {
+        let schema = "> This is a quote\n";
+        let input = "> This is a quote\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_link_validation() {
+        let schema = "[Link Text](https://example.com)\n";
+        let input = "[Link Text](https://example.com)\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_link_with_different_url_fails() {
+        let schema = "[Link Text](https://example.com)\n";
+        let input = "[Link Text](https://different.com)\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for different URL"
+        );
+    }
+
+    // ========== Edge Cases ==========
+
+    #[test]
+    fn test_empty_document() {
+        let schema = "";
+        let input = "";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors for empty document"
+        );
+    }
+
+    #[test]
+    fn test_only_whitespace() {
+        let schema = "   \n\n   \n";
+        let input = "   \n\n   \n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors for whitespace-only document"
+        );
+    }
+
+    #[test]
+    fn test_paragraph_with_inline_code() {
+        let schema = "This is `inline code` in text.\n";
+        let input = "This is `inline code` in text.\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_paragraph_with_emphasis() {
+        let schema = "This is *emphasized* text.\n";
+        let input = "This is *emphasized* text.\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_paragraph_with_strong() {
+        let schema = "This is **bold** text.\n";
+        let input = "This is **bold** text.\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_mixed_formatting() {
+        let schema = "# Title\n\nThis is a paragraph with **bold** and *italic* text.\n\n- List item 1\n- List item 2\n";
+        let input = "# Title\n\nThis is a paragraph with **bold** and *italic* text.\n\n- List item 1\n- List item 2\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    // ========== Incremental Reading Tests ==========
+
+    #[test]
+    fn test_incremental_reading_with_matcher() {
+        let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
+        let input_partial = "# Hi W";
+
+        let mut validator =
+            Validator::new(schema, input_partial, false).expect("Failed to create validator");
+
+        validator.validate();
+        let errors = validator.errors();
+        assert!(errors.is_empty(), "Should not error on partial input");
+
+        // Complete the input
+        validator
+            .read_input("# Hi Wolf\n", true)
+            .expect("Failed to read input");
+
+        validator.validate();
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_incremental_reading_multiple_steps() {
+        let schema = "# Title\n\nParagraph text\n";
+
+        let mut validator =
+            Validator::new(schema, "# ", false).expect("Failed to create validator");
+        validator.validate();
+        assert!(validator.errors().is_empty());
+
+        validator
+            .read_input("# Title\n", false)
+            .expect("Failed to read");
+        validator.validate();
+        assert!(validator.errors().is_empty());
+
+        validator
+            .read_input("# Title\n\nParagraph text\n", true)
+            .expect("Failed to read");
+        validator.validate();
+        assert!(
+            validator.errors().is_empty(),
+            "Expected no errors but found {:?}",
+            validator.errors()
+        );
+    }
+
+    #[test]
+    fn test_cannot_read_after_eof() {
+        let schema = "Test\n";
+        let mut validator =
+            Validator::new(schema, "Test\n", true).expect("Failed to create validator");
+
+        let result = validator.read_input("More text\n", false);
+        assert!(
+            result.is_err(),
+            "Should not be able to read input after EOF"
+        );
+    }
+
+    // ========== Matcher Edge Cases ==========
+
+    #[test]
+    fn test_matcher_at_start_of_line() {
+        let schema = "`name:/[A-Z][a-z]+/` is the name\n";
+        let input = "Alice is the name\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_at_end_of_line() {
+        let schema = "The name is `name:/[A-Z][a-z]+/`\n";
+        let input = "The name is Alice\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_entire_line() {
+        let schema = "`content:/.+/`\n";
+        let input = "Any content here\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_special_regex_chars() {
+        let schema = r"Price: `price:/\$[0-9]+\.[0-9]{2}/`
+";
+        let input = "Price: $19.99\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_with_optional_groups() {
+        let schema = "Date: `date:/[0-9]{4}-[0-9]{2}-[0-9]{2}/`\n";
+        let input = "Date: 2025-11-08\n";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
     }
 }

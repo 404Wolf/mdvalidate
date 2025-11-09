@@ -57,6 +57,7 @@ fn extract_error_info(error: &Error) -> (usize, String) {
             ),
         },
         Error::ParserError(_) => (0, "Parser error occurred".to_string()),
+        Error::SchemaError(_) => (0, "Schema error occurred".to_string()),
     }
 }
 

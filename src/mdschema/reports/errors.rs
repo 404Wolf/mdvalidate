@@ -1,6 +1,7 @@
 #[derive(Debug, Clone)]
 pub enum Error {
     SchemaViolation(SchemaViolationError),
+    SchemaError(SchemaError),
     ParserError(ParserError),
 }
 
@@ -9,6 +10,11 @@ pub enum ParserError {
     ReadAfterGotEOF,
     InvalidUTF8,
     TreesitterError,
+}
+
+#[derive(Debug, Clone)]
+pub enum SchemaError {
+    MultipleMatchersInNodeChildren(usize),
 }
 
 #[derive(Debug, Clone)]
