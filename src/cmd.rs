@@ -1,6 +1,9 @@
 use std::io::Read;
 
-use crate::mdschema::{reports::{errors::Error, pretty_print::pretty_print_error}, validator::validator::Validator};
+use crate::mdschema::{
+    reports::{errors::Error, pretty_print::pretty_print_error},
+    validator::validator::Validator,
+};
 use anyhow::Result;
 use colored::*;
 use log::{debug, info, trace};
@@ -213,6 +216,45 @@ mod tests {
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content"
+        );
+    }
+
+    #[test]
+    fn test_validate_stream_input_against_matcher() {
+        let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d/`
+
+# `title:/(([A-Z][a-z]+ )|and |the )+([A-Z][a-z]+)/`
+
+## `first_name:/[A-Z][a-z]+/`
+## `last_name:/[A-Z][a-z]+/`
+
+This is a shopping list:
+
+- `grocery_list_item:/Hello \w+/`
+    - `grocery_item_notes:/.*/`"#
+            .to_string();
+
+        let input_data = r#"# CSDS 999 Assignment 7
+
+# The Curious and Practical Garden
+
+## Wolf
+## Mermelstein
+
+This is a shopping list:
+
+- Hello Apples
+    - Fresh from market"#;
+
+        let cursor = Cursor::new(input_data.as_bytes());
+        let mut reader = LimitedReader::new(cursor, 2);
+
+        let result = validate(schema_str, &mut reader, "test_file.md");
+
+        let errors = result.expect("Validation should complete without errors");
+        assert!(
+            errors.is_empty(),
+            "Should have no errors for matching content with matchers"
         );
     }
 }

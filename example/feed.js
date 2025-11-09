@@ -1,14 +1,24 @@
-const data = "# Hi there\n";
-let i = 0;
+import { createReadStream } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-function writeNext() {
-  if (i < data.length) {
-    const chunk = data.slice(i, i + 2);
-    process.stdout.write(chunk);
-    console.error(chunk);
-    i += 2;
-    setTimeout(writeNext, 250);
-  }
-}
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-writeNext();
+const inputPath = join(__dirname, './input.md');
+const stream = createReadStream(inputPath, { encoding: 'utf8', highWaterMark: 2 });
+
+stream.on('data', (chunk) => {
+  process.stdout.write(chunk);
+  console.error(chunk);
+  stream.pause();
+  setTimeout(() => stream.resume(), 50);
+});
+
+stream.on('end', () => {
+  // Done streaming
+});
+
+stream.on('error', (err) => {
+  console.error('Error reading file:', err);
+});

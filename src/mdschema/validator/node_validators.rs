@@ -69,6 +69,12 @@ pub fn validate_matcher_node<'b>(
         debug!("Skipping matcher validation - incomplete node at EOF");
         return Vec::new();
     }
+    
+    debug!("validate_matcher_node: input_node range={:?}, input_text='{}', eof={}", 
+        input_node.byte_range(),
+        &input_str[input_node.byte_range()],
+        eof
+    );
 
     let mut errors = Vec::new();
 
@@ -124,21 +130,35 @@ pub fn validate_matcher_node<'b>(
     let input_start = input_node.byte_range().start + matcher_start;
     let input_to_match = &input_str[input_start..];
 
+    // If this is the last node, don't validate it if we haven't reached EOF,
+    // since the matcher might be incomplete.
     match matcher.match_str(input_to_match) {
         Some(matched_str) => {
             // Validate suffix
             let schema_end = schema_nodes.last().unwrap().byte_range().end;
             let suffix_schema = &schema_str[schema_start + matcher_end..schema_end];
             let suffix_start = input_start + matched_str.len();
-            let suffix_input = &input_str[suffix_start..input_node.byte_range().end];
-
-            if suffix_schema != suffix_input {
+            let input_end = input_node.byte_range().end;
+            
+            // Ensure suffix_start doesn't exceed input_end
+            if suffix_start > input_end {
                 errors.push(Error::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch(
                         input_node_descendant_index,
                         suffix_schema.into(),
                     ),
                 ));
+            } else {
+                let suffix_input = &input_str[suffix_start..input_end];
+
+                if suffix_schema != suffix_input {
+                    errors.push(Error::SchemaViolation(
+                        SchemaViolationError::NodeContentMismatch(
+                            input_node_descendant_index,
+                            suffix_schema.into(),
+                        ),
+                    ));
+                }
             }
         }
         None => {
