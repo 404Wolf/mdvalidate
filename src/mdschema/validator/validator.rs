@@ -739,7 +739,7 @@ mod tests {
     #[test]
     fn test_matcher_in_heading_with_other_text() {
         let schema = "# Section `num:/[0-9]+/`: Introduction\n";
-        let input = "# Section 42: Introduction\n";
+        let input = "# Section 22: Introduction\n";
 
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
@@ -1178,6 +1178,397 @@ mod tests {
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
             errors
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_multiple_matchers_and_literals() {
+        // Test document with:
+        // - Header (literal)
+        // - Paragraph (literal)
+        // - List with 4 items:
+        //   - Item 1: literal
+        //   - Item 2: matcher at end of line
+        //   - Item 3: literal (no matcher)
+        //   - Item 4: different matcher
+        // - Final line with matcher at the bottom
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with Alice
+- Third item is just literal
+- Fourth item has 22 in it
+
+Footer: goodbye
+"#;
+
+        let mut validator: Validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_matcher_mismatch() {
+        // Same structure but with an invalid matcher value
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with 123
+- Third item is just literal
+- Fourth item has 22 in it
+
+Footer: goodbye
+"#;
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for invalid name (numbers instead of letters)"
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_literal_mismatch() {
+        // Test that literals still fail when they don't match
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is DIFFERENT
+- Second item ends with Alice
+- Third item is just literal
+- Fourth item has 22 in it
+
+Footer: goodbye
+"#;
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for literal mismatch in first list item"
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_wrong_header() {
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Wrong Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with Alice
+- Third item is just literal
+- Fourth item has 22 in it
+
+Footer: goodbye
+"#;
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for wrong header text"
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_wrong_paragraph() {
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Document Title
+
+This paragraph has different text.
+
+- First item is literal
+- Second item ends with Alice
+- Third item is just literal
+- Fourth item has 22 in it
+
+Footer: goodbye
+"#;
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for wrong paragraph text"
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_wrong_third_list_item() {
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with Alice
+- Third item is MODIFIED
+- Fourth item has 22 in it
+
+Footer: goodbye
+"#;
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for modified third list item"
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_wrong_fourth_list_item_matcher() {
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with Alice
+- Third item is just literal
+- Fourth item has XYZ in it
+
+Footer: goodbye
+"#;
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for invalid number matcher (letters instead of numbers)"
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_wrong_footer_matcher() {
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with Alice
+- Third item is just literal
+- Fourth item has 22 in it
+
+Footer: GOODBYE123
+"#;
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for footer matcher (uppercase and numbers instead of lowercase)"
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_wrong_footer_prefix() {
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with Alice
+- Third item is just literal
+- Fourth item has 22 in it
+
+Epilogue: goodbye
+"#;
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for wrong footer prefix"
+        );
+    }
+
+    #[test]
+    fn test_complex_document_with_missing_list_item() {
+        let schema = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with `name:/[A-Z][a-z]+/`
+- Third item is just literal
+- Fourth item has `num:/[0-9]+/` in it
+
+Footer: `footer:/[a-z]+/`
+"#;
+
+        let input = r#"# Document Title
+
+This is a paragraph with some content.
+
+- First item is literal
+- Second item ends with Alice
+- Third item is just literal
+
+Footer: goodbye
+"#;
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+
+        validator.validate();
+
+        let errors = validator.errors();
+        assert!(
+            !errors.is_empty(),
+            "Expected validation error for missing list item"
         );
     }
 }
