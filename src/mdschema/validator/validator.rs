@@ -118,14 +118,6 @@ impl Validator {
                 "No new content to parse (new_len={}, old_len={})",
                 new_len, old_len
             );
-            // If we're now at EOF, reset indices so we re-validate text nodes
-            // that were previously skipped due to not being at EOF
-            if eof {
-                // TODO: This feels wrong
-                debug!("EOF reached with no new content, resetting indices for final validation");
-                self.last_input_descendant_index = 0;
-                self.last_schema_descendant_index = 0;
-            }
             return Ok(());
         }
 
