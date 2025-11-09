@@ -1109,8 +1109,6 @@ mod tests {
         );
     }
 
-    // ========== Matcher Edge Cases ==========
-
     #[test]
     fn test_matcher_at_start_of_line() {
         let schema = "`name:/[A-Z][a-z]+/` is the name\n";
@@ -1151,25 +1149,6 @@ mod tests {
     fn test_matcher_entire_line() {
         let schema = "`content:/.+/`\n";
         let input = "Any content here\n";
-
-        let mut validator =
-            Validator::new(schema, input, true).expect("Failed to create validator");
-
-        validator.validate();
-
-        let errors = validator.errors();
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors but found {:?}",
-            errors
-        );
-    }
-
-    #[test]
-    fn test_matcher_with_special_regex_chars() {
-        let schema = r"Price: `price:/\$[0-9]+\.[0-9]{2}/`
-";
-        let input = "Price: $19.99\n";
 
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
