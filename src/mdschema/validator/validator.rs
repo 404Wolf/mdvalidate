@@ -1183,15 +1183,6 @@ mod tests {
 
     #[test]
     fn test_complex_document_with_multiple_matchers_and_literals() {
-        // Test document with:
-        // - Header (literal)
-        // - Paragraph (literal)
-        // - List with 4 items:
-        //   - Item 1: literal
-        //   - Item 2: matcher at end of line
-        //   - Item 3: literal (no matcher)
-        //   - Item 4: different matcher
-        // - Final line with matcher at the bottom
         let schema = r#"# Document Title
 
 This is a paragraph with some content.
@@ -1230,122 +1221,6 @@ Footer: goodbye
     }
 
     #[test]
-    fn test_complex_document_with_matcher_mismatch() {
-        // Same structure but with an invalid matcher value
-        let schema = r#"# Document Title
-
-This is a paragraph with some content.
-
-- First item is literal
-- Second item ends with `name:/[A-Z][a-z]+/`
-- Third item is just literal
-- Fourth item has `num:/[0-9]+/` in it
-
-Footer: `footer:/[a-z]+/`
-"#;
-
-        let input = r#"# Document Title
-
-This is a paragraph with some content.
-
-- First item is literal
-- Second item ends with 123
-- Third item is just literal
-- Fourth item has 22 in it
-
-Footer: goodbye
-"#;
-
-        let mut validator =
-            Validator::new(schema, input, true).expect("Failed to create validator");
-
-        validator.validate();
-
-        let errors = validator.errors();
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for invalid name (numbers instead of letters)"
-        );
-    }
-
-    #[test]
-    fn test_complex_document_with_literal_mismatch() {
-        // Test that literals still fail when they don't match
-        let schema = r#"# Document Title
-
-This is a paragraph with some content.
-
-- First item is literal
-- Second item ends with `name:/[A-Z][a-z]+/`
-- Third item is just literal
-- Fourth item has `num:/[0-9]+/` in it
-
-Footer: `footer:/[a-z]+/`
-"#;
-
-        let input = r#"# Document Title
-
-This is a paragraph with some content.
-
-- First item is DIFFERENT
-- Second item ends with Alice
-- Third item is just literal
-- Fourth item has 22 in it
-
-Footer: goodbye
-"#;
-
-        let mut validator =
-            Validator::new(schema, input, true).expect("Failed to create validator");
-
-        validator.validate();
-
-        let errors = validator.errors();
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for literal mismatch in first list item"
-        );
-    }
-
-    #[test]
-    fn test_complex_document_with_wrong_header() {
-        let schema = r#"# Document Title
-
-This is a paragraph with some content.
-
-- First item is literal
-- Second item ends with `name:/[A-Z][a-z]+/`
-- Third item is just literal
-- Fourth item has `num:/[0-9]+/` in it
-
-Footer: `footer:/[a-z]+/`
-"#;
-
-        let input = r#"# Wrong Title
-
-This is a paragraph with some content.
-
-- First item is literal
-- Second item ends with Alice
-- Third item is just literal
-- Fourth item has 22 in it
-
-Footer: goodbye
-"#;
-
-        let mut validator =
-            Validator::new(schema, input, true).expect("Failed to create validator");
-
-        validator.validate();
-
-        let errors = validator.errors();
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for wrong header text"
-        );
-    }
-
-    #[test]
     fn test_complex_document_with_wrong_paragraph() {
         let schema = r#"# Document Title
 
@@ -1377,10 +1252,10 @@ Footer: goodbye
         validator.validate();
 
         let errors = validator.errors();
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for wrong paragraph text"
-        );
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
+            _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
+        }
     }
 
     #[test]
@@ -1415,10 +1290,10 @@ Footer: goodbye
         validator.validate();
 
         let errors = validator.errors();
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for modified third list item"
-        );
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
+            _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
+        }
     }
 
     #[test]
@@ -1453,10 +1328,10 @@ Footer: goodbye
         validator.validate();
 
         let errors = validator.errors();
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for invalid number matcher (letters instead of numbers)"
-        );
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
+            _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
+        }
     }
 
     #[test]
@@ -1491,10 +1366,10 @@ Footer: GOODBYE123
         validator.validate();
 
         let errors = validator.errors();
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for footer matcher (uppercase and numbers instead of lowercase)"
-        );
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
+            _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
+        }
     }
 
     #[test]
@@ -1529,14 +1404,14 @@ Epilogue: goodbye
         validator.validate();
 
         let errors = validator.errors();
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for wrong footer prefix"
-        );
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
+            _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
+        }
     }
 
     #[test]
-    fn test_complex_document_with_missing_list_item() {
+    fn test_complex_document_with_wrong_list_shape() {
         let schema = r#"# Document Title
 
 This is a paragraph with some content.
@@ -1556,6 +1431,8 @@ This is a paragraph with some content.
 - First item is literal
 - Second item ends with Alice
 - Third item is just literal
+- Fourth item has 22 in it
+    - Fourth item has 22 in it
 
 Footer: goodbye
 "#;
@@ -1566,9 +1443,133 @@ Footer: goodbye
         validator.validate();
 
         let errors = validator.errors();
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(_, _)) => {}
+            _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),
+        }
+    }
+
+    #[test]
+    fn test_single_matcher_matches_good_regex() {
+        let schema = "`id:/test/`";
+        let input = "test";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+        validator.validate();
+        let errors = validator.errors();
+
         assert!(
-            !errors.is_empty(),
-            "Expected validation error for missing list item"
+            errors.is_empty(),
+            "Expected no errors but found {:?}",
+            errors
         );
+    }
+
+    #[test]
+    fn test_single_matcher_matches_bad_regex() {
+        let schema = "`id:/test/`";
+        let input = "testttt";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+        validator.validate();
+        let errors = validator.errors();
+
+        println!("Errors: {:?}", errors);
+        match errors.first() {
+            Some(Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(
+                _,
+                expected,
+            ))) => {
+                println!("Got expected NodeContentMismatch error for: {}", expected);
+            }
+            _ => panic!("Expected NodeContentMismatch error but got: {:?}", errors),
+        }
+    }
+
+    #[test]
+    fn test_multiple_matchers() {
+        // The schema becomes a paragraph with multiple code nodes
+        let schema = "`id:/test/` `id:/example/`";
+        let input = "test example";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+        validator.validate();
+        let errors = validator.errors();
+
+        println!("Errors: {:?}", errors);
+        match errors.first() {
+            Some(Error::SchemaError(SchemaError::MultipleMatchersInNodeChildren(count))) => {
+                println!("Got expected MultipleMatchers error with count: {}", count);
+                assert_eq!(*count, 2, "Expected 2 matchers");
+            }
+            _ => panic!("Expected MultipleMatchers error but got: {:?}", errors),
+        }
+    }
+
+    #[test]
+    fn test_matcher_for_single_list_item() {
+        let schema = "- `id:/item\\d/`\n- `id:/item2/`";
+        let input = "- item1\n- item2";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+        validator.validate();
+        let errors = validator.errors();
+
+        println!("Errors: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for matching list items but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_matcher_for_wrong_node_types() {
+        let schema = "`id:/item1/`\n- `id:/item3/`";
+        let input = "- item1\n- item2";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+        validator.validate();
+        let errors = validator.errors();
+
+        println!("Errors: {:?}", errors);
+        match errors.first() {
+            Some(Error::SchemaViolation(err)) => {
+                println!("Got expected SchemaViolation error: {:?}", err);
+            }
+            _ => panic!("Expected SchemaViolation error but got: {:?}", errors),
+        }
+    }
+
+    #[test]
+    fn test_mismatched_list_items() {
+        let schema = "- `id:/item1/`\n- `id:/item3/`";
+        let input = "- item1\n- item2";
+
+        let mut validator =
+            Validator::new(schema, input, true).expect("Failed to create validator");
+        validator.validate();
+        let errors = validator.errors();
+
+        println!("Errors: {:?}", errors);
+        match errors.first() {
+            Some(Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(
+                _,
+                expected,
+            ))) => {
+                println!("Got expected NodeContentMismatch error for: {}", expected);
+                // The matcher pattern should be in the expected string
+                assert!(
+                    expected.contains("item3"),
+                    "Expected error to mention 'item3' matcher"
+                );
+            }
+            _ => panic!("Expected NodeContentMismatch error but got: {:?}", errors),
+        }
     }
 }

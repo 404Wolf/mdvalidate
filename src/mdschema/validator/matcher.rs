@@ -45,15 +45,6 @@ impl Matcher {
         })
     }
 
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    /// Test if the given text matches the matcher pattern.
-    pub fn is_match(&self, text: &str) -> bool {
-        self.regex.is_match(text)
-    }
-
     /// Get an actual match string for a given text, if it matches.
     pub fn match_str<'a>(&self, text: &'a str) -> Option<&'a str> {
         if let Some(mat) = self.regex.find(text) {

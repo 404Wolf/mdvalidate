@@ -25,8 +25,6 @@ pub enum SchemaViolationError {
     NodeContentMismatch(usize, String),
     /// Nodes have different numbers of children
     ChildrenLengthMismatch(usize, usize),
-    /// When a given parent has more than a single code child in the schema
-    MultipleMatchers(usize), // Just store the count, not the actual nodes
 }
 
 pub enum NodeContentMismatchError {

@@ -5,7 +5,6 @@ use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::PathBuf;
 
-mod tests;
 pub mod cmd;
 pub mod mdschema;
 

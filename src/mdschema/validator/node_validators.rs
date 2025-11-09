@@ -79,7 +79,10 @@ pub fn validate_matcher_node<'b>(
 
     if code_nodes.len() > 1 {
         return vec![Error::SchemaViolation(
-            SchemaViolationError::MultipleMatchers(code_nodes.len()),
+            SchemaViolationError::NodeContentMismatch(
+                input_node_descendant_index,
+                "Multiple matchers in single node".into(),
+            ),
         )];
     }
 
@@ -237,7 +240,15 @@ mod tests {
             .children(&mut schema_cursor)
             .collect();
 
-        let errors = validate_matcher_node(&input_node, 0, &schema_nodes, input, schema, true, &input_root);
+        let errors = validate_matcher_node(
+            &input_node,
+            0,
+            &schema_nodes,
+            input,
+            schema,
+            true,
+            &input_root,
+        );
 
         assert!(
             errors.is_empty(),
@@ -266,7 +277,15 @@ mod tests {
             .children(&mut schema_cursor)
             .collect();
 
-        let errors = validate_matcher_node(&input_node, 0, &schema_nodes, input, schema, true, &input_root);
+        let errors = validate_matcher_node(
+            &input_node,
+            0,
+            &schema_nodes,
+            input,
+            schema,
+            true,
+            &input_root,
+        );
 
         assert!(
             errors.is_empty(),
@@ -295,7 +314,15 @@ mod tests {
             .children(&mut schema_cursor)
             .collect();
 
-        let errors = validate_matcher_node(&input_node, 0, &schema_nodes, input, schema, true, &input_root);
+        let errors = validate_matcher_node(
+            &input_node,
+            0,
+            &schema_nodes,
+            input,
+            schema,
+            true,
+            &input_root,
+        );
 
         assert!(
             errors.is_empty(),
@@ -324,7 +351,15 @@ mod tests {
             .children(&mut schema_cursor)
             .collect();
 
-        let errors = validate_matcher_node(&input_node, 0, &schema_nodes, input, schema, true, &input_root);
+        let errors = validate_matcher_node(
+            &input_node,
+            0,
+            &schema_nodes,
+            input,
+            schema,
+            true,
+            &input_root,
+        );
 
         assert!(
             errors.is_empty(),
@@ -353,7 +388,15 @@ mod tests {
             .children(&mut schema_cursor)
             .collect();
 
-        let errors = validate_matcher_node(&input_node, 0, &schema_nodes, input, schema, true, &input_root);
+        let errors = validate_matcher_node(
+            &input_node,
+            0,
+            &schema_nodes,
+            input,
+            schema,
+            true,
+            &input_root,
+        );
 
         assert!(
             errors.is_empty(),
@@ -382,7 +425,15 @@ mod tests {
             .children(&mut schema_cursor)
             .collect();
 
-        let errors = validate_matcher_node(&input_node, 0, &schema_nodes, input, schema, true, &input_root);
+        let errors = validate_matcher_node(
+            &input_node,
+            0,
+            &schema_nodes,
+            input,
+            schema,
+            true,
+            &input_root,
+        );
 
         assert_eq!(errors.len(), 1);
         match &errors[0] {

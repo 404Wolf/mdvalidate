@@ -45,9 +45,6 @@ fn extract_error_info(error: &Error) -> (usize, String) {
                     expected
                 ),
             ),
-            SchemaViolationError::MultipleMatchers(count) => {
-                (0, format!("Multiple matchers found ({} matchers)", count))
-            }
             SchemaViolationError::ChildrenLengthMismatch(expected, actual) => (
                 0,
                 format!(
