@@ -1393,10 +1393,6 @@ Content for section 3."#;
         // Start with empty input
         let mut validator = Validator::new(schema, "", false).expect("Failed to create validator");
 
-        // Track how many times we call validate() - each call should process
-        // only new/changed nodes, not re-validate everything
-        let mut validation_count = 0;
-
         // Incrementally add content in logical chunks
         let chunks = vec![
             "# Title\n\n",
