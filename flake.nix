@@ -24,6 +24,7 @@
           programs.nixfmt.enable = true;
           programs.yamlfmt.enable = true;
           programs.typstfmt.enable = true;
+          programs.toml-sort.enable = true;
         };
       in
       {
@@ -47,6 +48,7 @@
               rust-analyzer
               fira-mono
               git-cliff
+              cargo-release
             ]
           );
           shellHook = ''

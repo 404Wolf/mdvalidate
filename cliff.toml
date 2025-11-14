@@ -9,15 +9,15 @@ body = """
 {% endfor %}
 """
 
+[commit_types]
+feat = {name = "Features"}
+fix = {name = "Bug Fixes"}
+chore = {name = "Chores"}
+docs = {name = "Documentation"}
+refactor = {name = "Refactors"}
+test = {name = "Tests"}
+
 [git]
 conventional_commits = true
 filter_unconventional = true
 tag_pattern = "v[0-9]*"
-
-[commit_types]
-feat = { name = "Features" }
-fix = { name = "Bug Fixes" }
-chore = { name = "Chores" }
-docs = { name = "Documentation" }
-refactor = { name = "Refactors" }
-test = { name = "Tests" }
