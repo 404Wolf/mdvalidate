@@ -1124,12 +1124,11 @@ checksum = "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
 
 [[package]]
 name = "mdv"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "ariadne",
  "cargo-llvm-cov",
- "cc",
  "clap",
  "colored",
  "env_logger",
