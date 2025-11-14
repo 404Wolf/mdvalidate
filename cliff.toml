@@ -11,7 +11,7 @@ body = """
 
 [git]
 conventional_commits = true
-filter_unconventional = false
+filter_unconventional = true
 tag_pattern = "v[0-9]*"
 
 [commit_types]
