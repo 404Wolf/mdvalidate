@@ -1,0 +1,23 @@
+[changelog]
+header = "# Changelog\n\n"
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first }} ({{ commit.id | truncate(length=7) }})
+{% endfor %}
+{% endfor %}
+"""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+tag_pattern = "v[0-9]*"
+
+[commit_types]
+feat = { name = "Features" }
+fix = { name = "Bug Fixes" }
+chore = { name = "Chores" }
+docs = { name = "Documentation" }
+refactor = { name = "Refactors" }
+test = { name = "Tests" }

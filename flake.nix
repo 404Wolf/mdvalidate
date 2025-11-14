@@ -46,6 +46,7 @@
               mermaid-cli
               rust-analyzer
               fira-mono
+              git-cliff
             ]
           );
           shellHook = ''
