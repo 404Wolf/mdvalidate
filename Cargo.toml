@@ -15,13 +15,17 @@ cargo-llvm-cov = "0.6.21"
 flamegraph = "0.6.9"
 
 [package]
-name = "mdv"
+name = "mdvalidate"
 version = "0.1.3"
 description = "Markdown schema validation engine"
 license = "MIT"
 documentation = "https://github.com/404wolf/mdvalidate"
 homepage = "https://github.com/404wolf/mdvalidate"
 edition = "2021"
+
+[[bin]]
+name = "mdv"
+path = "src/main.rs"
 
 [profile.flamegraph]
 inherits = "release"
