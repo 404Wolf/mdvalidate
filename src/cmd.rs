@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_validate_stream_input_against_matcher() {
-        let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d/`
+        let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d+/`
 
 # `title:/(([A-Z][a-z]+ )|and |the )+([A-Z][a-z]+)/`
 
@@ -281,6 +281,38 @@ This is a shopping list:
         assert!(
             !errors.is_empty(),
             "Expected validation errors for mismatched input but found none."
+        );
+    }
+
+    #[test]
+    fn test_multiple_nodes_with_one_error_receives_one_error_once() {
+        let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d+/`
+
+This is a test
+
+This is a test
+
+This is a test"#
+            .to_string();
+        let input_data = r#"# CSDS 999 Assignment dd
+
+This is a test
+
+This is a test
+
+This is a test"#;
+
+        let cursor = Cursor::new(input_data.as_bytes());
+        let mut reader = LimitedReader::new(cursor, 9);
+
+        let result = validate(schema_str, &mut reader, "test_file.md", false);
+
+        let errors = result.expect("Validation should complete without errors");
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected exactly one error but found {:?}",
+            errors
         );
     }
 }

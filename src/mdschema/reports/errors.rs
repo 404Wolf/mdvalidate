@@ -1,23 +1,23 @@
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Error {
     SchemaViolation(SchemaViolationError),
     SchemaError(SchemaError),
     ParserError(ParserError),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum ParserError {
     ReadAfterGotEOF,
     InvalidUTF8,
     TreesitterError,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SchemaError {
     MultipleMatchersInNodeChildren(usize),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SchemaViolationError {
     /// Mismatch between schema definition and actual node
     NodeTypeMismatch(usize, usize),
@@ -27,6 +27,7 @@ pub enum SchemaViolationError {
     ChildrenLengthMismatch(usize, usize),
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum NodeContentMismatchError {
     /// A node's text content doesn't match expected literal text
     Text(String),

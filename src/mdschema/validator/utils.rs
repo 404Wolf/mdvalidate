@@ -47,3 +47,8 @@ pub fn new_markdown_parser() -> Parser {
         .unwrap();
     parser
 }
+
+/// Determine whether a given node is the last node in the tree.
+pub fn is_last_node(input_str: &str, node: &tree_sitter::Node) -> bool {
+    input_str.trim().len() == node.byte_range().end
+}
