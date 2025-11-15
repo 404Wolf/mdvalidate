@@ -20,7 +20,7 @@ flamegraph = "0.6.9"
 
 [package]
 name = "mdvalidate"
-version = "0.1.22"
+version = "0.1.23"
 description = "Markdown schema validation engine"
 license = "MIT"
 documentation = "https://github.com/404wolf/mdvalidate"

@@ -3,6 +3,15 @@
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
+- add check (561935d…)
+
+- update action (3d50666…)
+
+- use nix flake (dc05c97…)
+
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
 - move release file (042890c…)
 
 - update release setup (1732440…)
@@ -12,6 +21,8 @@
 - Release mdvalidate version 0.1.21 (7e36bd1…)
 
 - add changelog (96a08c6…)
+
+- Release mdvalidate version 0.1.22 (e296326…)
 
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
