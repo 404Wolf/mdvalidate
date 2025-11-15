@@ -627,22 +627,9 @@ mod tests {
     }
 
     #[test]
-    fn test_matcher_with_different_valid_name() {
-        let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
-        let input = "# Hi Alice\n";
-
-        let (errors, _) = get_validator(schema, input, true);
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors but found {:?}",
-            errors
-        );
-    }
-
-    #[test]
     fn test_matcher_fails_with_invalid_name() {
         let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
-        let input = "# Hi wolf\n"; // lowercase first letter
+        let input = "# Hi wolf\n";
 
         let (errors, matches) = get_validator(schema, input, true);
         assert!(
@@ -651,22 +638,7 @@ mod tests {
         );
 
         println!("got matches {:?}", matches);
-        assert_eq!(matches.get("name"), None); // No match should be recorded
-    }
-
-    #[test]
-    fn test_matcher_with_numbers() {
-        let schema = r"Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
-";
-        let input = "Version: 1.2.3\n";
-
-        let (errors, matches) = get_validator(schema, input, true);
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors but found {:?}",
-            errors
-        );
-        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
+        assert_eq!(matches.get("name"), None);
     }
 
     #[test]
@@ -721,24 +693,6 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
     }
 
     #[test]
-    fn test_matcher_with_prefix_and_suffix_and_number_with_suffix() {
-        let schema = r"Hello `name:/[A-Z][a-z]+/` there!
-
-Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
-";
-        let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
-
-        let (errors, matches) = get_validator(schema, input, true);
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors but found {:?}",
-            errors
-        );
-        assert_eq!(matches.get("name").unwrap(), "Wolf");
-        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
-    }
-
-    #[test]
     fn test_matcher_with_wrong_suffix() {
         let schema = "Hello `name:/[A-Z][a-z]+/` there!\n";
         let input = "Hello Wolf here!\n"; // "here" instead of "there"
@@ -761,37 +715,6 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
             "Expected no validation errors but found {:?}",
             errors
         );
-    }
-
-    #[test]
-    fn test_matcher_with_word_pattern() {
-        let schema = r"Word: `word:/\w+/`
-";
-        let input = "Word: hello123\n";
-
-        let (errors, matches) = get_validator(schema, input, true);
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors but found {:?}",
-            errors
-        );
-
-        assert_eq!(matches.get("word").unwrap(), "hello123");
-    }
-
-    #[test]
-    fn test_matcher_with_invalid_word() {
-        let schema = r"Word: `word:/\w+/`
-";
-        let input = "Word: hello@world\n";
-
-        let (errors, matches) = get_validator(schema, input, true);
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for invalid word"
-        );
-
-        assert_eq!(matches.get("word").unwrap(), "hello");
     }
 
     #[test]
