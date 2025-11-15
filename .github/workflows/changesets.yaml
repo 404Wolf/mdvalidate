@@ -10,6 +10,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Switch to default branch
+        run: |
+          DEFAULT_BRANCH=$(git remote show origin | grep 'HEAD branch' | cut -d' ' -f5)
+          echo "Default branch is $DEFAULT_BRANCH"
+          git checkout $DEFAULT_BRANCH
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
         with:
