@@ -1,26 +1,31 @@
-[package]
+[[bin]]
 name = "mdv"
-version = "0.1.0"
-edition = "2021"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.100"
 ariadne = "0.5.1"
-clap = { version = "4.5.48", features = ["derive"] }
+clap = {version = "4.5.48", features = ["derive"]}
 colored = "3.0.0"
 env_logger = "0.10.0"
 line-col = "0.2.1"
 log = "0.4.28"
 regex = "1.12.2"
 tree-sitter = "0.25.10"
-tree-sitter-markdown = { git = "https://github.com/404wolf/tree-sitter-markdown.git" }
-
-[build-dependencies]
-cc="*"
+tree-sitter-markdown = {package = "tree-sitter-markdown-fork", version = "0.7.1"}
 
 [dev-dependencies]
 cargo-llvm-cov = "0.6.21"
 flamegraph = "0.6.9"
+
+[package]
+name = "mdvalidate"
+version = "0.1.25"
+description = "Markdown schema validation engine"
+license = "MIT"
+documentation = "https://github.com/404wolf/mdvalidate"
+homepage = "https://github.com/404wolf/mdvalidate"
+edition = "2021"
 
 [profile.flamegraph]
 inherits = "release"

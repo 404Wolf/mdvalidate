@@ -70,6 +70,7 @@ impl fmt::Display for Matcher {
 }
 
 mod tests {
+    #[cfg(test)]
     use crate::mdschema::validator::matcher::Matcher;
 
     #[test]

@@ -24,6 +24,7 @@
           programs.nixfmt.enable = true;
           programs.yamlfmt.enable = true;
           programs.typstfmt.enable = true;
+          programs.toml-sort.enable = true;
         };
       in
       {
@@ -46,6 +47,8 @@
               mermaid-cli
               rust-analyzer
               fira-mono
+              git-cliff
+              cargo-release
             ]
           );
           shellHook = ''
