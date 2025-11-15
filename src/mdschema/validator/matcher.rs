@@ -1,7 +1,8 @@
 use core::fmt;
-use log::debug;
 use regex::Regex;
 use std::sync::LazyLock;
+
+use super::errors::ValidationError;
 
 #[derive(Debug)]
 pub enum MatcherError {
@@ -26,13 +27,9 @@ enum MatcherType {
 enum SpecialMatchers {
     Ruler,
 }
-// id= re.get("id")
 
-//
 impl Matcher {
-    pub fn new(pattern: &str) -> Result<Matcher, MatcherError> {
-        debug!("Parsing matcher pattern: {}", pattern);
-
+    pub fn new(pattern: &str) -> Result<Matcher, ValidationError> {
         let pattern = pattern[1..pattern.len() - 1].trim(); // Remove surrounding backticks
         let captures = MATCHER_PATTERN.captures(pattern);
 
@@ -48,8 +45,18 @@ impl Matcher {
                         MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
                     }
                     (None, Some(_)) => MatcherType::Special(SpecialMatchers::Ruler),
-                    (Some(_), Some(_)) => return Err(MatcherError::InvalidFormat),
-                    (None, None) => return Err(MatcherError::InvalidFormat),
+                    (Some(_), Some(_)) => {
+                        return Err(ValidationError::InvalidMatcherFormat(format!(
+                            "Matcher cannot be both regex and special type: {}",
+                            pattern
+                        )))
+                    }
+                    (None, None) => {
+                        return Err(ValidationError::InvalidMatcherFormat(format!(
+                            "Matcher must be either regex or special type: {}",
+                            pattern
+                        )))
+                    }
                 };
                 println!(
                     "pattern is of type: {}",
@@ -58,11 +65,12 @@ impl Matcher {
                 (id, pattern)
             }
             None => {
-                return Err(MatcherError::InvalidFormat);
+                return Err(ValidationError::InvalidMatcherFormat(format!(
+                    "Expected format: 'id:/regex/', got {}",
+                    pattern
+                )));
             }
         };
-
-        debug!("Creating matcher with id '{:?}' and pattern", id);
 
         println!("id: {:?}", id,);
         Ok(Matcher {
@@ -92,6 +100,10 @@ impl Matcher {
     pub fn is_ruler(&self) -> bool {
         matches!(self.pattern, MatcherType::Special(SpecialMatchers::Ruler))
     }
+
+    pub fn id(&self) -> Option<&String> {
+        self.id.as_ref()
+    }
 }
 
 impl fmt::Display for Matcher {
@@ -117,6 +129,7 @@ impl fmt::Display for Matcher {
 }
 
 mod tests {
+    #[cfg(test)]
     use crate::mdschema::validator::matcher::Matcher;
 
     #[test]

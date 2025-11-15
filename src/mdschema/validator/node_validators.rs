@@ -1,10 +1,15 @@
+use cargo_llvm_cov::json;
 use log::debug;
+use serde_json::{json, Value};
 use tree_sitter::Node;
 
-use crate::mdschema::{
-    reports::errors::{Error, SchemaViolationError},
-    validator::matcher::Matcher,
+use crate::mdschema::validator::{
+    errors::{Error, SchemaViolationError},
+    matcher::Matcher,
+    utils::is_last_node,
 };
+
+pub type NodeValidationResult = (Vec<Error>, Value);
 
 /// Validate a text node against the schema text node.
 ///
@@ -17,16 +22,7 @@ pub fn validate_text_node<'b>(
     input_str: &'b str,
     schema_str: &'b str,
     eof: bool,
-    initial_input_node: &Node<'b>,
-) -> Vec<Error> {
-    debug!("Validating text node content");
-
-    if (input_node.byte_range().end == initial_input_node.byte_range().end) && !eof {
-        // Incomplete text node, skip validation for now
-        debug!("Skipping text validation - incomplete node at EOF");
-        return Vec::new();
-    }
-
+) -> NodeValidationResult {
     let mut errors = Vec::new();
 
     let schema_text = &schema_str[schema_node.byte_range()];
@@ -47,7 +43,12 @@ pub fn validate_text_node<'b>(
         ));
     }
 
-    errors
+    if !eof && is_last_node(input_str, input_node) {
+        debug!("Skipping error reporting, incomplete last node");
+        (vec![], json!({}))
+    } else {
+        (errors, json!({}))
+    }
 }
 
 /// Validate a matcher node against the input node.
@@ -62,20 +63,11 @@ pub fn validate_matcher_node<'b>(
     input_str: &'b str,
     schema_str: &'b str,
     eof: bool,
-    initial_input_node: &Node<'b>,
-) -> Vec<Error> {
-    let is_incomplete =
-        (input_node.byte_range().end == initial_input_node.byte_range().end) && !eof;
-
-    debug!(
-        "validate_matcher_node: input_node range={:?}, input_text='{}', eof={}, is_incomplete={}",
-        input_node.byte_range(),
-        &input_str[input_node.byte_range()],
-        eof,
-        is_incomplete
-    );
+) -> NodeValidationResult {
+    let is_incomplete = !eof && is_last_node(input_str, input_node);
 
     let mut errors = Vec::new();
+    let mut matches = json!({});
 
     let code_nodes: Vec<_> = schema_nodes
         .iter()
@@ -83,12 +75,15 @@ pub fn validate_matcher_node<'b>(
         .collect();
 
     if code_nodes.len() > 1 {
-        return vec![Error::SchemaViolation(
-            SchemaViolationError::NodeContentMismatch(
-                input_node_descendant_index,
-                "Multiple matchers in single node".into(),
-            ),
-        )];
+        return (
+            vec![Error::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch(
+                    input_node_descendant_index,
+                    "Multiple matchers in single node".into(),
+                ),
+            )],
+            matches,
+        );
     }
 
     let code_node = code_nodes[0];
@@ -97,12 +92,15 @@ pub fn validate_matcher_node<'b>(
     let matcher = match Matcher::new(matcher_text) {
         Ok(m) => m,
         Err(_) => {
-            return vec![Error::SchemaViolation(
-                SchemaViolationError::NodeContentMismatch(
-                    input_node_descendant_index,
-                    matcher_text.into(),
-                ),
-            )];
+            return (
+                vec![Error::SchemaViolation(
+                    SchemaViolationError::NodeContentMismatch(
+                        input_node_descendant_index,
+                        matcher_text.into(),
+                    ),
+                )],
+                matches,
+            );
         }
     };
 
@@ -127,14 +125,15 @@ pub fn validate_matcher_node<'b>(
                     prefix_schema.into(),
                 ),
             ));
-            return errors;
+
+            return (errors, matches);
         }
     }
 
     // Skip matcher and suffix validation if node is incomplete
     if is_incomplete {
         debug!("Skipping matcher and suffix validation - incomplete node");
-        return errors;
+        return (errors, matches);
     }
 
     let input_start = input_node.byte_range().start + matcher_start;
@@ -150,15 +149,13 @@ pub fn validate_matcher_node<'b>(
                                                  // TODO: is this really true though?
                 ),
             ));
-            return errors;
+            return (errors, matches);
         } else {
             // It's a ruler, no further validation needed
-            return errors;
+            return (errors, json!({}));
         }
     }
 
-    // If this is the last node, don't validate it if we haven't reached EOF,
-    // since the matcher might be incomplete.
     match matcher.match_str(input_to_match) {
         Some(matched_str) => {
             // Validate suffix
@@ -169,6 +166,7 @@ pub fn validate_matcher_node<'b>(
 
             // Ensure suffix_start doesn't exceed input_end
             if suffix_start > input_end {
+                // out of bounds
                 errors.push(Error::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch(
                         input_node_descendant_index,
@@ -187,6 +185,13 @@ pub fn validate_matcher_node<'b>(
                     ));
                 }
             }
+            // Good match! Add the matched node to the matches (if it has an id)
+            match matcher.id() {
+                Some(id) => {
+                    matches[id] = json!(matched_str);
+                }
+                None => {}
+            }
         }
         None => {
             errors.push(Error::SchemaViolation(
@@ -198,37 +203,78 @@ pub fn validate_matcher_node<'b>(
         }
     };
 
-    errors
+    // If this is the last node, don't validate it if we haven't reached EOF,
+    // since the matcher might be incomplete.
+    if !eof && is_incomplete {
+        (vec![], matches)
+    } else {
+        (errors, matches)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mdschema::validator::utils::new_markdown_parser;
+    use tree_sitter::Node;
+
+    /// Helper function to create parsers and nodes for text validation tests
+    fn get_text_validator(schema: &str, input: &str, eof: bool) -> (Vec<Error>, Value) {
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_node = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input node");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_node = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema node");
+
+        validate_text_node(&input_node, 0, &schema_node, input, schema, eof)
+    }
+
+    /// Helper function to create parsers and nodes for matcher validation tests
+    fn get_matcher_validator(schema: &str, input: &str, eof: bool) -> (Vec<Error>, Value) {
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_node = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input node");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<Node> = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema root child")
+            .children(&mut schema_cursor)
+            .collect();
+
+        validate_matcher_node(&input_node, 0, &schema_nodes, input, schema, eof)
+    }
 
     #[test]
     fn test_different_text_content_nodes_mismatch() {
         let schema = "Hello world";
         let input = "Hello there";
 
-        let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input, None).unwrap();
-        let input_node = input_tree.root_node().child(0).unwrap();
+        let (errors, _) = get_text_validator(schema, input, true);
 
-        let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema, None).unwrap();
-        let schema_node = schema_tree.root_node().child(0).unwrap();
-
-        let errors = validate_text_node(
-            &input_node,
-            0, // placeholder
-            &schema_node,
-            input,
-            schema,
-            true,
-            &input_node,
-        );
-
+        assert_eq!(errors.len(), 1);
         match &errors[0] {
             Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, expected)) => {
                 assert_eq!(expected, "Hello world");
@@ -242,23 +288,7 @@ mod tests {
         let schema = "Hello world";
         let input = "Hello world";
 
-        let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input, None).unwrap();
-        let input_node = input_tree.root_node().child(0).unwrap();
-
-        let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema, None).unwrap();
-        let schema_node = schema_tree.root_node().child(0).unwrap();
-
-        let errors = validate_text_node(
-            &input_node,
-            0, // placeholder
-            &schema_node,
-            input,
-            schema,
-            true,
-            &input_node,
-        );
+        let (errors, _) = get_text_validator(schema, input, true);
 
         assert!(
             errors.is_empty(),
@@ -272,30 +302,7 @@ mod tests {
         let schema = "Hello `id:/foo/` world";
         let input = "Hello foo world";
 
-        let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input, None).unwrap();
-        let input_node = input_tree.root_node().child(0).unwrap();
-        let input_root = input_tree.root_node();
-
-        let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema, None).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<Node> = schema_tree
-            .root_node()
-            .child(0)
-            .unwrap()
-            .children(&mut schema_cursor)
-            .collect();
-
-        let errors = validate_matcher_node(
-            &input_node,
-            0,
-            &schema_nodes,
-            input,
-            schema,
-            true,
-            &input_root,
-        );
+        let (errors, _) = get_matcher_validator(schema, input, true);
 
         assert!(
             errors.is_empty(),
@@ -309,30 +316,7 @@ mod tests {
         let schema = "Value: `num:/[0-9]+/`";
         let input = "Value: 12345";
 
-        let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input, None).unwrap();
-        let input_node = input_tree.root_node().child(0).unwrap();
-        let input_root = input_tree.root_node();
-
-        let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema, None).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<Node> = schema_tree
-            .root_node()
-            .child(0)
-            .unwrap()
-            .children(&mut schema_cursor)
-            .collect();
-
-        let errors = validate_matcher_node(
-            &input_node,
-            0,
-            &schema_nodes,
-            input,
-            schema,
-            true,
-            &input_root,
-        );
+        let (errors, _) = get_matcher_validator(schema, input, true);
 
         assert!(
             errors.is_empty(),
@@ -346,30 +330,7 @@ mod tests {
         let schema = "Start `id:/test/`";
         let input = "Start test";
 
-        let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input, None).unwrap();
-        let input_node = input_tree.root_node().child(0).unwrap();
-        let input_root = input_tree.root_node();
-
-        let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema, None).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<Node> = schema_tree
-            .root_node()
-            .child(0)
-            .unwrap()
-            .children(&mut schema_cursor)
-            .collect();
-
-        let errors = validate_matcher_node(
-            &input_node,
-            0,
-            &schema_nodes,
-            input,
-            schema,
-            true,
-            &input_root,
-        );
+        let (errors, _) = get_matcher_validator(schema, input, true);
 
         assert!(
             errors.is_empty(),
@@ -383,35 +344,25 @@ mod tests {
         let schema = "`id:/test/` end";
         let input = "test end";
 
-        let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input, None).unwrap();
-        let input_node = input_tree.root_node().child(0).unwrap();
-        let input_root = input_tree.root_node();
-
-        let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema, None).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<Node> = schema_tree
-            .root_node()
-            .child(0)
-            .unwrap()
-            .children(&mut schema_cursor)
-            .collect();
-
-        let errors = validate_matcher_node(
-            &input_node,
-            0,
-            &schema_nodes,
-            input,
-            schema,
-            true,
-            &input_root,
-        );
+        let (errors, matches) = get_matcher_validator(schema, input, true);
 
         assert!(
             errors.is_empty(),
             "Expected no errors but got: {:?}",
             errors
+        );
+
+        println!("matches: {:?}", matches);
+        assert_eq!(matches.as_object().unwrap().len(), 1);
+        assert_eq!(
+            matches
+                .as_object()
+                .unwrap()
+                .get("id")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "test"
         );
     }
 
@@ -420,30 +371,7 @@ mod tests {
         let schema = "`id:/test/`";
         let input = "test";
 
-        let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input, None).unwrap();
-        let input_node = input_tree.root_node().child(0).unwrap();
-        let input_root = input_tree.root_node();
-
-        let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema, None).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<Node> = schema_tree
-            .root_node()
-            .child(0)
-            .unwrap()
-            .children(&mut schema_cursor)
-            .collect();
-
-        let errors = validate_matcher_node(
-            &input_node,
-            0,
-            &schema_nodes,
-            input,
-            schema,
-            true,
-            &input_root,
-        );
+        let (errors, _) = get_matcher_validator(schema, input, true);
 
         assert!(
             errors.is_empty(),
@@ -457,30 +385,7 @@ mod tests {
         let schema = "Hello `id:/foo/` world";
         let input = "Goodbye foo world";
 
-        let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input, None).unwrap();
-        let input_node = input_tree.root_node().child(0).unwrap();
-        let input_root = input_tree.root_node();
-
-        let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema, None).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<Node> = schema_tree
-            .root_node()
-            .child(0)
-            .unwrap()
-            .children(&mut schema_cursor)
-            .collect();
-
-        let errors = validate_matcher_node(
-            &input_node,
-            0,
-            &schema_nodes,
-            input,
-            schema,
-            true,
-            &input_root,
-        );
+        let (errors, _) = get_matcher_validator(schema, input, true);
 
         assert_eq!(errors.len(), 1);
         match &errors[0] {
@@ -496,35 +401,14 @@ mod tests {
         let schema = "`ruler`";
         let input = "---";
 
-        let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser.parse(input, None).unwrap();
-        let input_node = input_tree.root_node().child(0).unwrap();
-        let input_root = input_tree.root_node();
-
-        let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser.parse(schema, None).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<Node> = schema_tree
-            .root_node()
-            .child(0)
-            .unwrap()
-            .children(&mut schema_cursor)
-            .collect();
-
-        let errors = validate_matcher_node(
-            &input_node,
-            0,
-            &schema_nodes,
-            input,
-            schema,
-            true,
-            &input_root,
-        );
+        let (errors, matches) = get_matcher_validator(schema, input, true);
 
         assert!(
             errors.is_empty(),
             "Expected no errors but got: {:?}",
             errors
         );
+
+        assert_eq!(matches.as_object().unwrap().len(), 0);
     }
 }

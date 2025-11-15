@@ -1,4 +1,5 @@
+pub mod errors;
 mod matcher;
+pub(crate) mod node_validators;
 mod utils;
-mod node_validators;
 pub mod validator;
