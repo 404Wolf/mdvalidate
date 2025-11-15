@@ -289,6 +289,28 @@ Hello World
 not a number
 ```)
 
+=== Special Matchers: Ruler
+
+The ruler matcher is a special matcher that dosn't require an id and will match a standard markdown ruler line.
+
+#schema(```markdown
+`ruler`
+```)
+
+#good-example(```markdown
+---
+```)
+#good-example(```markdown
+***
+```)
+#good-example(```markdown
+___
+```)
+
+#bad-example(```markdown
+ruler
+```)
+
 == HTML <sec:lang-html>
 
 Markdown is a superset of HTML. HTML is a subset of XML. For example, the
