@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use tree_sitter::Node;
 
 use crate::mdschema::validator::{
-    errors::{Error, SchemaViolationError},
+    errors::{Error, SchemaError, SchemaViolationError},
     matcher::Matcher,
     utils::is_last_node,
 };
@@ -47,6 +47,75 @@ pub fn validate_text_node<'b>(
         (vec![], json!({}))
     } else {
         (errors, json!({}))
+    }
+}
+
+/// Validate a matcher node against the children of a list input node.
+///
+/// This works by re-running the validation using validate_matcher_node on each input node in the
+/// list.
+pub fn validate_matcher_node_list<'b>(
+    input_node: &Node<'b>,
+    input_node_descendant_index: usize,
+    schema_nodes: &[Node<'b>],
+    input_str: &'b str,
+    schema_str: &'b str,
+    eof: bool,
+) -> NodeValidationResult {
+    let matcher = schema_nodes.iter().find(|n| n.kind() == "code_span");
+
+    match matcher {
+        None => {
+            return (
+                vec![Error::SchemaError(
+                    SchemaError::NoMatcherInListNodeChildren(input_node_descendant_index),
+                )],
+                json!({}),
+            );
+        }
+        Some(matcher) => {
+            let mut errors = Vec::new();
+            let mut matches_array = Vec::new();
+
+            for child in input_node.children(&mut input_node.walk().clone()) {
+                // TODO: reuse the cursor that we already have
+                let (child_errors, child_matches) = validate_matcher_node(
+                    &child.child(1).unwrap(),
+                    input_node_descendant_index,
+                    schema_nodes,
+                    input_str,
+                    schema_str,
+                    eof,
+                );
+                errors.extend(child_errors);
+
+                if let Some(obj) = child_matches.as_object() {
+                    // For each match object, extract the first value and add it to our array
+                    if let Some((_, value)) = obj.iter().next() {
+                        // TODO: Could we have multiple?
+                        matches_array.push(value.clone());
+                    }
+                }
+            }
+
+            let matcher_text = &schema_str[matcher.byte_range()];
+            let matcher_obj = match Matcher::new(matcher_text) {
+                Ok(m) => m,
+                Err(_) => {
+                    return (
+                        vec![Error::SchemaError(
+                            SchemaError::NoMatcherInListNodeChildren(input_node_descendant_index),
+                        )],
+                        json!({}),
+                    );
+                }
+            };
+
+            let mut matches = json!({});
+            matches[matcher_obj.id()] = serde_json::Value::Array(matches_array);
+
+            (errors, matches)
+        }
     }
 }
 
@@ -218,7 +287,6 @@ mod tests {
         validate_text_node(&input_node, 0, &schema_node, input, schema, eof)
     }
 
-    /// Helper function to create parsers and nodes for matcher validation tests
     fn get_matcher_validator(schema: &str, input: &str, eof: bool) -> (Vec<Error>, Value) {
         let mut input_parser = new_markdown_parser();
         let input_tree = input_parser
@@ -242,6 +310,44 @@ mod tests {
             .collect();
 
         validate_matcher_node(&input_node, 0, &schema_nodes, input, schema, eof)
+    }
+
+    fn get_list_matcher_validator(
+        schema: &str,
+        input: &str,
+        eof: bool,
+    ) -> (Vec<Error>, serde_json::Value) {
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+
+        let input_node = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input node");
+        assert_eq!(input_node.kind(), "tight_list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<Node> = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema root child")
+            .children(&mut schema_cursor)
+            .collect();
+        // We want the schema node to be the matcher node inside the first list item in the schema
+        assert_eq!(schema_nodes[0].kind(), "code_span");
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_node, 0, &schema_nodes, input, schema, eof);
+        return (
+            errors,
+            serde_json::Value::Array(matches.get("test").unwrap().as_array().unwrap().clone()),
+        );
     }
 
     #[test]
@@ -370,6 +476,40 @@ mod tests {
                 assert_eq!(expected, "Hello ");
             }
             _ => panic!("Expected NodeContentMismatch error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_matcher_list_expects_errors_on_pattern_mismatch() {
+        let schema = "`test:/[0-9]/`";
+        let input = "- 1\n- a\n- 3\n- b\n- 5";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        assert!(!errors.is_empty(), "Expected errors but got none");
+        assert_eq!(errors.len(), 2, "Expected 2 errors for 'a' and 'b'");
+
+        // Verify that valid matches were still captured
+        let matches_obj = matches.as_object().unwrap();
+        assert!(matches_obj.contains_key("num"));
+    }
+
+    #[test]
+    fn test_validate_matcher_list_for_simple_digit_pattern() {
+        let schema = "`test:/[0-9]/`";
+        let input = "- 1\n- 2\n- 3\n- 4\n- 5";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(matches_arr.len(), 5);
+        for i in 0..5 {
+            assert_eq!(matches_arr[i].as_str().unwrap(), (i + 1).to_string());
         }
     }
 }

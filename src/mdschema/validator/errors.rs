@@ -69,16 +69,19 @@ pub enum ParserError {
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SchemaError {
     MultipleMatchersInNodeChildren(usize),
+    /// When you call `validate_matcher_node_list` with a schema node whose
+    /// children contain no matchers, which should never happen.
+    NoMatcherInListNodeChildren(usize),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SchemaViolationError {
-    /// Mismatch between schema definition and actual node
+    /// Mismatch between schema definition and actual node. Index of node 1 and index of node 2 that mismatch
     NodeTypeMismatch(usize, usize),
-    /// Text content of node does not match expected value
+    /// Text content of node does not match expected value. Node index, text that doesn't validate
     NodeContentMismatch(usize, String),
-    /// Nodes have different numbers of children
-    ChildrenLengthMismatch(usize, usize),
+    /// Nodes have different numbers of children. Expected number, actual number, parent node index
+    ChildrenLengthMismatch(usize, usize, usize),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -96,58 +99,114 @@ pub fn pretty_print_error(
     source_content: &str,
     filename: &str,
 ) -> Result<String, String> {
-    let (node_index, message) = match error {
+    let mut buffer = Vec::new();
+
+    match error {
         Error::SchemaViolation(schema_err) => match schema_err {
             SchemaViolationError::NodeTypeMismatch(expected_id, actual_id) => {
                 let expected = find_node_by_index(tree.root_node(), *expected_id);
                 let actual = find_node_by_index(tree.root_node(), *actual_id);
+                let actual_range = actual.start_byte()..actual.end_byte();
 
-                (
-                    *actual_id,
-                    format!(
-                        "Node type mismatch: expected '{}' but found '{}'",
-                        expected.kind(),
-                        actual.kind()
-                    ),
-                )
+                Report::build(ReportKind::Error, (filename, actual_range.clone()))
+                    .with_message("Node type mismatch")
+                    .with_label(
+                        Label::new((filename, actual_range))
+                            .with_message(format!(
+                                "Expected '{}' but found '{}'",
+                                expected.kind(),
+                                actual.kind()
+                            ))
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .write((filename, Source::from(source_content)), &mut buffer)
+                    .map_err(|e| e.to_string())?;
             }
             SchemaViolationError::NodeContentMismatch(node_id, expected) => {
+                let node = find_node_by_index(tree.root_node(), *node_id);
                 let actual = node_content_by_index_or(tree.root_node(), *node_id, source_content);
+                let node_range = node.start_byte()..node.end_byte();
 
-                (
-                    *node_id,
-                    format!(
-                        "Node content mismatch: expected '{}' but found '{}'",
-                        expected, actual
-                    ),
-                )
+                Report::build(ReportKind::Error, (filename, node_range.clone()))
+                    .with_message("Node content mismatch")
+                    .with_label(
+                        Label::new((filename, node_range))
+                            .with_message(format!("Expected '{}' but found '{}'", expected, actual))
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .write((filename, Source::from(source_content)), &mut buffer)
+                    .map_err(|e| e.to_string())?;
             }
-            SchemaViolationError::ChildrenLengthMismatch(expected, actual) => (
-                0,
-                format!(
-                    "Children length mismatch: expected {} but found {} children",
-                    expected, actual
-                ),
-            ),
+            SchemaViolationError::ChildrenLengthMismatch(expected, actual, parent_index) => {
+                let parent = find_node_by_index(tree.root_node(), *parent_index);
+                let parent_range = parent.start_byte()..parent.end_byte();
+
+                Report::build(ReportKind::Error, (filename, parent_range.clone()))
+                    .with_message("Children length mismatch")
+                    .with_label(
+                        Label::new((filename, parent_range))
+                            .with_message(format!(
+                                "Expected {} children but found {}",
+                                expected, actual
+                            ))
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .write((filename, Source::from(source_content)), &mut buffer)
+                    .map_err(|e| e.to_string())?;
+            }
         },
-        Error::ParserError(_) => (0, "Parser error occurred".to_string()),
-        Error::SchemaError(_) => (0, "Schema error occurred".to_string()),
-    };
+        Error::ParserError(parser_err) => {
+            let root_range = 0..source_content.len();
+            let message = match parser_err {
+                ParserError::ReadAfterGotEOF => "Attempted to read after EOF",
+                ParserError::InvalidUTF8 => "Invalid UTF-8 encountered",
+                ParserError::TreesitterError => "Tree-sitter parsing error",
+            };
 
-    let error_node = find_node_by_index(tree.root_node(), node_index);
-    let range = error_node.start_byte()..error_node.end_byte();
-
-    let mut buffer = Vec::new();
-    Report::build(ReportKind::Error, (filename, range.clone()))
-        .with_message(&message)
-        .with_label(
-            Label::new((filename, range))
-                .with_message(&message)
-                .with_color(Color::Red),
-        )
-        .finish()
-        .write((filename, Source::from(source_content)), &mut buffer)
-        .map_err(|e| e.to_string())?;
+            Report::build(ReportKind::Error, (filename, root_range.clone()))
+                .with_message("Parser error")
+                .with_label(
+                    Label::new((filename, root_range))
+                        .with_message(message)
+                        .with_color(Color::Red),
+                )
+                .finish()
+                .write((filename, Source::from(source_content)), &mut buffer)
+                .map_err(|e| e.to_string())?;
+        }
+        Error::SchemaError(schema_err) => {
+            let root_range = 0..source_content.len();
+            let message = match schema_err {
+                SchemaError::MultipleMatchersInNodeChildren(node_id) => {
+                    format!(
+                        "Multiple matchers found in node children at index {}",
+                        node_id
+                    )
+                }
+                SchemaError::NoMatcherInListNodeChildren(node_id) => {
+                    let actual_node = find_node_by_index(tree.root_node(), *node_id);
+                    format!(
+                        "No matchers found in children of list node at index {} (node kind: '{}')",
+                        node_id,
+                        actual_node.kind()
+                    )
+                }
+            };
+            Report::build(ReportKind::Error, (filename, root_range.clone()))
+                .with_message("Schema error")
+                .with_label(
+                    Label::new((filename, root_range))
+                        .with_message(message)
+                        .with_color(Color::Red),
+                )
+                .finish()
+                .write((filename, Source::from(source_content)), &mut buffer)
+                .map_err(|e| e.to_string())?;
+        }
+    }
 
     Ok(String::from_utf8_lossy(&buffer).to_string())
 }
