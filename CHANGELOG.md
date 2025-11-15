@@ -11,7 +11,7 @@
 
 - Release mdvalidate version 0.1.23 (6913b8e…)
 
-- add release script (c4aa215…)
+- add release script (73ec96f…)
 
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
