@@ -20,6 +20,7 @@ jobs:
         with:
           config: ./cliff.toml
           args: --strip header
+          output: CHANGELOG.md
       - name: Commit and push updated CHANGELOG.md
         run: |
           git config --global user.name 'GitHub Actions'
