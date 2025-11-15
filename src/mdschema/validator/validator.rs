@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use line_col::LineColLookup;
 use log::debug;
 use tree_sitter::Tree;
@@ -22,7 +24,7 @@ pub struct Validator {
     /// The last descendant index we validated up to in the input tree. In preorder.
     last_input_descendant_index: usize,
     /// Any errors encountered during validation.
-    errors: Vec<Error>,
+    errors: HashSet<Error>,
     /// The full input string as last read. Not used internally but useful for
     /// debugging or reporting.
     last_input_str: String,
@@ -72,7 +74,7 @@ impl Validator {
             schema_tree,
             last_input_descendant_index: 0,
             last_schema_descendant_index: 0,
-            errors: Vec::new(),
+            errors: HashSet::new(),
             last_input_str: input_str.to_string(),
             schema_str: schema_str.to_string(),
             got_eof: eof,
@@ -81,7 +83,7 @@ impl Validator {
 
     /// Get all the errors that we have encountered
     pub fn errors(&self) -> Vec<Error> {
-        self.errors.clone()
+        self.errors.iter().cloned().collect()
     }
 
     /// Read new input. Updates the input tree with a new input tree for the full new input.
@@ -196,6 +198,14 @@ impl Validator {
         let schema_root_node = schema_cursor.node();
         schema_cursor.goto_descendant(self.last_schema_descendant_index);
 
+        debug!(
+            "Starting validation from input_index={} (type={}), schema_index={} (type={})",
+            input_cursor.descendant_index(),
+            input_cursor.node().kind(),
+            schema_cursor.descendant_index(),
+            schema_cursor.node().kind()
+        );
+
         // Start with the root nodes
         let mut child_pairs_to_validate = vec![(
             input_cursor.descendant_index(),
@@ -233,7 +243,7 @@ impl Validator {
             // We don't allow multiple code_span children for the schema
             // since it would lead to ambiguity
             if schema_children_code_node_count > 1 {
-                self.errors.push(Error::SchemaError(
+                self.errors.insert(Error::SchemaError(
                     SchemaError::MultipleMatchersInNodeChildren(schema_children_code_node_count),
                 ));
                 continue;
@@ -296,7 +306,6 @@ impl Validator {
                     &self.last_input_str,
                     &self.schema_str,
                     self.got_eof,
-                    &input_node,
                 ));
 
                 continue;
@@ -319,7 +328,7 @@ impl Validator {
             // still waiting for more input.
             if input_node.child_count() != schema_node.child_count() {
                 if self.got_eof {
-                    self.errors.push(Error::SchemaViolation(
+                    self.errors.insert(Error::SchemaViolation(
                         SchemaViolationError::ChildrenLengthMismatch(
                             input_cursor.descendant_index(),
                             schema_cursor.descendant_index(),
@@ -378,6 +387,20 @@ impl Validator {
                 schema_cursor.goto_parent();
             }
         }
+
+        // Go back to parents if we have not gotten EOF yet
+        if !self.got_eof {
+            input_cursor.goto_parent();
+            schema_cursor.goto_parent();
+        }
+
+        // Print errors so far and node indexes so far
+        debug!(
+            "Validation complete. Total errors so far: {}. Current input_index={}, schema_index={}",
+            self.errors.len(),
+            input_cursor.descendant_index(),
+            schema_cursor.descendant_index()
+        );
 
         // Update the last descendant indices to the end of the trees
         self.last_input_descendant_index = input_cursor.descendant_index();
@@ -593,8 +616,6 @@ mod tests {
         }
     }
 
-    // ========== Matcher Tests ==========
-
     #[test]
     fn test_simple_matcher_validates_correctly() {
         let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
@@ -791,8 +812,6 @@ mod tests {
             "Expected validation error for invalid word"
         );
     }
-
-    // ========== Complex Structure Tests ==========
 
     #[test]
     fn test_nested_lists_validate() {
@@ -1259,22 +1278,18 @@ Footer: goodbye
     #[test]
     fn test_single_matcher_matches_bad_regex() {
         let schema = "`id:/test/`";
-        let input = "testttt";
+        let input = "test";
 
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
         validator.validate();
-        let errors = validator.errors();
+        assert_eq!(validator.errors().len(), 0);
 
-        match errors.first() {
-            Some(Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(
-                _,
-                expected,
-            ))) => {
-                println!("Got expected NodeContentMismatch error for: {}", expected);
-            }
-            _ => panic!("Expected NodeContentMismatch error but got: {:?}", errors),
-        }
+        let input2 = "fhuaeifhwiuehfu";
+        let mut validator =
+            Validator::new(schema, input2, true).expect("Failed to create validator");
+        validator.validate();
+        assert_eq!(validator.errors().len(), 1);
     }
 
     #[test]

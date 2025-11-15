@@ -9,7 +9,7 @@ pub fn pretty_print_error(
     source_content: &str,
     filename: &str,
 ) -> Result<String, String> {
-    let (node_index, message) = extract_error_info(error);
+    let (node_index, message) = extract_error_info(&tree, source_content, error);
     let error_node = find_node_by_index(tree.root_node(), node_index);
     let range = error_node.start_byte()..error_node.end_byte();
 
@@ -28,7 +28,7 @@ pub fn pretty_print_error(
     Ok(String::from_utf8_lossy(&buffer).to_string())
 }
 
-fn extract_error_info(error: &Error) -> (usize, String) {
+fn extract_error_info(tree: &Tree, source_content: &str, error: &Error) -> (usize, String) {
     match error {
         Error::SchemaViolation(schema_err) => match schema_err {
             SchemaViolationError::NodeTypeMismatch(expected, actual) => (
@@ -38,13 +38,17 @@ fn extract_error_info(error: &Error) -> (usize, String) {
                     expected, actual
                 ),
             ),
-            SchemaViolationError::NodeContentMismatch(node_id, expected) => (
-                *node_id,
-                format!(
-                    "Node content mismatch: expected '{}' but found different content",
-                    expected
-                ),
-            ),
+            SchemaViolationError::NodeContentMismatch(node_id, expected) => {
+                let actual = node_content_by_index_or(tree.root_node(), *node_id, source_content);
+
+                (
+                    *node_id,
+                    format!(
+                        "Node content mismatch: expected '{}' but found '{}'",
+                        expected, actual
+                    ),
+                )
+            }
             SchemaViolationError::ChildrenLengthMismatch(expected, actual) => (
                 0,
                 format!(
@@ -62,4 +66,13 @@ fn find_node_by_index(root: tree_sitter::Node, target_index: usize) -> tree_sitt
     let mut cursor = root.walk();
     cursor.goto_descendant(target_index);
     cursor.node()
+}
+
+fn node_content_by_index_or<'a>(
+    root: tree_sitter::Node<'a>,
+    target_index: usize,
+    source_content: &'a str,
+) -> &'a str {
+    let node = find_node_by_index(root, target_index);
+    node.utf8_text(source_content.as_bytes()).unwrap_or("n/a")
 }

@@ -3,7 +3,7 @@ use tree_sitter::Node;
 
 use crate::mdschema::{
     reports::errors::{Error, SchemaViolationError},
-    validator::matcher::Matcher,
+    validator::{matcher::Matcher, utils::is_last_node},
 };
 
 /// Validate a text node against the schema text node.
@@ -17,16 +17,8 @@ pub fn validate_text_node<'b>(
     input_str: &'b str,
     schema_str: &'b str,
     eof: bool,
-    initial_input_node: &Node<'b>,
 ) -> Vec<Error> {
     debug!("Validating text node content");
-
-    if (input_node.byte_range().end == initial_input_node.byte_range().end) && !eof {
-        // Incomplete text node, skip validation for now
-        debug!("Skipping text validation - incomplete node at EOF");
-        return Vec::new();
-    }
-
     let mut errors = Vec::new();
 
     let schema_text = &schema_str[schema_node.byte_range()];
@@ -47,7 +39,12 @@ pub fn validate_text_node<'b>(
         ));
     }
 
-    errors
+    if !eof && is_last_node(input_str, input_node) {
+        debug!("Skipping error reporting, incomplete last node");
+        vec![]
+    } else {
+        errors
+    }
 }
 
 /// Validate a matcher node against the input node.
@@ -64,7 +61,8 @@ pub fn validate_matcher_node<'b>(
     eof: bool,
     initial_input_node: &Node<'b>,
 ) -> Vec<Error> {
-    let is_incomplete = (input_node.byte_range().end == initial_input_node.byte_range().end) && !eof;
+    let is_incomplete =
+        (input_node.byte_range().end == initial_input_node.byte_range().end) && !eof;
 
     debug!(
         "validate_matcher_node: input_node range={:?}, input_text='{}', eof={}, is_incomplete={}",
@@ -111,13 +109,13 @@ pub fn validate_matcher_node<'b>(
 
     // Always validate prefix, even for incomplete nodes
     let prefix_schema = &schema_str[schema_start..schema_start + matcher_start];
-    
+
     // Check if we have enough input to validate the prefix
     let input_has_full_prefix = input_node.byte_range().len() >= matcher_start;
-    
+
     if input_has_full_prefix {
-        let prefix_input =
-            &input_str[input_node.byte_range().start..input_node.byte_range().start + matcher_start];
+        let prefix_input = &input_str
+            [input_node.byte_range().start..input_node.byte_range().start + matcher_start];
 
         if prefix_schema != prefix_input {
             errors.push(Error::SchemaViolation(
@@ -139,8 +137,6 @@ pub fn validate_matcher_node<'b>(
     let input_start = input_node.byte_range().start + matcher_start;
     let input_to_match = &input_str[input_start..];
 
-    // If this is the last node, don't validate it if we haven't reached EOF,
-    // since the matcher might be incomplete.
     match matcher.match_str(input_to_match) {
         Some(matched_str) => {
             // Validate suffix
@@ -180,7 +176,13 @@ pub fn validate_matcher_node<'b>(
         }
     };
 
-    errors
+    // If this is the last node, don't validate it if we haven't reached EOF,
+    // since the matcher might be incomplete.
+    if !eof && is_last_node(input_str, input_node) {
+        vec![]
+    } else {
+        errors
+    }
 }
 
 #[cfg(test)]
@@ -208,7 +210,6 @@ mod tests {
             input,
             schema,
             true,
-            &input_node,
         );
 
         match &errors[0] {
@@ -239,7 +240,6 @@ mod tests {
             input,
             schema,
             true,
-            &input_node,
         );
 
         assert!(
