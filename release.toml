@@ -2,6 +2,5 @@ tag-name = "v{{version}}"
 tag-message = "Release {{version}}"
 push = true
 pre-release-hook = [
-  "git-cliff --config cliff.toml --output CHANGELOG.md"
+  "sh -c \"git-cliff --config cliff.toml --output CHANGELOG.md\""
 ]
-allow-branch = ["main", "master"]
