@@ -138,6 +138,23 @@ pub fn validate_matcher_node<'b>(
     let input_start = input_node.byte_range().start + matcher_start;
     let input_to_match = &input_str[input_start..];
 
+    // If the matcher is for a ruler, we should expect the entire input node to be a ruler
+    if matcher.is_ruler() {
+        if input_node.kind() != "thematic_break" {
+            errors.push(Error::SchemaViolation(
+                SchemaViolationError::NodeTypeMismatch(
+                    input_node_descendant_index,
+                    input_node_descendant_index, // should be the same as the schema's.
+                                                 // TODO: is this really true though?
+                ),
+            ));
+            return (errors, matches);
+        } else {
+            // It's a ruler, no further validation needed
+            return (errors, json!({}));
+        }
+    }
+
     match matcher.match_str(input_to_match) {
         Some(matched_str) => {
             // Validate suffix
@@ -167,8 +184,13 @@ pub fn validate_matcher_node<'b>(
                     ));
                 }
             }
-            // Good match! Add the matched node to the matches
-            matches[matcher.id()] = json!(matched_str);
+            // Good match! Add the matched node to the matches (if it has an id)
+            match matcher.id() {
+                Some(id) => {
+                    matches[id] = json!(matched_str);
+                }
+                None => {}
+            }
         }
         None => {
             errors.push(Error::SchemaViolation(
@@ -371,5 +393,21 @@ mod tests {
             }
             _ => panic!("Expected NodeContentMismatch error"),
         }
+    }
+
+    #[test]
+    fn test_ruler() {
+        let schema = "`ruler`";
+        let input = "---";
+
+        let (errors, matches) = get_matcher_validator(schema, input, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+
+        assert_eq!(matches.as_object().unwrap().len(), 0);
     }
 }

@@ -134,14 +134,14 @@ for an example).
 #figure(
   raw_block(
     raw: `````
-                  Schema AST                     Input AST
-                  -----------                    -----------
-                  Root                           Root
-                   |-- Paragraph                 |-- Paragraph
-                   |    |-- Code <--             |    |-- Text() <-- (the schema
-                   |         |-- Text()          |                   does not contain
-                                                                     the codeblock)
-                `````,
+                      Schema AST                     Input AST
+                      -----------                    -----------
+                      Root                           Root
+                       |-- Paragraph                 |-- Paragraph
+                       |    |-- Code <--             |    |-- Text() <-- (the schema
+                       |         |-- Text()          |                   does not contain
+                                                                         the codeblock)
+                    `````,
   ), caption: [matcher code blocks (left) contain inner content we care about (right)],
 ) <fig:might-not-be-same-spot>
 
@@ -287,6 +287,29 @@ Hello World
 
 #bad-example(```markdown
 not a number
+```)
+
+=== Special Matchers: Ruler
+
+The ruler matcher is a special matcher that dosn't require an id and will match
+a standard markdown ruler line.
+
+#schema(```markdown
+`ruler`
+```)
+
+#good-example(```markdown
+---
+```)
+#good-example(```markdown
+***
+```)
+#good-example(```markdown
+___
+```)
+
+#bad-example(```markdown
+ruler
 ```)
 
 == HTML <sec:lang-html>
