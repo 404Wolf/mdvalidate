@@ -9,6 +9,10 @@
 
 - fix release file (ff75ee2…)
 
+- Release mdvalidate version 0.1.21 (7e36bd1…)
+
+- add changelog (96a08c6…)
+
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
