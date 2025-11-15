@@ -1,6 +1,18 @@
 # Changelog
 
 
+### <!-- 1 -->🐛 Bug Fixes
+
+- use hash set (c7c62d3…)
+
+- fix streaming bug (d437f06…)
+
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- remove check (03789ae…)
+
+
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
 - add check (561935d…)
@@ -16,6 +28,8 @@
 - update CHANGELOG.md (2d1c542…)
 
 - update release setup (74acb4a…)
+
+- update CHANGELOG.md (934d660…)
 
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
