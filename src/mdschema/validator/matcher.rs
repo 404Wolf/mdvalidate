@@ -53,6 +53,10 @@ impl Matcher {
             None
         }
     }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
 }
 
 impl fmt::Display for Matcher {

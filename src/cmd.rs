@@ -121,6 +121,13 @@ mod tests {
     use super::*;
     use std::io::{self, Cursor, Read};
 
+    /// Helper function to create a validator and handle errors consistently
+    /// Returns the validation errors, panicking if the validation itself fails
+    fn get_validator<R: Read>(schema: String, mut input: R, eof: bool) -> Vec<Error> {
+        validate(schema, &mut input, "test_file.md", eof)
+            .expect("Validation should complete without errors")
+    }
+
     /// A custom reader that only reads a specific number of bytes at a time
     struct LimitedReader<R> {
         inner: R,
@@ -184,11 +191,9 @@ mod tests {
     fn test_validate_with_cursor() {
         let schema_str = "# Hi there!".to_string();
         let input_data = "# Hi there!";
-        let mut reader = Cursor::new(input_data.as_bytes());
+        let reader = Cursor::new(input_data.as_bytes());
 
-        let result = validate(schema_str, &mut reader, "test_file.md", false);
-
-        let errors = result.unwrap();
+        let errors = get_validator(schema_str, reader, false);
         assert!(errors.is_empty(), "Should have no errors");
     }
 
@@ -197,13 +202,9 @@ mod tests {
         let schema_str = "# Hi there!".to_string();
         let input_data = "# Hi there!";
         let cursor = Cursor::new(input_data.as_bytes());
-        let mut reader = LimitedReader::new(cursor, 2);
+        let reader = LimitedReader::new(cursor, 2);
 
-        // This test should not panic and should complete successfully
-        let result = validate(schema_str, &mut reader, "test_file.md", false);
-
-        // The validation should succeed (no errors in the function execution)
-        let errors = result.expect("Validation should complete without errors");
+        let errors = get_validator(schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content"
@@ -215,13 +216,9 @@ mod tests {
         let schema_str = "# Hi there!".to_string();
         let input_data = "# Hi there!";
         let cursor = Cursor::new(input_data.as_bytes());
-        let mut reader = LimitedReader::new(cursor, 1000);
+        let reader = LimitedReader::new(cursor, 1000);
 
-        // This test should not panic and should complete successfully
-        let result = validate(schema_str, &mut reader, "test_file.md", false);
-
-        // The validation should succeed (no errors in the function execution)
-        let errors = result.expect("Validation should complete without errors");
+        let errors = get_validator(schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content"
@@ -256,11 +253,9 @@ This is a shopping list:
     - Fresh from market"#;
 
         let cursor = Cursor::new(input_data.as_bytes());
-        let mut reader = LimitedReader::new(cursor, 2);
+        let reader = LimitedReader::new(cursor, 2);
 
-        let result = validate(schema_str, &mut reader, "test_file.md", false);
-
-        let errors = result.expect("Validation should complete without errors");
+        let errors = get_validator(schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content with matchers"
@@ -273,11 +268,9 @@ This is a shopping list:
         let input_data = r#"# JSDS"#;
 
         let cursor = Cursor::new(input_data.as_bytes());
-        let mut reader = LimitedReader::new(cursor, 2);
+        let reader = LimitedReader::new(cursor, 2);
 
-        let result = validate(schema_str, &mut reader, "test_file.md", false);
-
-        let errors = result.expect("Validation should complete without errors");
+        let errors = get_validator(schema_str, reader, false);
         assert!(
             !errors.is_empty(),
             "Expected validation errors for mismatched input but found none."
@@ -303,11 +296,9 @@ This is a test
 This is a test"#;
 
         let cursor = Cursor::new(input_data.as_bytes());
-        let mut reader = LimitedReader::new(cursor, 9);
+        let reader = LimitedReader::new(cursor, 9);
 
-        let result = validate(schema_str, &mut reader, "test_file.md", false);
-
-        let errors = result.expect("Validation should complete without errors");
+        let errors = get_validator(schema_str, reader, false);
         assert_eq!(
             errors.len(),
             1,

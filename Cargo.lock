@@ -1136,6 +1136,8 @@ dependencies = [
  "line-col",
  "log",
  "regex",
+ "serde",
+ "serde_json",
  "tree-sitter",
  "tree-sitter-markdown-fork",
 ]
