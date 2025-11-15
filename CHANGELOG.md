@@ -13,6 +13,10 @@
 
 - add release script (73ec96f…)
 
+- update CHANGELOG.md (2d1c542…)
+
+- update release setup (74acb4a…)
+
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
