@@ -14,12 +14,11 @@ jobs:
         uses: orhun/git-cliff-action@v4
         with:
           config: ./cliff.toml
-          args: --current --strip header
-          output: CHANGELOG.md
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          token: ${{ secrets.GH_ACCESS_TOKEN }}
-          body_path: CHANGELOG.md
-          draft: false
-          prerelease: false
+          args: --strip header
+      - name: Commit and push updated CHANGELOG.md
+        run: |
+          git config --global user.name 'GitHub Actions'
+          git config --global user.email 'actions@github.com'
+          git add CHANGELOG.md
+          git commit -m "chore: update CHANGELOG.md for ${{ github.ref_name }}" || echo "No changes to commit"
+          git push
