@@ -17,13 +17,9 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: Verify changelog
         run: |
-          # Backup original changelog
           cp CHANGELOG.md CHANGELOG.md.original
-
-          # Generate fresh changelog
           nix develop -c git cliff -o CHANGELOG.md.generated
 
-          # Compare and fail if different
           if ! diff -q CHANGELOG.md.original CHANGELOG.md.generated; then
             echo "Changelog is out of sync with git history"
             echo "cargo-release <patch|minor|major> --release"
