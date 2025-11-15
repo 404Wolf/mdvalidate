@@ -12,6 +12,8 @@
 
 - remove check (03789ae…)
 
+- update CHANGELOG.md (ecaa5ce…)
+
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
