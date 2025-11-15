@@ -9,6 +9,10 @@
 
 - use nix flake (dc05c97…)
 
+- Release mdvalidate version 0.1.23 (6913b8e…)
+
+- add release script (c4aa215…)
+
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
 
