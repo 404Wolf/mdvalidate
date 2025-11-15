@@ -74,6 +74,8 @@ impl Validator {
             schema_tree,
             last_input_descendant_index: 0,
             last_schema_descendant_index: 0,
+            // We revalidate some nodes multiple times if the cursor leaves off,
+            // so we use a set to automatically weed out duplicates
             errors: HashSet::new(),
             last_input_str: input_str.to_string(),
             schema_str: schema_str.to_string(),

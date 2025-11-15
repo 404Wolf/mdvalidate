@@ -17,7 +17,7 @@ stream.on("data", (chunk) => {
   process.stdout.write(chunk);
   console.error(chunk);
   stream.pause();
-  setTimeout(() => stream.resume(), 50);
+  setTimeout(() => stream.resume(), 30);
 });
 
 stream.on("end", () => {
