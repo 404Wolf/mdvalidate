@@ -350,10 +350,17 @@ impl Validator {
                 );
 
                 self.errors_so_far.extend(errors);
-                self.matches_so_far
-                    .as_object_mut()
-                    .unwrap() // Safe unwrap since matches is always an object
-                    .extend(matches.as_object().unwrap().clone());
+
+                // For list matchers, replace the entire array since validate_matcher_node_list
+                // revalidates all items and returns the complete array
+                for (key, new_value) in matches.as_object().unwrap() {
+                    self.matches_so_far
+                        .as_object_mut()
+                        .unwrap()
+                        .insert(key.clone(), new_value.clone());
+                }
+
+                continue;
             }
             // If they are both text, directly compare them. This is a "base
             // case," where we do not need to do any special logic.
