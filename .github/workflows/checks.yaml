@@ -14,17 +14,14 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
-
-      - name: Install git-cliff
-        run: cargo install git-cliff
-
+      - uses: cachix/install-nix-action@v31
       - name: Verify changelog
         run: |
           # Backup original changelog
           cp CHANGELOG.md CHANGELOG.md.original
 
           # Generate fresh changelog
-          git cliff -o CHANGELOG.md.generated
+          nix develop -c git cliff -o CHANGELOG.md.generated
 
           # Compare and fail if different
           if ! diff -q CHANGELOG.md.original CHANGELOG.md.generated; then
