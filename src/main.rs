@@ -1,12 +1,13 @@
 use clap::Parser;
 use env_logger;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Write};
+use std::process::exit;
 
 pub mod cmd;
 pub mod mdschema;
 mod path_or_stdio;
 
-use crate::cmd::validate;
+use crate::cmd::process_stdio;
 use crate::path_or_stdio::PathOrStdio;
 use colored::Colorize;
 
@@ -18,10 +19,13 @@ struct Args {
     /// Input Markdown file or "-" for stdin
     input: String,
     /// Output JSON file for discovered matches or "-" for stdout
-    output: String,
+    output: Option<String>,
     /// Whether to stop validation on the first error encountered
     #[arg(short, long)]
     fast_fail: bool,
+    /// Whether to suppress non-error output
+    #[arg(short, long)]
+    quiet: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -43,14 +47,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input = PathOrStdio::from(args.input);
     let mut input_reader = input.reader()?;
 
-    if let Err(e) = validate(
+    let mut output_writer: &mut Option<&mut Box<dyn Write>> = match args.output {
+        Some(ref output_path) => {
+            let output_pos = PathOrStdio::from(output_path.clone());
+            &mut Some(&mut output_pos.writer()?)
+        }
+        None => &mut None,
+    };
+
+    match process_stdio(
         &schema_str,
         &mut input_reader,
+        &mut output_writer,
         input.filepath(),
         args.fast_fail,
+        args.quiet,
     ) {
-        println!("{}", format!("Error! {}", e).red());
-        return Err(Box::new(e));
+        Err(err) => {
+            println!("{}", format!("Error! {}", err).red());
+            return Err(Box::new(err));
+        }
+        Ok((_, errored)) => {
+            if errored {
+                exit(1)
+            }
+        }
     }
 
     Ok(())

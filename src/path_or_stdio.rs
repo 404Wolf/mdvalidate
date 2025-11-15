@@ -33,6 +33,16 @@ impl PathOrStdio {
             PathOrStdio::Stdio => Ok(Box::new(io::stdin())),
         }
     }
+
+    pub fn writer(&self) -> io::Result<Box<dyn io::Write>> {
+        match self {
+            PathOrStdio::Path(p) => {
+                let file = File::create(p)?;
+                Ok(Box::new(file))
+            }
+            PathOrStdio::Stdio => Ok(Box::new(io::stdout())),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -61,7 +71,7 @@ mod tests {
     }
 
     #[test]
-    fn test_with_temp_file_get_stream() {
+    fn test_with_temp_file_get_readable() {
         use std::io::Write;
         use tempfile::NamedTempFile;
 
@@ -79,6 +89,32 @@ mod tests {
                     .read_to_string(&mut content)
                     .expect("Failed to read content");
                 assert_eq!(content.trim(), "Hello, world!");
+            }
+            _ => panic!("Expected Path variant"),
+        }
+    }
+
+    #[test]
+    fn test_with_temp_file_get_writable() {
+        use std::io::Read;
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        let path_str = temp_file.path().to_str().unwrap().to_string();
+        let pos = PathOrStdio::from(path_str.clone());
+
+        match pos {
+            PathOrStdio::Path(_) => {
+                {
+                    let mut writer = pos.writer().expect("Failed to get writer");
+                    writeln!(writer, "Hello, writable world!").expect("Failed to write content");
+                }
+
+                let mut file = File::open(path_str).expect("Failed to open temp file");
+                let mut content = String::new();
+                file.read_to_string(&mut content)
+                    .expect("Failed to read content");
+                assert_eq!(content.trim(), "Hello, writable world!");
             }
             _ => panic!("Expected Path variant"),
         }

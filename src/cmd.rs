@@ -1,24 +1,23 @@
-use std::io::Read;
-
-use colored::*;
-use log::{debug, info, trace};
-
 use crate::mdschema::validator::{
-    errors::{pretty_print_error, Error, ValidationError},
+    errors::{pretty_print_error, ValidationError},
+    node_validators::NodeValidationResult,
     validator::Validator,
 };
+use colored::Colorize;
+use log::{debug, trace};
+use std::io::{Read, Write};
+use tree_sitter::Tree;
 
 static DEFAULT_BUFFER_SIZE: usize = 2048;
 
-pub fn validate<R: Read>(
+pub fn process<R: Read>(
     schema_str: &String,
     input: &mut R,
-    filename: &str,
     fast_fail: bool,
-) -> Result<Vec<Error>, ValidationError> {
+) -> Result<(NodeValidationResult, Tree, String), ValidationError> {
     let buffer_size = get_buffer_size();
 
-    debug!("Starting validation for file: {}", filename);
+    debug!("Starting validation");
 
     let mut input_str = String::new();
     let mut buffer = vec![0; buffer_size];
@@ -27,7 +26,6 @@ pub fn validate<R: Read>(
     let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
         .ok_or(ValidationError::ValidatorCreationFailed)?;
 
-    let mut total_bytes_read = 0;
     let mut iteration_count = 0;
 
     loop {
@@ -35,7 +33,6 @@ pub fn validate<R: Read>(
         trace!("Reading iteration #{}", iteration_count);
 
         let bytes_read = input.read(&mut buffer)?;
-        total_bytes_read += bytes_read;
 
         // If we're done reading, mark EOF
         if bytes_read == 0 {
@@ -63,29 +60,51 @@ pub fn validate<R: Read>(
         }
     }
 
-    debug!(
-        "Validation loop completed after {} iterations, with {} bytes processed",
-        iteration_count, total_bytes_read,
-    );
-
     let errors = validator.errors();
-    let input_tree = validator.input_tree.clone();
+    let matches = validator.matches();
+    let input_tree = validator.input_tree;
 
-    let mut pretty_output = String::new();
-    for error in &errors {
-        let pretty = pretty_print_error(&input_tree, error, &input_str, filename)
-            .map_err(ValidationError::PrettyPrintFailed)?;
-        pretty_output.push_str(&pretty);
-    }
+    Ok(((errors, matches), input_tree, input_str))
+}
 
-    if !pretty_output.is_empty() {
-        info!("Validation completed with issues found");
-        println!("{}", pretty_output);
+pub fn process_stdio<R: Read, W: Write>(
+    schema_str: &String,
+    input: &mut R,
+    output: &mut Option<&mut W>,
+    filename: &str,
+    fast_fail: bool,
+    quiet: bool,
+) -> Result<(NodeValidationResult, bool), ValidationError> {
+    let ((errors, matches), input_tree, input_str) = process(schema_str, input, fast_fail)?;
+
+    let mut errored = false;
+    if errors.is_empty() {
+        match (output, quiet) {
+            (None, false) => {
+                println!(
+                    "{}",
+                    format!(
+                        "File {} validated successfully! No errors found.",
+                        filename
+                    )
+                    .green()
+                );
+            }
+            (Some(out), false) => {
+                writeln!(out, "{}", matches)?;
+            }
+            _ => {}
+        }
     } else {
-        println!("{}", "Validation success! Input matches schema.".green());
+        for error in &errors {
+            let pretty = pretty_print_error(&input_tree, error, &input_str, filename)
+                .map_err(ValidationError::PrettyPrintFailed)?;
+            eprintln!("{}", pretty);
+            errored = true;
+        }
     }
 
-    Ok(errors)
+    Ok(((errors, matches), errored))
 }
 
 fn get_buffer_size() -> usize {
@@ -97,14 +116,17 @@ fn get_buffer_size() -> usize {
 
 #[cfg(test)]
 mod tests {
+    use crate::mdschema::validator::errors::Error;
+
     use super::*;
     use std::io::{self, Cursor, Read};
 
     /// Helper function to create a validator and handle errors consistently
     /// Returns the validation errors, panicking if the validation itself fails
     fn get_validator<R: Read>(schema: &String, mut input: R, eof: bool) -> Vec<Error> {
-        validate(schema, &mut input, "test_file.md", eof)
-            .expect("Validation should complete without errors")
+        let ((errors, _), _, _) =
+            process(schema, &mut input, eof).expect("Validation should complete without errors");
+        errors
     }
 
     /// A custom reader that only reads a specific number of bytes at a time
