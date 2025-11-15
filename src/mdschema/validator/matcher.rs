@@ -8,8 +8,9 @@ pub enum MatcherError {
     InvalidFormat,
 }
 
-static MATCHER_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap());
+static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
+});
 
 pub struct Matcher {
     id: Option<String>,
@@ -27,7 +28,6 @@ enum SpecialMatchers {
 }
 // id= re.get("id")
 
-
 //
 impl Matcher {
     pub fn new(pattern: &str) -> Result<Matcher, MatcherError> {
@@ -43,7 +43,6 @@ impl Matcher {
                 let regex_pattern = caps.name("regex").map(|m| m.as_str().to_string());
                 let special = caps.name("special").map(|m| m.as_str().to_string());
 
-
                 let pattern = match (regex_pattern, special) {
                     (Some(regex_pattern), None) => {
                         MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
@@ -52,24 +51,20 @@ impl Matcher {
                     (Some(_), Some(_)) => return Err(MatcherError::InvalidFormat),
                     (None, None) => return Err(MatcherError::InvalidFormat),
                 };
-                println!("pattern is of type: {}", std::any::type_name_of_val(&pattern));
-                (
-                    id, 
-                    pattern,
-                )
-
+                println!(
+                    "pattern is of type: {}",
+                    std::any::type_name_of_val(&pattern)
+                );
+                (id, pattern)
             }
             None => {
                 return Err(MatcherError::InvalidFormat);
             }
         };
 
-        debug!(
-            "Creating matcher with id '{:?}' and pattern",
-            id
-        );
+        debug!("Creating matcher with id '{:?}' and pattern", id);
 
-        println!("id: {:?}", id, );
+        println!("id: {:?}", id,);
         Ok(Matcher {
             id,
             pattern: matcher,
@@ -82,15 +77,20 @@ impl Matcher {
             MatcherType::Regex(regex) => match regex.find(text) {
                 Some(mat) => Some(&text[mat.start()..mat.end()]),
                 None => None,
-            }
-            MatcherType::Special(SpecialMatchers::Ruler) => 
+            },
+            MatcherType::Special(SpecialMatchers::Ruler) => {
                 if text == "ruler" || text.matches(['-', '*', '_']).count() >= 3 {
                     Some("ruler")
                 } else {
                     None
                 }
-            
+            }
         }
+    }
+
+    /// Check whether the matcher is for a ruler.
+    pub fn is_ruler(&self) -> bool {
+        matches!(self.pattern, MatcherType::Special(SpecialMatchers::Ruler))
     }
 }
 
@@ -107,7 +107,6 @@ impl fmt::Display for Matcher {
                 }
             }
             MatcherType::Special(SpecialMatchers::Ruler) => "ruler",
-
         };
 
         match &self.id {

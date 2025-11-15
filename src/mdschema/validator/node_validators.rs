@@ -64,7 +64,8 @@ pub fn validate_matcher_node<'b>(
     eof: bool,
     initial_input_node: &Node<'b>,
 ) -> Vec<Error> {
-    let is_incomplete = (input_node.byte_range().end == initial_input_node.byte_range().end) && !eof;
+    let is_incomplete =
+        (input_node.byte_range().end == initial_input_node.byte_range().end) && !eof;
 
     debug!(
         "validate_matcher_node: input_node range={:?}, input_text='{}', eof={}, is_incomplete={}",
@@ -111,13 +112,13 @@ pub fn validate_matcher_node<'b>(
 
     // Always validate prefix, even for incomplete nodes
     let prefix_schema = &schema_str[schema_start..schema_start + matcher_start];
-    
+
     // Check if we have enough input to validate the prefix
     let input_has_full_prefix = input_node.byte_range().len() >= matcher_start;
-    
+
     if input_has_full_prefix {
-        let prefix_input =
-            &input_str[input_node.byte_range().start..input_node.byte_range().start + matcher_start];
+        let prefix_input = &input_str
+            [input_node.byte_range().start..input_node.byte_range().start + matcher_start];
 
         if prefix_schema != prefix_input {
             errors.push(Error::SchemaViolation(
@@ -138,6 +139,23 @@ pub fn validate_matcher_node<'b>(
 
     let input_start = input_node.byte_range().start + matcher_start;
     let input_to_match = &input_str[input_start..];
+
+    // If the matcher is for a ruler, we should expect the entire input node to be a ruler
+    if matcher.is_ruler() {
+        if input_node.kind() != "thematic_break" {
+            errors.push(Error::SchemaViolation(
+                SchemaViolationError::NodeTypeMismatch(
+                    input_node_descendant_index,
+                    input_node_descendant_index, // should be the same as the schema's.
+                                                 // TODO: is this really true though?
+                ),
+            ));
+            return errors;
+        } else {
+            // It's a ruler, no further validation needed
+            return errors;
+        }
+    }
 
     // If this is the last node, don't validate it if we haven't reached EOF,
     // since the matcher might be incomplete.
@@ -471,5 +489,42 @@ mod tests {
             }
             _ => panic!("Expected NodeContentMismatch error"),
         }
+    }
+
+    #[test]
+    fn test_ruler() {
+        let schema = "`ruler`";
+        let input = "---";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser.parse(input, None).unwrap();
+        let input_node = input_tree.root_node().child(0).unwrap();
+        let input_root = input_tree.root_node();
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser.parse(schema, None).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<Node> = schema_tree
+            .root_node()
+            .child(0)
+            .unwrap()
+            .children(&mut schema_cursor)
+            .collect();
+
+        let errors = validate_matcher_node(
+            &input_node,
+            0,
+            &schema_nodes,
+            input,
+            schema,
+            true,
+            &input_root,
+        );
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
     }
 }
