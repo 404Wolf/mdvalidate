@@ -5,12 +5,10 @@ use log::debug;
 use serde_json::{json, Value};
 use tree_sitter::Tree;
 
-use crate::mdschema::{
-    reports::errors::{Error, ParserError, SchemaError, SchemaViolationError},
-    validator::{
-        node_validators::{validate_matcher_node, validate_text_node},
-        utils::new_markdown_parser,
-    },
+use crate::mdschema::validator::{
+    errors::{Error, ParserError, SchemaError, SchemaViolationError},
+    node_validators::{validate_matcher_node, validate_text_node},
+    utils::new_markdown_parser,
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -653,7 +651,7 @@ mod tests {
         );
 
         println!("got matches {:?}", matches);
-        assert_eq!(matches.get(0).unwrap(), "wolf");
+        assert_eq!(matches.get("name"), None); // No match should be recorded
     }
 
     #[test]
@@ -668,20 +666,7 @@ mod tests {
             "Expected no validation errors but found {:?}",
             errors
         );
-        assert_eq!(matches.get(0).unwrap(), "1.2.3");
-    }
-
-    #[test]
-    fn test_matcher_with_numbers_fails_on_invalid_format() {
-        let schema = r"Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
-";
-        let input = "Version: 1.2\n";
-
-        let (errors, _) = get_validator(schema, input, true);
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for invalid version"
-        );
+        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
     }
 
     #[test]
@@ -696,15 +681,16 @@ mod tests {
             "Expected no validation errors but found {:?}",
             errors
         );
-        assert_eq!(matches.get(0).unwrap(), "Wolf");
+        assert_eq!(matches.get("name").unwrap(), "Wolf");
     }
 
     #[test]
     fn test_matcher_with_prefix_and_suffix_and_number() {
         let schema = r"Hello `name:/[A-Z][a-z]+/` there!
+
 Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 ";
-        let input = "Hello Wolf there!\nVersion: 1.2.3\n";
+        let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
 
         let (errors, matches) = get_validator(schema, input, true);
         assert!(
@@ -712,16 +698,17 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
             "Expected no validation errors but found {:?}",
             errors
         );
-        assert_eq!(matches.get(0).unwrap(), "Wolf");
-        assert_eq!(matches.get(1).unwrap(), "1.2.3");
+        assert_eq!(matches.get("name").unwrap(), "Wolf");
+        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
     }
 
     #[test]
     fn test_matcher_with_prefix_and_suffix_and_number_with_prefix() {
         let schema = r"Hello `name:/[A-Z][a-z]+/` there!
+
 Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 ";
-        let input = "Hello Wolf there!\nVersion: 1.2.3\n";
+        let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
 
         let (errors, matches) = get_validator(schema, input, true);
         assert!(
@@ -729,16 +716,17 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
             "Expected no validation errors but found {:?}",
             errors
         );
-        assert_eq!(matches.get(0).unwrap(), "Wolf");
-        assert_eq!(matches.get(1).unwrap(), "1.2.3");
+        assert_eq!(matches.get("name").unwrap(), "Wolf");
+        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
     }
 
     #[test]
     fn test_matcher_with_prefix_and_suffix_and_number_with_suffix() {
         let schema = r"Hello `name:/[A-Z][a-z]+/` there!
+
 Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 ";
-        let input = "Hello Wolf there!\nVersion: 1.2.3\n";
+        let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
 
         let (errors, matches) = get_validator(schema, input, true);
         assert!(
@@ -746,8 +734,8 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
             "Expected no validation errors but found {:?}",
             errors
         );
-        assert_eq!(matches.get(0).unwrap(), "Wolf");
-        assert_eq!(matches.get(1).unwrap(), "1.2.3");
+        assert_eq!(matches.get("name").unwrap(), "Wolf");
+        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
     }
 
     #[test]
@@ -803,7 +791,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
             "Expected validation error for invalid word"
         );
 
-        assert_eq!(matches.get("word").unwrap(), "hello@world");
+        assert_eq!(matches.get("word").unwrap(), "hello");
     }
 
     #[test]

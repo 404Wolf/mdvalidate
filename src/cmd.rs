@@ -1,17 +1,18 @@
 use std::io::Read;
 
-use crate::mdschema::{
-    reports::{errors::Error, pretty_print::pretty_print_error},
-    validator::validator::Validator,
-};
 use anyhow::Result;
 use colored::*;
 use log::{debug, info, trace};
 
+use crate::mdschema::validator::{
+    errors::{pretty_print_error, Error},
+    validator::Validator,
+};
+
 static DEFAULT_BUFFER_SIZE: usize = 2048;
 
 pub fn validate<R: Read>(
-    schema_str: String,
+    schema_str: &String,
     input: &mut R,
     filename: &str,
     fast_fail: bool,
@@ -19,7 +20,6 @@ pub fn validate<R: Read>(
     let buffer_size = get_buffer_size();
 
     debug!("Starting validation for file: {}", filename);
-    debug!("Schema length: {} characters", schema_str.len());
 
     let mut input_str = String::new();
     let mut buffer = vec![0; buffer_size];
@@ -27,8 +27,6 @@ pub fn validate<R: Read>(
     debug!("Creating validator with buffer size: {}", buffer_size);
     let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
         .ok_or_else(|| anyhow::anyhow!("Failed to create validator"))?;
-
-    debug!("Validator created successfully");
 
     let mut total_bytes_read = 0;
     let mut iteration_count = 0;
@@ -40,59 +38,43 @@ pub fn validate<R: Read>(
         let bytes_read = input.read(&mut buffer)?;
         total_bytes_read += bytes_read;
 
-        debug!(
-            "Read {} bytes in iteration #{} (total: {} bytes)",
-            bytes_read, iteration_count, total_bytes_read
-        );
-
         // If we're done reading, mark EOF
         if bytes_read == 0 {
             debug!("Reached EOF, processing final input");
+
             if let Err(e) = validator.read_input(&input_str, true) {
                 return Err(anyhow::anyhow!("Error reading input at EOF: {:?}", e));
             }
             validator.validate();
+
             break;
         }
 
         let new_text = std::str::from_utf8(&buffer[..bytes_read])?;
         input_str.push_str(new_text);
 
-        trace!("Input string length now: {} characters", input_str.len());
-
-        debug!(
-            "Processing input for validation (iteration #{})",
-            iteration_count
-        );
         if let Err(e) = validator.read_input(&input_str, false) {
             return Err(anyhow::anyhow!("Error reading input: {:?}", e));
         }
         validator.validate();
-        trace!(
-            "Validation step completed for iteration #{}",
-            iteration_count
-        );
 
         // Check for fast-fail AFTER validation
         if fast_fail && !validator.errors().is_empty() {
-            debug!("Fast-fail enabled and errors found, exiting validation loop early");
             break;
         }
     }
 
     debug!(
-        "Validation loop completed after {} iterations",
-        iteration_count
+        "Validation loop completed after {} iterations, with {} bytes processed",
+        iteration_count, total_bytes_read,
     );
-    debug!("Total bytes processed: {}", total_bytes_read);
 
-    debug!("Generating validation report");
     let errors = validator.errors();
     let input_tree = validator.input_tree.clone();
 
     let mut pretty_output = String::new();
     for error in &errors {
-        let pretty = pretty_print_error(input_tree.clone(), error, &input_str, filename)
+        let pretty = pretty_print_error(&input_tree, error, &input_str, filename)
             .map_err(|e| anyhow::anyhow!("Error generating report: {}", e))?;
         pretty_output.push_str(&pretty);
     }
@@ -103,8 +85,6 @@ pub fn validate<R: Read>(
     } else {
         println!("{}", "Validation success! Input matches schema.".green());
     }
-
-    debug!("Validation function completed for file: {}", filename);
 
     Ok(errors)
 }
@@ -123,7 +103,7 @@ mod tests {
 
     /// Helper function to create a validator and handle errors consistently
     /// Returns the validation errors, panicking if the validation itself fails
-    fn get_validator<R: Read>(schema: String, mut input: R, eof: bool) -> Vec<Error> {
+    fn get_validator<R: Read>(schema: &String, mut input: R, eof: bool) -> Vec<Error> {
         validate(schema, &mut input, "test_file.md", eof)
             .expect("Validation should complete without errors")
     }
@@ -193,7 +173,7 @@ mod tests {
         let input_data = "# Hi there!";
         let reader = Cursor::new(input_data.as_bytes());
 
-        let errors = get_validator(schema_str, reader, false);
+        let errors = get_validator(&schema_str, reader, false);
         assert!(errors.is_empty(), "Should have no errors");
     }
 
@@ -204,7 +184,7 @@ mod tests {
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 2);
 
-        let errors = get_validator(schema_str, reader, false);
+        let errors = get_validator(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content"
@@ -218,7 +198,7 @@ mod tests {
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 1000);
 
-        let errors = get_validator(schema_str, reader, false);
+        let errors = get_validator(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content"
@@ -255,7 +235,7 @@ This is a shopping list:
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 2);
 
-        let errors = get_validator(schema_str, reader, false);
+        let errors = get_validator(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content with matchers"
@@ -270,7 +250,7 @@ This is a shopping list:
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 2);
 
-        let errors = get_validator(schema_str, reader, false);
+        let errors = get_validator(&schema_str, reader, false);
         assert!(
             !errors.is_empty(),
             "Expected validation errors for mismatched input but found none."
@@ -298,7 +278,7 @@ This is a test"#;
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 9);
 
-        let errors = get_validator(schema_str, reader, false);
+        let errors = get_validator(&schema_str, reader, false);
         assert_eq!(
             errors.len(),
             1,

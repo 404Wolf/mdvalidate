@@ -2,10 +2,13 @@ use log::debug;
 use serde_json::{json, Value};
 use tree_sitter::Node;
 
-use crate::mdschema::{
-    reports::errors::{Error, SchemaViolationError},
-    validator::{matcher::Matcher, utils::is_last_node},
+use crate::mdschema::validator::{
+    errors::{Error, SchemaViolationError},
+    matcher::Matcher,
+    utils::is_last_node,
 };
+
+pub type NodeValidationResult = (Vec<Error>, Value);
 
 /// Validate a text node against the schema text node.
 ///
@@ -18,8 +21,7 @@ pub fn validate_text_node<'b>(
     input_str: &'b str,
     schema_str: &'b str,
     eof: bool,
-) -> (Vec<Error>, Value) {
-    debug!("Validating text node content");
+) -> NodeValidationResult {
     let mut errors = Vec::new();
 
     let schema_text = &schema_str[schema_node.byte_range()];
@@ -60,7 +62,7 @@ pub fn validate_matcher_node<'b>(
     input_str: &'b str,
     schema_str: &'b str,
     eof: bool,
-) -> (Vec<Error>, Value) {
+) -> NodeValidationResult {
     let is_incomplete = !eof && is_last_node(input_str, input_node);
 
     let mut errors = Vec::new();

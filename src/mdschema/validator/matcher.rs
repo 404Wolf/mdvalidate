@@ -1,6 +1,5 @@
 use anyhow::Result;
 use core::fmt;
-use log::debug;
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -15,8 +14,6 @@ pub struct Matcher {
 
 impl Matcher {
     pub fn new(pattern: &str) -> Result<Matcher> {
-        debug!("Parsing matcher pattern: {}", pattern);
-
         let pattern = pattern[1..pattern.len() - 1].trim(); // Remove surrounding backticks
         let captures = MATCHER_PATTERN.captures(pattern);
 
@@ -33,11 +30,6 @@ impl Matcher {
                 ));
             }
         };
-
-        debug!(
-            "Creating matcher with id '{}' and regex pattern '{}'",
-            id, regex_pattern
-        );
 
         Ok(Matcher {
             id,

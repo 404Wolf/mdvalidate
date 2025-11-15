@@ -52,3 +52,35 @@ pub fn new_markdown_parser() -> Parser {
 pub fn is_last_node(input_str: &str, node: &tree_sitter::Node) -> bool {
     input_str.trim().len() == node.byte_range().end
 }
+
+/// Find a node by its index given by a cursor's .descendant_index().
+pub fn find_node_by_index(root: tree_sitter::Node, target_index: usize) -> tree_sitter::Node {
+    let mut cursor = root.walk();
+    cursor.goto_descendant(target_index);
+    cursor.node()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_node_to_str() {
+        let source = "# Heading\n\nThis is a paragraph.";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let root_node = tree.root_node();
+        let result = node_to_str(root_node, source);
+        println!("{}", result);
+    }
+
+    #[test]
+    fn test_find_node_by_index() {
+        let source = "# Heading\n\nThis is a paragraph.";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(source, None).unwrap();
+        let root_node = tree.root_node();
+        let node = find_node_by_index(root_node, 2);
+        assert_eq!(node.kind(), "atx_h1_marker");
+    }
+}
