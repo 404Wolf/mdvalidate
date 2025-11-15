@@ -4,11 +4,6 @@ use std::sync::LazyLock;
 
 use super::errors::ValidationError;
 
-#[derive(Debug)]
-pub enum MatcherError {
-    InvalidFormat,
-}
-
 static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
 });

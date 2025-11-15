@@ -1,4 +1,3 @@
-use cargo_llvm_cov::json;
 use log::debug;
 use serde_json::{json, Value};
 use tree_sitter::Node;
