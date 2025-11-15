@@ -1,0 +1,36 @@
+name: Verify Changelog
+
+on:
+  pull_request:
+    paths:
+      - "CHANGELOG.md"
+      - "Cargo.toml"
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Install git-cliff
+        run: cargo install git-cliff
+
+      - name: Verify changelog
+        run: |
+          # Backup original changelog
+          cp CHANGELOG.md CHANGELOG.md.original
+
+          # Generate fresh changelog
+          git cliff -o CHANGELOG.md.generated
+
+          # Compare and fail if different
+          if ! diff -q CHANGELOG.md.original CHANGELOG.md.generated; then
+            echo "Changelog is out of sync with git history"
+            echo "Run 'git cliff -o CHANGELOG.md' to update it"
+            exit 1
+          else
+            echo "Changelog is in sync with git history"
+          fi
