@@ -250,12 +250,27 @@ impl Validator {
             // Schema is a list with a single entry which is a node that contains a code node.
             // This is for the case where we have `matcher`+ (with the + at the end) to indicate
             // that the matcher pattern applies for multiple consecutive list items.
+            let schema_node_first_list_item_code_node_count = {
+                schema_node
+                    .child(0)
+                    .map(|first_child| {
+                        children_code_node_count(&first_child, &mut schema_cursor.clone())
+                    })
+                    .unwrap_or(0)
+            };
             let is_schema_specified_list_node =
-                schema_node.kind() == "tight_list" && schema_children_code_node_count == 1;
+                schema_node.kind() == "tight_list" && schema_node.child_count() == 1;
+            debug!(
+                "Schema node is a schema-specified list node: {}",
+                is_schema_specified_list_node
+            );
 
             // We don't allow multiple code_span children for the schema
             // since it would lead to ambiguity
-            if schema_children_code_node_count > 1 && !is_schema_specified_list_node {
+            if schema_children_code_node_count > 1
+                || (schema_node.kind() == "tight_list"
+                    && schema_node_first_list_item_code_node_count > 0)
+            {
                 trace!("Schema node has multiple matcher children, reporting error");
 
                 self.errors_so_far.insert(Error::SchemaError(
@@ -310,12 +325,25 @@ impl Validator {
 
                 continue;
             } else if is_schema_specified_list_node {
+                // Get the first list item, then get its children excluding the list marker
+                let first_list_item = schema_node.child(0).unwrap();
+
+                // Get the paragraph child of the list item (which contains the actual content)
+                let first_list_item_paragraph = first_list_item
+                    .children(&mut schema_cursor.clone())
+                    .skip(1) // Skip the list_marker_minus node
+                    .next()
+                    .unwrap(); // Get the paragraph node
+
+                // Now get the children of the paragraph (text + code nodes)
+                let schema_list_item_children: Vec<_> = first_list_item_paragraph
+                    .children(&mut schema_cursor.clone())
+                    .collect();
+
                 let (errors, matches) = validate_matcher_node_list(
                     &input_node,
                     input_cursor.descendant_index(),
-                    &schema_node
-                        .children(&mut schema_cursor.clone())
-                        .collect::<Vec<_>>(),
+                    &schema_list_item_children,
                     &self.last_input_str,
                     &self.schema_str,
                     self.got_eof,
@@ -370,7 +398,19 @@ impl Validator {
             // raise an error - but only if we've received EOF. Otherwise, we're
             // still waiting for more input.
             if input_node.child_count() != schema_node.child_count() {
-                if self.got_eof {
+                if is_schema_specified_list_node {
+                    debug!(
+                        "Skipping children length mismatch check for schema-specified list node"
+                    );
+                } else if self.got_eof {
+                    debug!(
+                        "Children length mismatch at input_index={}, schema_index={}: input_child_count={}, schema_child_count={}",
+                        input_cursor.descendant_index(),
+                        schema_cursor.descendant_index(),
+                        input_node.child_count(),
+                        schema_node.child_count()
+                    );
+
                     self.errors_so_far.insert(Error::SchemaViolation(
                         SchemaViolationError::ChildrenLengthMismatch(
                             input_node.child_count(),

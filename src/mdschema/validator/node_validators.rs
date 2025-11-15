@@ -66,6 +66,7 @@ pub fn validate_matcher_node_list<'b>(
 
     match matcher {
         None => {
+            println!("No matcher found in list node children!, for schema nodes i got {:?}", schema_nodes);
             return (
                 vec![Error::SchemaError(
                     SchemaError::NoMatcherInListNodeChildren(input_node_descendant_index),
