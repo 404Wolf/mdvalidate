@@ -3,7 +3,6 @@ name = "mdv"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.100"
 ariadne = "0.5.1"
 clap = {version = "4.5.48", features = ["derive"]}
 colored = "3.0.0"

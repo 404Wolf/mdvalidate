@@ -1,7 +1,56 @@
 use ariadne::{Color, Label, Report, ReportKind, Source};
+use std::fmt;
+use std::io;
 use tree_sitter::Tree;
 
 use crate::mdschema::validator::utils::find_node_by_index;
+
+#[derive(Debug)]
+pub enum ValidationError {
+    Io(io::Error),
+    Utf8(std::string::FromUtf8Error),
+    InvalidRegex(regex::Error),
+    InvalidMatcherFormat(String),
+    ValidatorCreationFailed,
+    ReadInputFailed(Error),
+    PrettyPrintFailed(String),
+}
+
+impl fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ValidationError::Io(e) => write!(f, "IO error: {}", e),
+            ValidationError::Utf8(e) => write!(f, "UTF-8 error: {}", e),
+            ValidationError::InvalidRegex(e) => write!(f, "Invalid regex: {}", e),
+            ValidationError::InvalidMatcherFormat(msg) => {
+                write!(f, "Invalid matcher format: {}", msg)
+            }
+            ValidationError::ValidatorCreationFailed => write!(f, "Failed to create validator"),
+            ValidationError::ReadInputFailed(e) => write!(f, "Failed to read input: {:?}", e),
+            ValidationError::PrettyPrintFailed(e) => write!(f, "Error generating report: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
+impl From<io::Error> for ValidationError {
+    fn from(e: io::Error) -> Self {
+        ValidationError::Io(e)
+    }
+}
+
+impl From<std::str::Utf8Error> for ValidationError {
+    fn from(_: std::str::Utf8Error) -> Self {
+        ValidationError::Utf8(String::from_utf8(vec![]).unwrap_err())
+    }
+}
+
+impl From<regex::Error> for ValidationError {
+    fn from(e: regex::Error) -> Self {
+        ValidationError::InvalidRegex(e)
+    }
+}
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum Error {

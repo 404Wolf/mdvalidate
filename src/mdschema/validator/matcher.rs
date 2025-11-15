@@ -1,7 +1,8 @@
-use anyhow::Result;
 use core::fmt;
 use regex::Regex;
 use std::sync::LazyLock;
+
+use super::errors::ValidationError;
 
 static MATCHER_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(?P<id>[a-zA-Z0-9-_]+):/(?P<regex>.+?)/$").unwrap());
@@ -13,7 +14,7 @@ pub struct Matcher {
 }
 
 impl Matcher {
-    pub fn new(pattern: &str) -> Result<Matcher> {
+    pub fn new(pattern: &str) -> Result<Matcher, ValidationError> {
         let pattern = pattern[1..pattern.len() - 1].trim(); // Remove surrounding backticks
         let captures = MATCHER_PATTERN.captures(pattern);
 
@@ -24,10 +25,10 @@ impl Matcher {
                 (id.to_string(), regex_pattern)
             }
             None => {
-                return Err(anyhow::anyhow!(
+                return Err(ValidationError::InvalidMatcherFormat(format!(
                     "Expected format: 'id:/regex/', got {}",
                     pattern
-                ));
+                )));
             }
         };
 

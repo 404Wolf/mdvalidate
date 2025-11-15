@@ -27,15 +27,6 @@ struct Args {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let result = validate_main();
-    if let Err(ref e) = result {
-        println!("{}", format!("Error! {}", e).red());
-    }
-
-    Ok(())
-}
-
-fn validate_main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let schema_src = PathOrStdio::from(args.schema);
@@ -50,22 +41,17 @@ fn validate_main() -> Result<(), Box<dyn std::error::Error>> {
     BufReader::new(schema_src).read_to_string(&mut schema_str)?;
 
     let input = PathOrStdio::from(args.input);
-    let output = PathOrStdio::from(args.output);
+    let mut input_reader = input.reader()?;
 
-    let mut input_reader = input.reader().or_else(|e| {
-        Err(format!(
-            "Failed to open input file '{}': {}",
-            input.filepath(),
-            e
-        ))
-    })?;
-
-    validate(
+    if let Err(e) = validate(
         &schema_str,
         &mut input_reader,
-        &output.filepath(),
+        input.filepath(),
         args.fast_fail,
-    )?;
+    ) {
+        println!("{}", format!("Error! {}", e).red());
+        return Err(Box::new(e));
+    }
 
     Ok(())
 }

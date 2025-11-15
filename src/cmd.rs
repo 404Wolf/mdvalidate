@@ -1,11 +1,10 @@
 use std::io::Read;
 
-use anyhow::Result;
 use colored::*;
 use log::{debug, info, trace};
 
 use crate::mdschema::validator::{
-    errors::{pretty_print_error, Error},
+    errors::{pretty_print_error, Error, ValidationError},
     validator::Validator,
 };
 
@@ -16,7 +15,7 @@ pub fn validate<R: Read>(
     input: &mut R,
     filename: &str,
     fast_fail: bool,
-) -> Result<Vec<Error>> {
+) -> Result<Vec<Error>, ValidationError> {
     let buffer_size = get_buffer_size();
 
     debug!("Starting validation for file: {}", filename);
@@ -26,7 +25,7 @@ pub fn validate<R: Read>(
 
     debug!("Creating validator with buffer size: {}", buffer_size);
     let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
-        .ok_or_else(|| anyhow::anyhow!("Failed to create validator"))?;
+        .ok_or(ValidationError::ValidatorCreationFailed)?;
 
     let mut total_bytes_read = 0;
     let mut iteration_count = 0;
@@ -43,7 +42,7 @@ pub fn validate<R: Read>(
             debug!("Reached EOF, processing final input");
 
             if let Err(e) = validator.read_input(&input_str, true) {
-                return Err(anyhow::anyhow!("Error reading input at EOF: {:?}", e));
+                return Err(ValidationError::ReadInputFailed(e));
             }
             validator.validate();
 
@@ -54,7 +53,7 @@ pub fn validate<R: Read>(
         input_str.push_str(new_text);
 
         if let Err(e) = validator.read_input(&input_str, false) {
-            return Err(anyhow::anyhow!("Error reading input: {:?}", e));
+            return Err(ValidationError::ReadInputFailed(e));
         }
         validator.validate();
 
@@ -75,7 +74,7 @@ pub fn validate<R: Read>(
     let mut pretty_output = String::new();
     for error in &errors {
         let pretty = pretty_print_error(&input_tree, error, &input_str, filename)
-            .map_err(|e| anyhow::anyhow!("Error generating report: {}", e))?;
+            .map_err(ValidationError::PrettyPrintFailed)?;
         pretty_output.push_str(&pretty);
     }
 
