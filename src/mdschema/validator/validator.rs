@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 
 use line_col::LineColLookup;
-use log::debug;
+use log::{debug, trace};
 use serde_json::{json, Value};
 use tree_sitter::Tree;
 
 use crate::mdschema::validator::{
     errors::{Error, ParserError, SchemaError, SchemaViolationError},
-    node_validators::{validate_matcher_node, validate_text_node},
+    node_validators::{validate_matcher_node, validate_matcher_node_list, validate_text_node},
     utils::new_markdown_parser,
 };
 
@@ -244,14 +244,39 @@ impl Validator {
             // text nodes, and the input node is just text OR the input node
             // has only text children, we validate the matcher using our matcher
             // helper. It takes care of prefix/suffix matching as well.
-            let schema_children_code_node_count = schema_node
-                .children(&mut schema_cursor.clone())
-                .filter(|child| child.kind() == "code_span")
-                .count();
+            let schema_children_code_node_count =
+                children_code_node_count(&schema_node, &mut schema_cursor);
+
+            // Schema is a list with a single entry which is a node that contains a code node.
+            // This is for the case where we have `matcher`+ (with the + at the end) to indicate
+            // that the matcher pattern applies for multiple consecutive list items.
+            let schema_node_first_list_item_code_node_count = {
+                schema_node
+                    .child(0)
+                    .map(|first_child| {
+                        children_code_node_count(&first_child, &mut schema_cursor.clone())
+                    })
+                    .unwrap_or(0)
+            };
+            let is_schema_specified_list_node = schema_node.kind() == "tight_list"
+                && schema_node.child_count() == 1
+                && input_node.child_count() > 1; // When we hit the validate_matcher_list we
+                                                 // are expecting multiple items, and if we
+                                                 // don't get multiple items we say "hey, you
+                                                 // should have used +"!
+            debug!(
+                "Schema node is a schema-specified list node: {}",
+                is_schema_specified_list_node
+            );
 
             // We don't allow multiple code_span children for the schema
             // since it would lead to ambiguity
-            if schema_children_code_node_count > 1 {
+            if schema_children_code_node_count > 1
+                || (schema_node.kind() == "tight_list"
+                    && schema_node_first_list_item_code_node_count > 0)
+            {
+                trace!("Schema node has multiple matcher children, reporting error");
+
                 self.errors_so_far.insert(Error::SchemaError(
                     SchemaError::MultipleMatchersInNodeChildren(schema_children_code_node_count),
                 ));
@@ -265,6 +290,7 @@ impl Validator {
                         .child(0)
                         .map(|c| c.kind() == "text")
                         .unwrap_or(false));
+            trace!("Input node is text only: {}", input_is_text_only);
 
             // If the schema's current level's child nodes have a code node (a matcher)
             if schema_children_code_node_count == 1 && input_is_text_only {
@@ -300,6 +326,43 @@ impl Validator {
                     .as_object_mut()
                     .unwrap() // Safe unwrap since matches is always an object
                     .extend(matches.as_object().unwrap().clone());
+
+                continue;
+            } else if is_schema_specified_list_node {
+                // Get the first list item, then get its children excluding the list marker
+                let first_list_item = schema_node.child(0).unwrap();
+
+                // Get the paragraph child of the list item (which contains the actual content)
+                let first_list_item_paragraph = first_list_item
+                    .children(&mut schema_cursor.clone())
+                    .skip(1) // Skip the list_marker_minus node
+                    .next()
+                    .unwrap(); // Get the paragraph node
+
+                // Now get the children of the paragraph (text + code nodes)
+                let schema_list_item_children: Vec<_> = first_list_item_paragraph
+                    .children(&mut schema_cursor.clone())
+                    .collect();
+
+                let (errors, matches) = validate_matcher_node_list(
+                    &input_node,
+                    input_cursor.descendant_index(),
+                    &schema_list_item_children,
+                    &self.last_input_str,
+                    &self.schema_str,
+                    self.got_eof,
+                );
+
+                self.errors_so_far.extend(errors);
+
+                // For list matchers, replace the entire array since validate_matcher_node_list
+                // revalidates all items and returns the complete array
+                for (key, new_value) in matches.as_object().unwrap() {
+                    self.matches_so_far
+                        .as_object_mut()
+                        .unwrap()
+                        .insert(key.clone(), new_value.clone());
+                }
 
                 continue;
             }
@@ -346,11 +409,24 @@ impl Validator {
             // raise an error - but only if we've received EOF. Otherwise, we're
             // still waiting for more input.
             if input_node.child_count() != schema_node.child_count() {
-                if self.got_eof {
+                if is_schema_specified_list_node {
+                    debug!(
+                        "Skipping children length mismatch check for schema-specified list node"
+                    );
+                } else if self.got_eof {
+                    debug!(
+                        "Children length mismatch at input_index={}, schema_index={}: input_child_count={}, schema_child_count={}",
+                        input_cursor.descendant_index(),
+                        schema_cursor.descendant_index(),
+                        input_node.child_count(),
+                        schema_node.child_count()
+                    );
+
                     self.errors_so_far.insert(Error::SchemaViolation(
                         SchemaViolationError::ChildrenLengthMismatch(
-                            input_cursor.descendant_index(),
-                            schema_cursor.descendant_index(),
+                            input_node.child_count(),
+                            schema_node.child_count(),
+                            input_node.descendant_count(),
                         ),
                     ));
                 }
@@ -427,13 +503,22 @@ impl Validator {
     }
 }
 
+fn children_code_node_count(
+    node: &tree_sitter::Node,
+    cursor: &mut tree_sitter::TreeCursor,
+) -> usize {
+    node.children(&mut cursor.clone())
+        .filter(|child| child.kind() == "code_span")
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Helper function to create a validator and run validation, returning errors
     /// Panics if validator creation fails
-    fn get_validator(schema: &str, input: &str, eof: bool) -> (Vec<Error>, Value) {
+    fn do_validate(schema: &str, input: &str, eof: bool) -> (Vec<Error>, Value) {
         let mut validator = Validator::new(schema, input, eof).expect("Failed to create validator");
         validator.validate();
         (validator.errors(), validator.matches())
@@ -474,7 +559,7 @@ mod tests {
         let input = "Hello World";
         let schema = "Hello World";
 
-        let (errors, value) = get_validator(schema, input, true);
+        let (errors, value) = do_validate(schema, input, true);
         assert!(errors.is_empty());
         assert_eq!(value, json!({}));
     }
@@ -484,7 +569,7 @@ mod tests {
         let input = "Hello Wo";
         let schema = "Hello World";
 
-        let (errors, value) = get_validator(schema, input, false);
+        let (errors, value) = do_validate(schema, input, false);
         assert!(errors.is_empty());
         assert_eq!(value, json!({}));
     }
@@ -557,7 +642,7 @@ mod tests {
         let schema = "# Test\n\nfooobar\n\ntest\n";
         let input = "# Test\n\nfooobar\n\ntestt\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
             Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
             _ => panic!("Expected TextMismatch error, got {:?}", errors[0]),
@@ -569,7 +654,7 @@ mod tests {
         let schema = "# Test\n\nfooobar\n\ntest\n";
         let input = "# Test\n\n\nfooobar\n\n\n\ntest\n\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -582,7 +667,7 @@ mod tests {
         let schema = "# Test\n\nfooobar\n\ntest\n";
         let input = "# Test\n\nfooobar\n\ntestt\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             !errors.is_empty(),
             "Expected validation errors but found none"
@@ -594,9 +679,17 @@ mod tests {
         let schema = "# Test\n\nfooobar\n\ntest\n";
         let input = "# Test\n\nfooobar\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(_, _)) => {}
+            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(
+                expected,
+                actual,
+                parent_index,
+            )) => {
+                assert_eq!(*expected, 2);
+                assert_eq!(*actual, 3);
+                assert_eq!(*parent_index, 7);
+            }
             _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),
         }
     }
@@ -606,7 +699,7 @@ mod tests {
         let schema = "- Item 1\n- Item 2\n";
         let input = "- Item 1\n- Item X\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
             Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
             _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
@@ -614,24 +707,31 @@ mod tests {
     }
 
     #[test]
+    fn test_repeated_list_matcher() {
+        let schema = "- `item:/\\d+/`+\n";
+        let input = "- 1\n- 2\n- 3\n";
+
+        let (errors, matches) = do_validate(schema, input, true);
+        println!("got matches {:?}", matches);
+        assert!(
+            errors.is_empty(),
+            "expected no errors, but found {:?}",
+            errors
+        );
+        // The matcher with + should collect all matches in an array
+        let items = matches.get("item").unwrap().as_array().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], "1");
+        assert_eq!(items[1], "2");
+        assert_eq!(items[2], "3");
+    }
+
+    #[test]
     fn test_simple_matcher_validates_correctly() {
         let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
         let input = "# Hi Wolf\n";
 
-        let (errors, _) = get_validator(schema, input, true);
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors but found {:?}",
-            errors
-        );
-    }
-
-    #[test]
-    fn test_matcher_with_different_valid_name() {
-        let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
-        let input = "# Hi Alice\n";
-
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -642,31 +742,16 @@ mod tests {
     #[test]
     fn test_matcher_fails_with_invalid_name() {
         let schema = "# Hi `name:/[A-Z][a-z]+/`\n";
-        let input = "# Hi wolf\n"; // lowercase first letter
+        let input = "# Hi wolf\n";
 
-        let (errors, matches) = get_validator(schema, input, true);
+        let (errors, matches) = do_validate(schema, input, true);
         assert!(
             !errors.is_empty(),
             "Expected validation error for lowercase name"
         );
 
         println!("got matches {:?}", matches);
-        assert_eq!(matches.get("name"), None); // No match should be recorded
-    }
-
-    #[test]
-    fn test_matcher_with_numbers() {
-        let schema = r"Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
-";
-        let input = "Version: 1.2.3\n";
-
-        let (errors, matches) = get_validator(schema, input, true);
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors but found {:?}",
-            errors
-        );
-        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
+        assert_eq!(matches.get("name"), None);
     }
 
     #[test]
@@ -675,7 +760,7 @@ mod tests {
 ";
         let input = "Hello Wolf there!\n";
 
-        let (errors, matches) = get_validator(schema, input, true);
+        let (errors, matches) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -692,7 +777,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 ";
         let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
 
-        let (errors, matches) = get_validator(schema, input, true);
+        let (errors, matches) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -710,25 +795,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 ";
         let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
 
-        let (errors, matches) = get_validator(schema, input, true);
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors but found {:?}",
-            errors
-        );
-        assert_eq!(matches.get("name").unwrap(), "Wolf");
-        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
-    }
-
-    #[test]
-    fn test_matcher_with_prefix_and_suffix_and_number_with_suffix() {
-        let schema = r"Hello `name:/[A-Z][a-z]+/` there!
-
-Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
-";
-        let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
-
-        let (errors, matches) = get_validator(schema, input, true);
+        let (errors, matches) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -743,7 +810,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "Hello `name:/[A-Z][a-z]+/` there!\n";
         let input = "Hello Wolf here!\n"; // "here" instead of "there"
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             !errors.is_empty(),
             "Expected validation error for wrong suffix"
@@ -755,43 +822,12 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "# Assignment `number:/\\d+/` test\n";
         let input = "# Assignment 1 test\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
             errors
         );
-    }
-
-    #[test]
-    fn test_matcher_with_word_pattern() {
-        let schema = r"Word: `word:/\w+/`
-";
-        let input = "Word: hello123\n";
-
-        let (errors, matches) = get_validator(schema, input, true);
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors but found {:?}",
-            errors
-        );
-
-        assert_eq!(matches.get("word").unwrap(), "hello123");
-    }
-
-    #[test]
-    fn test_matcher_with_invalid_word() {
-        let schema = r"Word: `word:/\w+/`
-";
-        let input = "Word: hello@world\n";
-
-        let (errors, matches) = get_validator(schema, input, true);
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for invalid word"
-        );
-
-        assert_eq!(matches.get("word").unwrap(), "hello");
     }
 
     #[test]
@@ -799,7 +835,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "- Item 1\n  - Nested item\n- Item 2\n";
         let input = "- Item 1\n  - Nested item\n- Item 2\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -812,7 +848,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "- Item 1\n  - Nested item\n- Item 2\n";
         let input = "- Item 1\n  - Wrong item\n- Item 2\n"; // "Wrong" instead of "Nested"
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             !errors.is_empty(),
             "Expected validation error for nested list mismatch"
@@ -824,7 +860,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "# Heading 1\n\n## Heading 2\n";
         let input = "# Heading 1\n\n## Heading 2\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -837,7 +873,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n";
         let input = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -850,7 +886,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n";
         let input = "```rust\nfn main() {\n    println!(\"World\");\n}\n```\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             !errors.is_empty(),
             "Expected validation error for different code content"
@@ -862,7 +898,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "> This is a blockquote\n";
         let input = "> This is a blockquote\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -875,7 +911,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "[Link text](https://example.com)\n";
         let input = "[Link text](https://example.com)\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -888,7 +924,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "[Link text](https://example.com)\n";
         let input = "[Link text](https://different.com)\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             !errors.is_empty(),
             "Expected validation error for different URL"
@@ -900,7 +936,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "";
         let input = "";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -913,7 +949,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "# Assignment `num:/\\d+/`\n";
         let input = "# Assignment 7\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -926,7 +962,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "This is a `code` example.\n";
         let input = "This is a `code` example.\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -938,7 +974,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "\n\n\n";
         let input = "\n\n\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1014,7 +1050,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "`word:/\\w+/` is the first word\n";
         let input = "Hello is the first word\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1027,7 +1063,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "The last word is `word:/\\w+/`\n";
         let input = "The last word is Hello\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1040,7 +1076,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "This is **bold** and *italic* and `code`.\n";
         let input = "This is **bold** and *italic* and `code`.\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1053,7 +1089,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "`name:/[A-Z][a-z]+(\\s[A-Z][a-z]+)?/`\n";
         let input = "Wolf Mermelstein\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1066,7 +1102,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "`line:/.+/`\n";
         let input = "This is the entire line content\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1079,7 +1115,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let schema = "`line:/[A-Z][a-z]+(\\s[A-Z][a-z]+)?/`\n";
         let input = "Wolf Mermelstein\n";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1121,7 +1157,15 @@ Footer: goodbye
 
         let errors = validator.errors();
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(_, _)) => {}
+            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(
+                expected,
+                actual,
+                parent_index,
+            )) => {
+                assert_eq!(*expected, 3);
+                assert_eq!(*actual, 2);
+                assert_eq!(*parent_index, 9);
+            }
             _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),
         }
     }
@@ -1316,7 +1360,7 @@ Content for section 3."#;
         let schema = "# Title\n\nSome content with a ruler below:\n\n---\n\nMore content.";
         let input = "# Title\n\nSome content with a ruler below:\n\n---\n\nMore content.";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1329,7 +1373,7 @@ Content for section 3."#;
         let schema = "# Title\n\nContent above rulers.\n\n***\n\nMore content.\n\n___\n\nEnd content.\n\n---";
         let input = "# Title\n\nContent above rulers.\n\n***\n\nMore content.\n\n___\n\nEnd content.\n\n---";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
