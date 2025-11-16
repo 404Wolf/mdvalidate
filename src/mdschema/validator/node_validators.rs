@@ -5,7 +5,7 @@ use tree_sitter::Node;
 use crate::mdschema::validator::{
     errors::{Error, SchemaError, SchemaViolationError},
     matcher::{get_everything_after_special_chars, Matcher},
-    utils::{is_last_node, node_to_str},
+    utils::{is_last_node, new_markdown_parser, node_to_str},
 };
 
 pub type NodeValidationResult = (Vec<Error>, Value);
@@ -190,8 +190,7 @@ pub fn validate_matcher_node_list<'b>(
                     }
 
                     // Parse the schema to get the nested list structure
-                    let mut schema_parser =
-                        crate::mdschema::validator::utils::new_markdown_parser();
+                    let mut schema_parser = new_markdown_parser();
 
                     // This is just the excerpt we need of the schema string
                     let Some(schema_tree) = schema_parser.parse(schema_str, None) else {
@@ -201,23 +200,29 @@ pub fn validate_matcher_node_list<'b>(
                     // Navigate to the nested list in the schema's first item
                     let Some(schema_nested_list) = schema_tree
                         .root_node()
+                        // document -> list
                         .child(0)
+                        // list -> list_item
                         .and_then(|n| n.child(0))
+                        // list_item -> nested list ???
                         .and_then(|n| n.child(2))
                     else {
                         continue 'list_level_validation_loop;
                     };
 
+                    // Actually check!
                     if !is_list_node(&schema_nested_list) {
                         continue 'list_level_validation_loop;
                     }
 
+                    // nested list -> list_item -> paragraph
                     let Some(schema_nested_paragraph) =
                         schema_nested_list.child(0).and_then(|item| item.child(1))
                     else {
                         continue 'list_level_validation_loop;
                     };
 
+                    // the paragraph in the schema node is the one that contains the matcher
                     let mut nested_cursor = schema_tree.walk();
                     let nested_schema_nodes: Vec<Node> = schema_nested_paragraph
                         .children(&mut nested_cursor)
@@ -238,6 +243,7 @@ pub fn validate_matcher_node_list<'b>(
                     // Add the nested matches as an object to the array
                     if !nested_matches.as_object().unwrap().is_empty() {
                         matches_array.push(nested_matches);
+                        // {"num1":["1",{"num2":["2"]},"3",{"num2":["4"]}]}
                     }
                 }
             }
