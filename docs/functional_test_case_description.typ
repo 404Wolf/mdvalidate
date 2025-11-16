@@ -23,19 +23,35 @@
 #import "template.typ": *
 
 #let schema(content) = block(
-  stroke: gray + 1pt, inset: 2pt, radius: 4pt, fill: rgb(250, 250, 250), breakable: false, content,
+  stroke: gray + 1pt,
+  inset: 2pt,
+  radius: 4pt,
+  fill: rgb(250, 250, 250),
+  breakable: false,
+  content,
 )
 
 #let good-example(content) = block(
-  stroke: green + 1pt, inset: 2pt, radius: 4pt, fill: rgb(250, 250, 250), breakable: false, content,
+  stroke: green + 1pt,
+  inset: 2pt,
+  radius: 4pt,
+  fill: rgb(250, 250, 250),
+  breakable: false,
+  content,
 )
 
 #let bad-example(content) = block(
-  stroke: red + 1pt, inset: 2pt, radius: 4pt, fill: rgb(250, 250, 250), breakable: false, content,
+  stroke: red + 1pt,
+  inset: 2pt,
+  radius: 4pt,
+  fill: rgb(250, 250, 250),
+  breakable: false,
+  content,
 )
 
 #show: template.with(
-  title: "Functional Test Case Description", author: "Wolf Mermelstein and Alessandro Mason",
+  title: "Functional Test Case Description",
+  author: "Wolf Mermelstein and Alessandro Mason",
 )
 
 = Introduction
@@ -99,7 +115,8 @@ rustPlatform.buildRustPackage {
 
 We are using Rust's
 #link(
-  "https://doc.rust-lang.org/rust-by-example/testing/unit_testing.html", "standard practice",
+  "https://doc.rust-lang.org/rust-by-example/testing/unit_testing.html",
+  "standard practice",
 ) of defining a test module, with test functions like
 `#[test]` via their #link("https://doc.rust-lang.org/beta/test/index.html", "testing framework"),
 which we run with `cargo test`.
@@ -155,55 +172,84 @@ For all the following test cases the steps are:
 === Literal Matching
 
 #table(
-  columns: (1fr, 1fr, 1.5fr), align: (left, left, left), table.header([*Test Case*], [*Test Data*], [*Result*]), [Two identical text nodes], [#schema(```markdown
-              Hello, world!
-              ```)
-  #good-example(```markdown
-              Hello, world!
-              ```)], [Validation passes with no errors, indices match], [Two different text nodes], [#schema(```markdown
-              Hello, everyone!
-              ```)
-  #bad-example(```markdown
-              Hello, world!
-              ```)], [Validation fails with "Literal mismatch: expected \"Hello, everyone!\", found
-    \"Hello, world!\""], [Two paragraph nodes with same text], [#schema(```markdown
-              This is a paragraph.
-              ```)
-  #good-example(```markdown
-              This is a paragraph.
-              ```)], [Validation passes with no errors, indices match], [H1 heading with paragraph (same text)], [#schema(```markdown
-              # Heading
+  columns: (1fr, 1fr, 1.5fr),
+  align: (left, left, left),
+  table.header([*Test Case*], [*Test Data*], [*Result*]),
+  [Two identical text nodes],
+  [#schema(```markdown
+    Hello, world!
+    ```)
+    #good-example(```markdown
+    Hello, world!
+    ```)],
+  [Validation passes with no errors, indices match],
 
-              This is a paragraph.
-              ```)
-  #good-example(```markdown
-              # Heading
+  [Two different text nodes],
+  [#schema(```markdown
+    Hello, everyone!
+    ```)
+    #bad-example(```markdown
+    Hello, world!
+    ```)],
+  [Validation fails with "Literal mismatch: expected \"Hello, everyone!\", found
+    \"Hello, world!\""],
 
-              This is a paragraph.
-              ```)], [Validation passes with no errors, indices match], [Different heading levels (H1 vs H2)], [#schema(```markdown
-              ## Heading
-              ```)
-  #bad-example(```markdown
-              # Heading
-              ```)], [Validation fails with "Node mismatch" error], [Not at EOF - final characters mismatch], [#schema(```markdown
-              # Test
-              Hello, world
-              ```)
-  #bad-example(```markdown
-              # Test
-              Hello, wor
-              ```)], [With eof: false passes, with eof: true fails due to incomplete content], [Mismatched content structure], [#schema(```markdown
-              # Test
+  [Two paragraph nodes with same text],
+  [#schema(```markdown
+    This is a paragraph.
+    ```)
+    #good-example(```markdown
+    This is a paragraph.
+    ```)],
+  [Validation passes with no errors, indices match],
 
-              fooobar
+  [H1 heading with paragraph (same text)],
+  [#schema(```markdown
+    # Heading
 
-              test
-              ```)
-  #bad-example(```markdown
-              fooobar
+    This is a paragraph.
+    ```)
+    #good-example(```markdown
+    # Heading
 
-              testt
-              ```)], [Validation fails with mismatch error (missing heading, different text)],
+    This is a paragraph.
+    ```)],
+  [Validation passes with no errors, indices match],
+
+  [Different heading levels (H1 vs H2)],
+  [#schema(```markdown
+    ## Heading
+    ```)
+    #bad-example(```markdown
+    # Heading
+    ```)],
+  [Validation fails with "Node mismatch" error],
+
+  [Not at EOF - final characters mismatch],
+  [#schema(```markdown
+    # Test
+    Hello, world
+    ```)
+    #bad-example(```markdown
+    # Test
+    Hello, wor
+    ```)],
+  [With eof: false passes, with eof: true fails due to incomplete content],
+
+  [Mismatched content structure],
+  [#schema(```markdown
+    # Test
+
+    fooobar
+
+    test
+    ```)
+    #bad-example(```markdown
+    fooobar
+
+    testt
+    ```)],
+  [Validation fails with mismatch error (missing heading, different text)],
 )
 
 === Schema Definition Language
@@ -211,69 +257,106 @@ For all the following test cases the steps are:
 #set text(size: 9pt)
 
 #table(
-  columns: (1fr, 1fr, 1.5fr), align: (left, left, left), table.header([*Test Case*], [*Test Data*], [*Result*]), [Valid regex matcher in inline code], [ #schema(```markdown
-              `id:/test/`
-              ```)
-  #good-example(```markdown
-              test
-              ```) ], [Validation passes with no errors], [Invalid regex matcher - pattern mismatch], [#schema(```markdown
-              `id:/test/`
-              ```)
-  #bad-example(```markdown
-              testttt
-              ```)], [Validation fails with "Matcher mismatch: input 'testttt' does not" error], [Multiple matchers in single node], [#schema(```markdown
-              `id:/test/` `id:/example/`
-              ```)
-  #bad-example(```markdown
-              test example
-              ```)], [Validation fails with "Multiple matchers in a single node are not supported"
-    error], [List item with regex matcher], [#schema(```markdown
-              - `id:/item\d/`
-              - `id:/item2/`
-              ```)
-  #good-example(```markdown
-              - item1
-              - item2
-              ```)], [Validation passes for matching list items], [Mismatched node types (list vs paragraph)], [#schema(```markdown
-              `id:/item1/`
-              - `id:/item3/`
-              ```)
-  #bad-example(```markdown
-              - item1
-              - item2
-              ```)], [Validation fails with "Node mismatch" error], [Mismatched list item content], [#schema(```markdown
-              - `id:/item1/`
-              - `id:/item3/`
-              ```)
-  #bad-example(```markdown
-              - item1
-              - item2
-              ```)], [Validation fails with "Matcher mismatch: input 'item2' does not" error], [Different list types (ordered vs unordered)], [#schema(```markdown
-              1. `id:/item1/`
-              2. `id:/item2/`
-              ```)
-  #bad-example(```markdown
-              - item1
-              - item2
-              ```)], [Validation fails with "Node mismatch" error], [Bad schema file], [#schema(```markdown
-            # `
-            ```)], [The validation does not even begin because the schema is invalid], [Bad input file], [#schema(```markdown
-            # `
-            ```)], [The validation does not even begin because the input is invalid],
+  columns: (1fr, 1fr, 1.5fr),
+  align: (left, left, left),
+  table.header([*Test Case*], [*Test Data*], [*Result*]),
+  [Valid regex matcher in inline code],
+  [ #schema(```markdown
+    `id:/test/`
+    ```)
+    #good-example(```markdown
+    test
+    ```) ],
+  [Validation passes with no errors],
+
+  [Invalid regex matcher - pattern mismatch],
+  [#schema(```markdown
+    `id:/test/`
+    ```)
+    #bad-example(```markdown
+    testttt
+    ```)],
+  [Validation fails with "Matcher mismatch: input 'testttt' does not" error],
+
+  [Multiple matchers in single node],
+  [#schema(```markdown
+    `id:/test/` `id:/example/`
+    ```)
+    #bad-example(```markdown
+    test example
+    ```)],
+  [Validation fails with "Multiple matchers in a single node are not supported"
+    error],
+
+  [List item with regex matcher],
+  [#schema(```markdown
+    - `id:/item\d/`
+    - `id:/item2/`
+    ```)
+    #good-example(```markdown
+    - item1
+    - item2
+    ```)],
+  [Validation passes for matching list items],
+
+  [Mismatched node types (list vs paragraph)],
+  [#schema(```markdown
+    `id:/item1/`
+    - `id:/item3/`
+    ```)
+    #bad-example(```markdown
+    - item1
+    - item2
+    ```)],
+  [Validation fails with "Node mismatch" error],
+
+  [Mismatched list item content],
+  [#schema(```markdown
+    - `id:/item1/`
+    - `id:/item3/`
+    ```)
+    #bad-example(```markdown
+    - item1
+    - item2
+    ```)],
+  [Validation fails with "Matcher mismatch: input 'item2' does not" error],
+
+  [Different list types (ordered vs unordered)],
+  [#schema(```markdown
+    1. `id:/item1/`
+    2. `id:/item2/`
+    ```)
+    #bad-example(```markdown
+    - item1
+    - item2
+    ```)],
+  [Validation fails with "Node mismatch" error],
+
+  [Bad schema file],
+  [#schema(```markdown
+  # `
+  ```)],
+  [The validation does not even begin because the schema is invalid],
+
+  [Bad input file],
+  [#schema(```markdown
+  # `
+  ```)],
+  [The validation does not even begin because the input is invalid],
 )
 
 We will also have a small test to make sure that we can generate JSON output
 based on labels:
 
 #schema(```markdown
-  # Hello
-  `test:/\d+/`
-  ```)
+# Hello
+`test:/\d+/`
+```)
 
 #good-example(```markdown
-  # Hello
-  123
-  ```)
+# Hello
+123
+```)
 
 Should produce the following JSON:
 
@@ -295,22 +378,22 @@ of the command line tool. This will take the form of a simple test script that
 executes `mdv` on a schema file and conforming input file:
 
 #schema(```markdown
-  # CSDS 999 Assignment `assignment_number:\d`
+# CSDS 999 Assignment `assignment_number:\d`
 
-  # `title:(([A-Z][a-z]+ )|and |the )+([A-Z][a-z]+)`
+# `title:(([A-Z][a-z]+ )|and |the )+([A-Z][a-z]+)`
 
-  ## `first_name:[A-Z][a-z]+`
-  ## `last_name:[A-Z][a-z]+`
+## `first_name:[A-Z][a-z]+`
+## `last_name:[A-Z][a-z]+`
 
-  Example code:
+Example code:
 
-  `m!foo = 12`!
+`m!foo = 12`!
 
-  This is a shopping list:
+This is a shopping list:
 
-  - `grocery_list_item:/Hello \w+/`+
-      - `grocery_item_notes:text`?{,3}
-  ```)
+- `grocery_list_item:/Hello \w+/`+
+    - `grocery_item_notes:text`?{,3}
+```)
 
 #good-example(```markdown
 # CSDS 999 Assignment 5
@@ -391,109 +474,155 @@ incrementally. In order to make streaming possible we need to be able to read
 input that is "partial" --- that does not include an EOF.
 
 #table(
-  columns: (1fr, 1fr, 1.5fr), align: (left, left, left), table.header([*Test Case*], [*Test Data*], [*Result*]), [Initial validate with EOF works], [#schema(```markdown
-              Hello World
-              ```)
-  #good-example(```markdown
-              Hello World
-              ```)], [Validation passes with no errors when EOF is true], [Initial validate without EOF - incomplete text], [#schema(```markdown
-              Hello World
-              ```)
-  #good-example(```markdown
-              Hello Wo
-              ```)], [Validation passes with no errors when EOF is false (incomplete input allowed)], [Initially empty then read input], [#schema(```markdown
-              Hello
+  columns: (1fr, 1fr, 1.5fr),
+  align: (left, left, left),
+  table.header([*Test Case*], [*Test Data*], [*Result*]),
+  [Initial validate with EOF works],
+  [#schema(```markdown
+    Hello World
+    ```)
+    #good-example(```markdown
+    Hello World
+    ```)],
+  [Validation passes with no errors when EOF is true],
 
-              World
-              ```)
-  Initial: ```markdown
+  [Initial validate without EOF - incomplete text],
+  [#schema(```markdown
+    Hello World
+    ```)
+    #good-example(```markdown
+    Hello Wo
+    ```)],
+  [Validation passes with no errors when EOF is false (incomplete input allowed)],
 
-              ```
-  Updated: ```markdown
-              Hello
+  [Initially empty then read input],
+  [#schema(```markdown
+    Hello
 
-              TEST World
-              ```], [Empty input passes, then after reading "Hello\n\nTEST World" validation fails], [Validate, read input, validate again], [#schema(```markdown
-              Hello World
-              ```)
-  Initial (EOF: false): ```markdown
-              Hello Wo
-              ```
-  Updated (EOF: true): ```markdown
-              Hello World
-              ```], [First validation passes with incomplete input, second validation passes with
-    complete input], [Validation fails with mismatched content], [#schema(```markdown
-              # Test
+    World
+    ```)
+    Initial: ```markdown
 
-              fooobar
+    ```
+    Updated: ```markdown
+    Hello
 
-              test
-              ```)
-  #bad-example(```markdown
-              # Test
+    TEST World
+    ```],
+  [Empty input passes, then after reading "Hello\n\nTEST World" validation fails],
 
-              fooobar
+  [Validate, read input, validate again],
+  [#schema(```markdown
+    Hello World
+    ```)
+    Initial (EOF: false): ```markdown
+    Hello Wo
+    ```
+    Updated (EOF: true): ```markdown
+    Hello World
+    ```],
+  [First validation passes with incomplete input, second validation passes with
+    complete input],
 
-              testt
-              ```)], [Validation fails due to text mismatch ("test" vs "testt")], [Validation passes with different whitespace], [#schema(```markdown
-              # Test
+  [Validation fails with mismatched content],
+  [#schema(```markdown
+    # Test
 
-              fooobar
+    fooobar
 
-              test
-              ```)
-  #good-example(```markdown
-              # Test
+    test
+    ```)
+    #bad-example(```markdown
+    # Test
+
+    fooobar
+
+    testt
+    ```)],
+  [Validation fails due to text mismatch ("test" vs "testt")],
+
+  [Validation passes with different whitespace],
+  [#schema(```markdown
+    # Test
+
+    fooobar
+
+    test
+    ```)
+    #good-example(```markdown
+    # Test
 
 
-              fooobar
+    fooobar
 
 
 
-              test
+    test
 
-              ```)], [Validation passes - extra whitespace is ignored], [Validation fails with escaped newlines], [#schema(```markdown
-              # Test
+    ```)],
+  [Validation passes - extra whitespace is ignored],
 
-              fooobar
+  [Validation fails with escaped newlines],
+  [#schema(```markdown
+    # Test
 
-              test
-              ```)
-  #bad-example(```markdown
-              # Test
+    fooobar
 
-              fooobar
+    test
+    ```)
+    #bad-example(```markdown
+    # Test
 
-              testt
-              ```)], [Validation fails due to text mismatch with escaped newlines],
+    fooobar
+
+    testt
+    ```)],
+  [Validation fails due to text mismatch with escaped newlines],
 )
 
 == Command Line Streaming
 
 // Table 1: Reader/IO Tests
 #table(
-  columns: (1fr, 1fr, 1.5fr), align: (left, left, left), table.header([*Test Case*], [*Test Data*], [*Result*]), [Limited reader actually limits bytes], [Input: ```markdown
-              Hello, world! This is a longer string.
-              ```
-  Max bytes per read: 3], [First read returns 3 bytes ("Hel"), subsequent reads return 3 bytes each until
-    EOF], [Validate with cursor (basic)], [#schema(```markdown
-              # Hi there!
-              ```)
-  #good-example(```markdown
-              # Hi there!
-              ```)], [Validation passes with cursor reader], [Validate with two-byte reads], [#schema(```markdown
-              # Hi there!
-              ```)
-  #good-example(```markdown
-              # Hi there!
-              ```)
-  Max bytes per read: 2], [Validation completes successfully with limited reader (2 bytes at a time)], [Validate with thousand-byte reads], [#schema(```markdown
-              # Hi there!
-              ```)
-  #good-example(```markdown
-              # Hi there!
-              ```)
-  Max bytes per read: 1000], [Validation completes successfully with large buffer reader (1000 bytes at a
+  columns: (1fr, 1fr, 1.5fr),
+  align: (left, left, left),
+  table.header([*Test Case*], [*Test Data*], [*Result*]),
+  [Limited reader actually limits bytes],
+  [Input: ```markdown
+    Hello, world! This is a longer string.
+    ```
+    Max bytes per read: 3],
+  [First read returns 3 bytes ("Hel"), subsequent reads return 3 bytes each until
+    EOF],
+
+  [Validate with cursor (basic)],
+  [#schema(```markdown
+    # Hi there!
+    ```)
+    #good-example(```markdown
+    # Hi there!
+    ```)],
+  [Validation passes with cursor reader],
+
+  [Validate with two-byte reads],
+  [#schema(```markdown
+    # Hi there!
+    ```)
+    #good-example(```markdown
+    # Hi there!
+    ```)
+    Max bytes per read: 2],
+  [Validation completes successfully with limited reader (2 bytes at a time)],
+
+  [Validate with thousand-byte reads],
+  [#schema(```markdown
+    # Hi there!
+    ```)
+    #good-example(```markdown
+    # Hi there!
+    ```)
+    Max bytes per read: 1000],
+  [Validation completes successfully with large buffer reader (1000 bytes at a
     time)],
 )
 
@@ -505,16 +634,23 @@ We haven't implemented an LSP for `mdvalidate` yet, but when we do, we will
 expect to incorporate the following tests:
 
 #table(
-  columns: (1fr, 2fr), align: (left, left), table.header([*LSP Method*], [*Test Description*]), [`textDocument/didOpen`], [
-  Server receives document open notification and begins validation. Initial
-  diagnostics are computed and published for the opened document.
+  columns: (1fr, 2fr),
+  align: (left, left),
+  table.header([*LSP Method*], [*Test Description*]),
+  [`textDocument/didOpen`],
+  [
+    Server receives document open notification and begins validation. Initial
+    diagnostics are computed and published for the opened document.
 
-  - Opening a blank file
-  - Opening a file with just one line of valid Markdown
-  - Opening a file with just one line of invalid Markdown
-  - Opening and closing a file rapidly (sending many `textDocument/didOpen`s for the
-    same file in quick succession).
-  ], [`textDocument/didChange`], [
+    - Opening a blank file
+    - Opening a file with just one line of valid Markdown
+    - Opening a file with just one line of invalid Markdown
+    - Opening and closing a file rapidly (sending many `textDocument/didOpen`s for the
+      same file in quick succession).
+  ],
+
+  [`textDocument/didChange`],
+  [
     Server receives incremental changes to document content. Validation is re-run on
     each change and updated diagnostics are published. Tests include adding
     characters incrementally, deleting content, and making multi-line edits.
@@ -534,7 +670,10 @@ expect to incorporate the following tests:
       Markdown (*does not* conform to schema but is bad Markdown)
     - User adds a chunk of text all of a sudden and the remaining text is valid
       Markdown (*does* conform to schema but is bad Markdown)
-  ], [`textDocument/didClose`], [
+  ],
+
+  [`textDocument/didClose`],
+  [
     Server receives document close notification and cleans up resources. Diagnostics
     are cleared for the closed document.
 
@@ -546,7 +685,10 @@ expect to incorporate the following tests:
       Markdown)
     - User tries to close a file that has already been closed
     - User tries to close a file that has never even been opened
-  ], [`textDocument/publishDiagnostics`], [
+  ],
+
+  [`textDocument/publishDiagnostics`],
+  [
     Server publishes diagnostics (errors/warnings) to client. Tests verify correct
     error positions, messages, and severity levels. Includes testing red squiggles
     for schema violations, matcher mismatches, and structural errors.
@@ -580,22 +722,22 @@ characters of Markdown Input in 20ms. We will make a Markdown file that has 1.3k
 lines of literal headings:
 
 #schema(```markdown
-  # `testing:Testing\d`+
-  ```)
+# `testing:Testing\d`+
+```)
 
 #good-example(```markdown
-  # Testing 1
-  # Testing 2
-  # Testing 3
-  # Testing 4
-  ```)
+# Testing 1
+# Testing 2
+# Testing 3
+# Testing 4
+```)
 
 #bad-example(```markdown
-  # Testing one
-  # Testing two
-  # Testing three
-  # Testing four
-  ```)
+# Testing one
+# Testing two
+# Testing three
+# Testing four
+```)
 
 We will make sure that validation for valid input and failure for bad input is
 correct and accurate during this stress test.
@@ -621,9 +763,59 @@ The current code coverage is shown in @fig:code-coverage.
 
 #figure(
   table(
-    columns: (2fr, 1fr, 1fr, 1fr), align: (left, center, center, center), table.header(
-      [*Filename*], [*Function Coverage*], [*Line Coverage*], [*Region Coverage*],
-    ), [build/rustc-1.89.0-src/library/std/src/sys/thread_local/native/mod.rs], [66.67% (2/3)], [66.67% (2/3)], [57.14% (4/7)], [mdvalidate/src/cmd.rs], [72.73% (8/11)], [91.20% (114/125)], [85.99% (221/257)], [mdvalidate/src/main.rs], [0.00% (0/2)], [0.00% (0/35)], [0.00% (0/69)], [mdvalidate/src/mdschema/reports/errors.rs], [75.00% (3/4)], [87.50% (28/32)], [87.88% (29/33)], [mdvalidate/src/mdschema/reports/pretty_print.rs], [50.00% (1/2)], [17.86% (5/28)], [13.04% (6/46)], [mdvalidate/src/mdschema/reports/validation_report.rs], [100.00% (3/3)], [100.00% (13/13)], [100.00% (9/9)], [mdvalidate/src/mdschema/validator/binode_validator.rs], [100.00% (16/16)], [87.14% (305/350)], [86.55% (579/669)], [mdvalidate/src/mdschema/validator/matcher.rs], [85.71% (6/7)], [71.43% (25/35)], [85.92% (61/71)], [mdvalidate/src/mdschema/validator/utils.rs], [33.33% (1/3)], [22.58% (7/31)], [16.36% (9/55)], [mdvalidate/src/mdschema/validator/validator.rs], [100.00% (13/13)], [88.18% (194/220)], [90.70% (351/387)], table.cell(colspan: 4, []), [*Totals*], [*82.81% (53/64)*], [*79.47% (693/872)*], [*79.16% (1269/1603)*],
+    columns: (2fr, 1fr, 1fr, 1fr),
+    align: (left, center, center, center),
+    table.header(
+      [*Filename*],
+      [*Function Coverage*],
+      [*Line Coverage*],
+      [*Region Coverage*],
+    ),
+    [build/rustc-1.89.0-src/library/std/src/sys/thread_local/native/mod.rs],
+    [66.67% (2/3)],
+    [66.67% (2/3)],
+    [57.14% (4/7)],
+    [mdvalidate/src/cmd.rs],
+    [72.73% (8/11)],
+    [91.20% (114/125)],
+    [85.99% (221/257)],
+    [mdvalidate/src/main.rs],
+    [0.00% (0/2)],
+    [0.00% (0/35)],
+    [0.00% (0/69)],
+    [mdvalidate/src/mdschema/reports/errors.rs],
+    [75.00% (3/4)],
+    [87.50% (28/32)],
+    [87.88% (29/33)],
+    [mdvalidate/src/mdschema/reports/pretty_print.rs],
+    [50.00% (1/2)],
+    [17.86% (5/28)],
+    [13.04% (6/46)],
+    [mdvalidate/src/mdschema/reports/validation_report.rs],
+    [100.00% (3/3)],
+    [100.00% (13/13)],
+    [100.00% (9/9)],
+    [mdvalidate/src/mdschema/validator/binode_validator.rs],
+    [100.00% (16/16)],
+    [87.14% (305/350)],
+    [86.55% (579/669)],
+    [mdvalidate/src/mdschema/validator/matcher.rs],
+    [85.71% (6/7)],
+    [71.43% (25/35)],
+    [85.92% (61/71)],
+    [mdvalidate/src/mdschema/validator/utils.rs],
+    [33.33% (1/3)],
+    [22.58% (7/31)],
+    [16.36% (9/55)],
+    [mdvalidate/src/mdschema/validator/validator.rs],
+    [100.00% (13/13)],
+    [88.18% (194/220)],
+    [90.70% (351/387)],
+    table.cell(colspan: 4, []),
+    [*Totals*],
+    [*82.81% (53/64)*],
+    [*79.47% (693/872)*],
+    [*79.16% (1269/1603)*],
   ),
 ) <fig:code-coverage>
 

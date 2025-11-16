@@ -1,2 +1,4 @@
-- `num1:/\d/`+++
-  - `num2:/\d/`++
+# Shopping List
+
+- `item:/[A-Z][a-z]+/`++
+    - `foo:/.*/`+

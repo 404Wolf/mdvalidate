@@ -1,10 +1,9 @@
-- 1
-  - 2
-- 3
-  - 4
-- 3
-  - 4
-- 3
-  - 4
-- 3
-  - 4
+# Shopping List
+
+- Apples
+    - Red and fresh
+    - From the market
+- Bananas
+    - Organic
+- Carrots
+    - For the soup

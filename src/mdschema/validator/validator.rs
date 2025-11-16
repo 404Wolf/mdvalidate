@@ -314,9 +314,8 @@ impl Validator {
 
                 // Validate the input text against the matchers in the schema
                 let (errors, matches) = validate_matcher_node(
-                    &text_node_to_validate,
-                    input_cursor.descendant_index(),
-                    &schema_children,
+                    &mut input_cursor,
+                    &mut schema_cursor,
                     &self.last_input_str,
                     &self.schema_str,
                     self.got_eof,
@@ -329,29 +328,23 @@ impl Validator {
 
                 continue;
             } else if is_schema_specified_list_node {
-                // Get the first list item, then get its children excluding the list marker
-                let first_list_item = schema_node.child(0).unwrap();
-
-                // Get the paragraph child of the list item (which contains the actual content)
-                let first_list_item_paragraph = first_list_item
-                    .children(&mut schema_cursor.clone())
-                    .skip(1) // Skip the list_marker_minus node
-                    .next()
-                    .unwrap(); // Get the paragraph node
-
-                // Now get the children of the paragraph (text + code nodes)
-                let schema_list_item_children: Vec<_> = first_list_item_paragraph
-                    .children(&mut schema_cursor.clone())
-                    .collect();
+                // move the cursor to the first list item
+                schema_cursor.goto_first_child(); // list_item
+                schema_cursor.goto_next_sibling(); // list_marker
+                schema_cursor.goto_next_sibling(); // paragraph
+                assert_eq!(schema_cursor.node().kind(), "paragraph");
 
                 let (errors, matches) = validate_matcher_node_list(
-                    &input_node,
-                    input_cursor.descendant_index(),
-                    &schema_list_item_children,
+                    &mut input_cursor,
+                    &mut schema_cursor,
                     &self.last_input_str,
                     &self.schema_str,
                     self.got_eof,
                 );
+
+                // move the cursor back to the parent list node
+                schema_cursor.goto_parent();
+                assert_eq!(schema_cursor.node().kind(), "list");
 
                 self.errors_so_far.extend(errors);
 
@@ -376,9 +369,8 @@ impl Validator {
                 );
 
                 let (errors, matches) = validate_text_node(
-                    &input_node,
-                    input_cursor.descendant_index(),
-                    &schema_node,
+                    &mut input_cursor,
+                    &mut schema_cursor,
                     &self.last_input_str,
                     &self.schema_str,
                     self.got_eof,
@@ -1379,5 +1371,102 @@ Content for section 3."#;
             "Expected no validation errors but found {:?}",
             errors
         );
+    }
+
+    #[test]
+    fn test_with_repeater() {
+        let schema = r#"# Title
+
+Content above repeater.
+
+* `item:/\d/`+"#;
+        let good_input = r#"# Title
+
+Content above repeater.
+
+* 1
+* 2
+* 3"#;
+        let bad_input = r#"# Title
+
+Content above repeater.
+
+* 1
+* two
+* 3"#;
+
+        // We should be able to extract some useful matches even though it fails
+        let (errors, matches) = do_validate(schema, bad_input, true);
+        assert!(
+            !errors.is_empty(),
+            "Expected validation errors for bad input but found none"
+        );
+        let items = matches.get("item").unwrap().as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0], "1");
+        assert_eq!(items[1], "3");
+
+        let (errors, matches) = do_validate(schema, good_input, true);
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+        let items = matches.get("item").unwrap().as_array().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], "1");
+        assert_eq!(items[1], "2");
+        assert_eq!(items[2], "3");
+    }
+
+    #[test]
+    fn test_nested_repeater_with_limited_size() {
+        let schema = r#"
+- `item1:/\d+/`{2,4}++
+    - `item2:/\d+/`{2,4}+
+"#;
+
+        let input = r#"
+- 1
+    - 10
+    - 20
+- 2
+    - 30
+    - 40
+    - 50
+- 3
+    - 60
+    - 70
+"#;
+
+        let (errors, matches) = do_validate(schema, input, true);
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+
+        let item1 = matches.get("item1").unwrap().as_array().unwrap();
+        assert_eq!(item1.len(), 6); // 3 strings + 3 objects with nested matches
+        assert_eq!(item1[0], "1");
+        assert_eq!(item1[2], "2");
+        assert_eq!(item1[4], "3");
+
+        let item2_first = item1[1].as_object().unwrap();
+        let item2_second = item1[3].as_object().unwrap();
+        let item2_third = item1[5].as_object().unwrap();
+        let item2_first_array = item2_first.get("item2").unwrap().as_array().unwrap();
+        let item2_second_array = item2_second.get("item2").unwrap().as_array().unwrap();
+        let item2_third_array = item2_third.get("item2").unwrap().as_array().unwrap();
+        assert_eq!(item2_first_array.len(), 2);
+        assert_eq!(item2_first_array[0], "10");
+        assert_eq!(item2_first_array[1], "20");
+        assert_eq!(item2_second_array.len(), 3);
+        assert_eq!(item2_second_array[0], "30");
+        assert_eq!(item2_second_array[1], "40");
+        assert_eq!(item2_second_array[2], "50");
+        assert_eq!(item2_third_array.len(), 2);
+        assert_eq!(item2_third_array[0], "60");
+        assert_eq!(item2_third_array[1], "70");
     }
 }
