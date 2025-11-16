@@ -8,7 +8,7 @@ static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
 });
 
-pub static SPECIAL_CHARS_START: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[+]*").unwrap());
+pub static SPECIAL_CHARS_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[+\{\},0-9]*").unwrap());
 
 pub fn get_everything_after_special_chars(text: &str) -> &str {
     let captures = SPECIAL_CHARS_START.captures(text);
@@ -29,6 +29,10 @@ pub struct Matcher {
     extras: HashSet<MatcherExtras>,
     /// Optional maximum recursion depth for nested lists (parsed from +N after the plus)
     max_depth: Option<usize>,
+    /// Optional minimum number of list items at this level
+    min_items: Option<usize>,
+    /// Optional maximum number of list items at this level
+    max_items: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -76,11 +80,18 @@ impl Matcher {
             None => (HashSet::new(), None),
         };
 
+        let (min_items, max_items) = match extras {
+            Some(text) => Self::extract_item_count_limits(text),
+            None => (None, None),
+        };
+
         Ok(Matcher {
             id,
             extras: extras_set,
             pattern: matcher,
             max_depth,
+            min_items,
+            max_items,
         })
     }
 
@@ -112,6 +123,24 @@ impl Matcher {
         };
 
         (extras, max_depth)
+    }
+
+    /// Extract item count limits from {min,max} syntax in the text following the matcher.
+    /// Returns (min_items, max_items) where either can be None.
+    /// Examples: {2,5} = min 2, max 5; {3,} = min 3, no max; {,10} = no min, max 10
+    fn extract_item_count_limits(text: &str) -> (Option<usize>, Option<usize>) {
+        // Look for {min,max} pattern
+        let re = Regex::new(r"\{(\d*),(\d*)\}").unwrap();
+        
+        if let Some(caps) = re.captures(text) {
+            let min = caps.get(1)
+                .and_then(|m| if m.as_str().is_empty() { None } else { m.as_str().parse::<usize>().ok() });
+            let max = caps.get(2)
+                .and_then(|m| if m.as_str().is_empty() { None } else { m.as_str().parse::<usize>().ok() });
+            (min, max)
+        } else {
+            (None, None)
+        }
     }
 
     /// Extract the ID and pattern from the regex captures.
@@ -178,6 +207,16 @@ impl Matcher {
     /// Return optional maximum depth for nested lists
     pub fn max_depth(&self) -> Option<usize> {
         self.max_depth
+    }
+
+    /// Return optional minimum number of items at this list level
+    pub fn min_items(&self) -> Option<usize> {
+        self.min_items
+    }
+
+    /// Return optional maximum number of items at this list level
+    pub fn max_items(&self) -> Option<usize> {
+        self.max_items
     }
 }
 
@@ -255,5 +294,39 @@ mod tests {
         assert_eq!(matcher.match_str("ruler"), Some("ruler"));
         assert_eq!(matcher.match_str("!@#$"), None);
         assert_eq!(matcher.match_str("whatever"), None);
+    }
+
+    #[test]
+    fn test_item_count_limits() {
+        // Test {min,max} parsing
+        let matcher = Matcher::new("`test:/\\d+/`", Some("{2,5}++")).unwrap();
+        assert_eq!(matcher.min_items(), Some(2));
+        assert_eq!(matcher.max_items(), Some(5));
+        assert_eq!(matcher.max_depth(), Some(2));
+        assert!(matcher.is_repeated());
+
+        // Test {min,} (no max)
+        let matcher = Matcher::new("`test:/\\d+/`", Some("{3,}+")).unwrap();
+        assert_eq!(matcher.min_items(), Some(3));
+        assert_eq!(matcher.max_items(), None);
+        assert_eq!(matcher.max_depth(), Some(1));
+
+        // Test {,max} (no min)
+        let matcher = Matcher::new("`test:/\\d+/`", Some("{,10}+++")).unwrap();
+        assert_eq!(matcher.min_items(), None);
+        assert_eq!(matcher.max_items(), Some(10));
+        assert_eq!(matcher.max_depth(), Some(3));
+
+        // Test with + before {}
+        let matcher = Matcher::new("`test:/\\d+/`", Some("++{1,3}")).unwrap();
+        assert_eq!(matcher.min_items(), Some(1));
+        assert_eq!(matcher.max_items(), Some(3));
+        assert_eq!(matcher.max_depth(), Some(2));
+
+        // Test without {} - should have no limits
+        let matcher = Matcher::new("`test:/\\d+/`", Some("+")).unwrap();
+        assert_eq!(matcher.min_items(), None);
+        assert_eq!(matcher.max_items(), None);
+        assert_eq!(matcher.max_depth(), Some(1));
     }
 }

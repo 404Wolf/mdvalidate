@@ -177,6 +177,9 @@ fn validate_matcher_node_list_rec<'b>(
                 );
             }
 
+            // Count the number of list items at this depth level
+            let num_list_items = input_node.child_count();
+
             'list_level_validation_loop: for input_node_list_item in
                 input_node.children(&mut input_node.walk().clone())
             {
@@ -208,6 +211,20 @@ fn validate_matcher_node_list_rec<'b>(
                 if let Some(nested_list) = input_node_list_item.child(2) {
                     if !is_list_node(&nested_list) {
                         continue 'list_level_validation_loop;
+                    }
+
+                    // Before doing anything else, check if we're allowed to go deeper
+                    if let Some(max_allowed) = matcher.max_depth() {
+                        if current_depth >= max_allowed {
+                            // depth limit reached; report error and return empty matches
+                            errors.push(Error::SchemaViolation(
+                                SchemaViolationError::NodeListTooDeep(
+                                    max_allowed,
+                                    input_node_descendant_index,
+                                ),
+                            ));
+                            return (errors, json!({}));
+                        }
                     }
 
                     // Parse the schema to get the nested list structure
@@ -249,20 +266,6 @@ fn validate_matcher_node_list_rec<'b>(
                         .children(&mut nested_cursor)
                         .collect();
 
-                    // Before recursing, check max depth (if specified for this matcher)
-                    if let Some(max_allowed) = matcher.max_depth() {
-                        if current_depth >= max_allowed {
-                            // depth limit reached; report error and skip validating deeper nested lists
-                            errors.push(Error::SchemaViolation(
-                                SchemaViolationError::NodeListTooDeep(
-                                    max_allowed,
-                                    input_node_descendant_index,
-                                ),
-                            ));
-                            continue 'list_level_validation_loop;
-                        }
-                    }
-
                     // Recursively validate the nested list
                     let (nested_errors, nested_matches) = validate_matcher_node_list_rec(
                         &nested_list,
@@ -286,8 +289,36 @@ fn validate_matcher_node_list_rec<'b>(
 
             let mut matches = json!({});
             match matcher.id() {
-                Some(id) => matches[id] = serde_json::Value::Array(matches_array),
+                Some(id) => matches[id] = serde_json::Value::Array(matches_array.clone()),
                 None => {}
+            }
+
+            // Check item count constraints based on the number of list items at this depth
+            // (not the size of matches_array, which may include nested structures)
+            if let Some(min) = matcher.min_items() {
+                if num_list_items < min {
+                    errors.push(Error::SchemaViolation(
+                        SchemaViolationError::WrongListCount(
+                            Some(min),
+                            matcher.max_items(),
+                            num_list_items,
+                            input_node_descendant_index,
+                        ),
+                    ));
+                }
+            }
+
+            if let Some(max) = matcher.max_items() {
+                if num_list_items > max {
+                    errors.push(Error::SchemaViolation(
+                        SchemaViolationError::WrongListCount(
+                            matcher.min_items(),
+                            Some(max),
+                            num_list_items,
+                            input_node_descendant_index,
+                        ),
+                    ));
+                }
             }
 
             (errors, matches)
@@ -1451,10 +1482,10 @@ mod tests {
 
     #[test]
     fn test_depth_limit_enforced_with_error() {
-        // Use ++ (2 pluses) to allow max depth of 2
-        // But provide 3 levels of nesting - should error on the deepest level
-        let schema = "- `l1:/\\d/`++\n  - `l2:/\\d/`++";
-        let input = "- 1\n  - 2\n    - 3\n- 4\n  - 5";
+        // Use + (1 plus) to allow max depth of 1 (no nesting allowed)
+        // But provide 2 levels of nesting - should error on the second level
+        let schema = "- `num:/\\d/`+";
+        let input = "- 1\n  - 2\n- 3";
 
         let mut input_parser = new_markdown_parser();
         let input_tree = input_parser
@@ -1491,13 +1522,101 @@ mod tests {
                 max_depth,
                 _node_index,
             )) => {
-                assert_eq!(*max_depth, 2, "Expected max_depth to be 2");
+                assert_eq!(*max_depth, 1, "Expected max_depth to be 1");
             }
             _ => panic!("Expected NodeListTooDeep error but got: {:?}", errors[0]),
         }
 
         // Matches should be empty since we hit the depth limit
-        let expected = json!({});
-        assert_eq!(matches, expected);
+        assert_eq!(matches, json!({}));
+    }
+
+    #[test]
+    fn test_list_item_count_too_few() {
+        // Schema requires at least 3 items {3,}
+        let schema = "`test:/\\d+/`{3,}+";
+        let input = "- 1\n- 2";
+
+        let (errors, _matches) = get_list_matcher_validator(schema, input, true);
+
+        assert_eq!(errors.len(), 1, "Expected 1 error but got: {:?}", errors);
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::WrongListCount(min, max, actual, _)) => {
+                assert_eq!(*min, Some(3));
+                assert_eq!(*max, None);
+                assert_eq!(*actual, 2);
+            }
+            _ => panic!("Expected WrongListCount error but got: {:?}", errors[0]),
+        }
+    }
+
+    #[test]
+    fn test_list_item_count_too_many() {
+        // Schema allows at most 2 items {,2}
+        let schema = "`test:/\\d+/`{,2}+";
+        let input = "- 1\n- 2\n- 3";
+
+        let (errors, _matches) = get_list_matcher_validator(schema, input, true);
+
+        assert_eq!(errors.len(), 1, "Expected 1 error but got: {:?}", errors);
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::WrongListCount(min, max, actual, _)) => {
+                assert_eq!(*min, None);
+                assert_eq!(*max, Some(2));
+                assert_eq!(*actual, 3);
+            }
+            _ => panic!("Expected WrongListCount error but got: {:?}", errors[0]),
+        }
+    }
+
+    #[test]
+    fn test_list_item_count_in_range() {
+        // Schema requires 2-4 items {2,4}
+        let schema = "`test:/\\d+/`{2,4}+";
+        let input = "- 1\n- 2\n- 3";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(matches_arr.len(), 3);
+    }
+
+    #[test]
+    fn test_list_item_count_exact_min() {
+        // Schema requires at least 3 items {3,}
+        let schema = "`test:/\\d+/`{3,}+";
+        let input = "- 1\n- 2\n- 3";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(matches_arr.len(), 3);
+    }
+
+    #[test]
+    fn test_list_item_count_exact_max() {
+        // Schema allows at most 3 items {,3}
+        let schema = "`test:/\\d+/`{,3}+";
+        let input = "- 1\n- 2\n- 3";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(matches_arr.len(), 3);
     }
 }

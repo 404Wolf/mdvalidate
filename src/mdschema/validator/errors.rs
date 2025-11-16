@@ -87,6 +87,9 @@ pub enum SchemaViolationError {
     ChildrenLengthMismatch(usize, usize, usize),
     /// Nested list exceeds the maximum allowed depth. Max depth allowed, node index of deepest list
     NodeListTooDeep(usize, usize),
+    /// List item count is outside the expected range. (min, max, actual, node_index)
+    /// min and max are Option<usize> where None means no limit
+    WrongListCount(Option<usize>, Option<usize>, usize, usize),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -211,6 +214,37 @@ pub fn pretty_print_error(
                          to allow for the depth of the following ones. For example, you could\n\
                          make that `num1:/\\d/`+++ to allow for three levels of nesting (the one
                          below it, and the two allowed below that).",
+                    )
+                    .finish()
+                    .write((filename, Source::from(source_content)), &mut buffer)
+                    .map_err(|e| e.to_string())?;
+            }
+            SchemaViolationError::WrongListCount(min, max, actual, node_index) => {
+                let node = find_node_by_index(tree.root_node(), *node_index);
+                let node_range = node.start_byte()..node.end_byte();
+
+                let range_desc = match (min, max) {
+                    (Some(min_val), Some(max_val)) => {
+                        format!("between {} and {}", min_val, max_val)
+                    }
+                    (Some(min_val), None) => format!("at least {}", min_val),
+                    (None, Some(max_val)) => format!("at most {}", max_val),
+                    (None, None) => "any number of".to_string(),
+                };
+
+                let message = format!("Expected {} item(s) but found {}", range_desc, actual);
+
+                Report::build(ReportKind::Error, (filename, node_range.clone()))
+                    .with_message("List item count mismatch")
+                    .with_label(
+                        Label::new((filename, node_range))
+                            .with_message(message)
+                            .with_color(Color::Red),
+                    )
+                    .with_help(
+                        "The number of items in `matcher`{1,2} syntax refers to the number of \
+                         entries at the level of that matcher (deeper items are not included in \
+                         that count).",
                     )
                     .finish()
                     .write((filename, Source::from(source_content)), &mut buffer)
