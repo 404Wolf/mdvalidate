@@ -216,6 +216,12 @@ fn validate_matcher_node_list_rec<'b>(
                     // Before doing anything else, check if we're allowed to go deeper
                     if let Some(max_allowed) = matcher.max_depth() {
                         if current_depth >= max_allowed {
+                            trace!(
+                                "Maximum list nesting depth of {} exceeded at node index {}",
+                                max_allowed,
+                                input_node_descendant_index
+                            );
+
                             // depth limit reached; report error and return empty matches
                             errors.push(Error::SchemaViolation(
                                 SchemaViolationError::NodeListTooDeep(
@@ -245,11 +251,21 @@ fn validate_matcher_node_list_rec<'b>(
                         // list_item -> nested list ???
                         .and_then(|n| n.child(2))
                     else {
+                        trace!(
+                            "No nested list found in schema at node index {}",
+                            input_node_descendant_index
+                        );
+
                         continue 'list_level_validation_loop;
                     };
 
                     // Actually check!
                     if !is_list_node(&schema_nested_list) {
+                        trace!(
+                            "No nested list found in schema at node index {}",
+                            input_node_descendant_index
+                        );
+
                         continue 'list_level_validation_loop;
                     }
 
@@ -257,6 +273,11 @@ fn validate_matcher_node_list_rec<'b>(
                     let Some(schema_nested_paragraph) =
                         schema_nested_list.child(0).and_then(|item| item.child(1))
                     else {
+                        trace!(
+                            "No paragraph found in nested schema list at node index {}",
+                            input_node_descendant_index
+                        );
+
                         continue 'list_level_validation_loop;
                     };
 
@@ -275,6 +296,12 @@ fn validate_matcher_node_list_rec<'b>(
                         schema_str,
                         eof,
                         current_depth + 1,
+                    );
+
+                    trace!(
+                        "Nested list validation at node index {} produced {} errors",
+                        input_node_descendant_index,
+                        nested_errors.len()
                     );
 
                     errors.extend(nested_errors);
@@ -297,6 +324,13 @@ fn validate_matcher_node_list_rec<'b>(
             // (not the size of matches_array, which may include nested structures)
             if let Some(min) = matcher.min_items() {
                 if num_list_items < min {
+                    trace!(
+                        "Minimum list item count of {} not met at node index {}: found {} items",
+                        min,
+                        input_node_descendant_index,
+                        num_list_items
+                    );
+
                     errors.push(Error::SchemaViolation(
                         SchemaViolationError::WrongListCount(
                             Some(min),
@@ -310,6 +344,13 @@ fn validate_matcher_node_list_rec<'b>(
 
             if let Some(max) = matcher.max_items() {
                 if num_list_items > max {
+                    trace!(
+                        "Maximum list item count of {} exceeded at node index {}: found {} items",
+                        max,
+                        input_node_descendant_index,
+                        num_list_items
+                    );
+
                     errors.push(Error::SchemaViolation(
                         SchemaViolationError::WrongListCount(
                             matcher.min_items(),
