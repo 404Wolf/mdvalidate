@@ -1,1 +1,1 @@
-- `item:/\d+/`
+Prefix `test:/[0-9]/` Suffix+

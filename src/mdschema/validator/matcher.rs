@@ -1,6 +1,6 @@
 use core::fmt;
 use regex::Regex;
-use std::sync::LazyLock;
+use std::{collections::HashSet, sync::LazyLock};
 
 use super::errors::ValidationError;
 
@@ -8,57 +8,59 @@ static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
 });
 
+pub static SPECIAL_CHARS_START: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[+]*").unwrap());
+
+pub fn get_everything_after_special_chars(text: &str) -> &str {
+    let captures = SPECIAL_CHARS_START.captures(text);
+    match captures {
+        Some(caps) => {
+            let mat = caps.get(0).unwrap();
+            &text[mat.end()..]
+        }
+        None => text,
+    }
+}
+
 pub struct Matcher {
     id: Option<String>,
     /// A compiled regex for the pattern.
     pattern: MatcherType,
+    /// Extra flags, which we receive via extra text that corresponds to the matcher
+    extras: HashSet<MatcherExtras>,
 }
 
+#[derive(Debug, Clone)]
 enum MatcherType {
     Regex(Regex),
     Special(SpecialMatchers),
 }
 
+#[derive(Debug, Clone)]
 enum SpecialMatchers {
     Ruler,
 }
 
+/// Special matcher types that extend the meaning of a group.
+///
+/// This is the text that comes directly after the matcher codeblock.  For
+/// example, '+' indicates that the matcher is repeated (and allows many list
+/// items).
+///
+/// Make sure to update SPECIAL_CHARS_START when adding new extras.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum MatcherExtras {
+    Repeated,
+}
+
 impl Matcher {
-    pub fn new(pattern: &str) -> Result<Matcher, ValidationError> {
+    /// Create a new Matcher given the text in a matcher codeblock and the text node's contents
+    /// immediately proceeding the matcher.
+    pub fn new(pattern: &str, extras: Option<&str>) -> Result<Matcher, ValidationError> {
         let pattern = pattern[1..pattern.len() - 1].trim(); // Remove surrounding backticks
         let captures = MATCHER_PATTERN.captures(pattern);
 
         let (id, matcher) = match captures {
-            Some(caps) => {
-                println!("caps: {:?}", caps.name("id"));
-                let id = caps.name("id").map(|m| m.as_str().to_string());
-                let regex_pattern = caps.name("regex").map(|m| m.as_str().to_string());
-                let special = caps.name("special").map(|m| m.as_str().to_string());
-
-                let pattern = match (regex_pattern, special) {
-                    (Some(regex_pattern), None) => {
-                        MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
-                    }
-                    (None, Some(_)) => MatcherType::Special(SpecialMatchers::Ruler),
-                    (Some(_), Some(_)) => {
-                        return Err(ValidationError::InvalidMatcherFormat(format!(
-                            "Matcher cannot be both regex and special type: {}",
-                            pattern
-                        )))
-                    }
-                    (None, None) => {
-                        return Err(ValidationError::InvalidMatcherFormat(format!(
-                            "Matcher must be either regex or special type: {}",
-                            pattern
-                        )))
-                    }
-                };
-                println!(
-                    "pattern is of type: {}",
-                    std::any::type_name_of_val(&pattern)
-                );
-                (id, pattern)
-            }
+            Some(caps) => Self::extract_id_and_pattern(&caps, &pattern)?,
             None => {
                 return Err(ValidationError::InvalidMatcherFormat(format!(
                     "Expected format: 'id:/regex/', got {}",
@@ -67,11 +69,63 @@ impl Matcher {
             }
         };
 
-        println!("id: {:?}", id,);
+        let extras = match extras {
+            Some(text) => Self::extract_matcher_extras(text),
+            None => HashSet::new(),
+        };
+
         Ok(Matcher {
             id,
+            extras,
             pattern: matcher,
         })
+    }
+
+    /// Extract any extra flags from the text following the matcher.
+    fn extract_matcher_extras(text: &str) -> HashSet<MatcherExtras> {
+        let set_of_chars = text.chars().collect::<HashSet<char>>();
+        let mut extras = HashSet::new();
+
+        for char in set_of_chars {
+            match char {
+                '+' => {
+                    extras.insert(MatcherExtras::Repeated);
+                }
+                _ => {}
+            }
+        }
+
+        extras
+    }
+
+    /// Extract the ID and pattern from the regex captures.
+    fn extract_id_and_pattern(
+        captures: &regex::Captures,
+        pattern: &str,
+    ) -> Result<(Option<String>, MatcherType), ValidationError> {
+        let id = captures.name("id").map(|m| m.as_str().to_string());
+        let regex_pattern = captures.name("regex").map(|m| m.as_str().to_string());
+        let special = captures.name("special").map(|m| m.as_str().to_string());
+
+        let matcher = match (regex_pattern, special) {
+            (Some(regex_pattern), None) => {
+                MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
+            }
+            (None, Some(_)) => MatcherType::Special(SpecialMatchers::Ruler),
+            (Some(_), Some(_)) => {
+                return Err(ValidationError::InvalidMatcherFormat(format!(
+                    "Matcher cannot be both regex and special type: {}",
+                    pattern
+                )))
+            }
+            (None, None) => {
+                return Err(ValidationError::InvalidMatcherFormat(format!(
+                    "Matcher must be either regex or special type: {}",
+                    pattern
+                )))
+            }
+        };
+        Ok((id, matcher))
     }
 
     /// Get an actual match string for a given text, if it matches.
@@ -91,9 +145,14 @@ impl Matcher {
         }
     }
 
-    /// Check whether the matcher is for a ruler.
+    /// Whether the matcher is for a ruler.
     pub fn is_ruler(&self) -> bool {
         matches!(self.pattern, MatcherType::Special(SpecialMatchers::Ruler))
+    }
+
+    /// Whether the matcher repeats.
+    pub fn is_repeated(&self) -> bool {
+        self.extras.contains(&MatcherExtras::Repeated)
     }
 
     pub fn id(&self) -> Option<&String> {
@@ -129,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_matcher_creation_and_matching() {
-        let matcher = Matcher::new("`word:/\\w+/`").unwrap();
+        let matcher = Matcher::new("`word:/\\w+/`", None).unwrap();
         assert_eq!(matcher.id, Some("word".to_string()));
         assert_eq!(matcher.match_str("hello world"), Some("hello"));
         assert_eq!(matcher.match_str("1234"), Some("1234"));
@@ -138,20 +197,21 @@ mod tests {
 
     #[test]
     fn test_matcher_invalid_pattern() {
-        let result = Matcher::new("`invalid_pattern`");
+        let result = Matcher::new("`invalid_pattern`", None);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_matcher_display() {
-        let matcher = Matcher::new("`num:/\\d+/`").unwrap();
+        let matcher = Matcher::new("`num:/\\d+/`", None).unwrap();
         let display_str = format!("{}", matcher);
         assert_eq!(display_str, "num:/\\d+/");
     }
 
     #[test]
     fn test_long_complicated_id_and_regex() {
-        let matcher = Matcher::new("`complicatedID_123-abc:/[a-zA-Z0-9_\\-]{5,15}/`").unwrap();
+        let matcher =
+            Matcher::new("`complicatedID_123-abc:/[a-zA-Z0-9_\\-]{5,15}/`", None).unwrap();
         assert_eq!(matcher.id, Some("complicatedID_123-abc".to_string()));
         assert_eq!(
             matcher.match_str("user_12345 is logged in"),
@@ -162,14 +222,14 @@ mod tests {
 
     #[test]
     fn test_with_no_id() {
-        let matcher = Matcher::new("`ruler`").unwrap();
+        let matcher = Matcher::new("`ruler`", None).unwrap();
         assert_eq!(matcher.id, None);
         assert_eq!(matcher.match_str("ruler"), Some("ruler"));
         assert_eq!(matcher.match_str("***"), Some("ruler"));
         assert_eq!(matcher.match_str("!@#$"), None);
         assert_eq!(matcher.match_str("whatever"), None);
 
-        let matcher = Matcher::new("'id:ruler'").unwrap();
+        let matcher = Matcher::new("'id:ruler'", None).unwrap();
         assert_eq!(matcher.id, Some("id".to_string()));
         assert_eq!(matcher.match_str("ruler"), Some("ruler"));
         assert_eq!(matcher.match_str("!@#$"), None);

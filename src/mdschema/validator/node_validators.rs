@@ -1,14 +1,47 @@
-use log::debug;
+use log::{debug, trace};
 use serde_json::{json, Value};
 use tree_sitter::Node;
 
 use crate::mdschema::validator::{
     errors::{Error, SchemaError, SchemaViolationError},
-    matcher::Matcher,
-    utils::is_last_node,
+    matcher::{get_everything_after_special_chars, Matcher},
+    utils::{is_last_node, node_to_str},
 };
 
 pub type NodeValidationResult = (Vec<Error>, Value);
+
+/// Find the matcher code_span node in a list of schema nodes.
+/// Returns the matcher node and the next node after it, if any.
+/// Returns an error if multiple matchers are found.
+fn find_matcher_node<'b>(
+    schema_nodes: &'b [Node<'b>],
+    input_node_descendant_index: usize,
+) -> Result<(Option<&'b Node<'b>>, Option<&'b Node<'b>>), Error> {
+    let mut code_node = None;
+    let mut next_node = None;
+
+    for (i, node) in schema_nodes.iter().enumerate() {
+        if node.kind() == "code_span" {
+            if code_node.is_some() {
+                trace!(
+                    "Multiple matchers found in single node at index {}",
+                    input_node_descendant_index
+                );
+
+                return Err(Error::SchemaViolation(
+                    SchemaViolationError::NodeContentMismatch(
+                        input_node_descendant_index,
+                        "Multiple matchers in single node".into(),
+                    ),
+                ));
+            }
+            code_node = Some(node);
+            next_node = schema_nodes.get(i + 1);
+        }
+    }
+
+    Ok((code_node, next_node))
+}
 
 /// Validate a text node against the schema text node.
 ///
@@ -33,7 +66,13 @@ pub fn validate_text_node<'b>(
     );
 
     if schema_text != input_text {
-        debug!("Text mismatch found");
+        trace!(
+            "Text content mismatch at node index {}: expected '{}', got '{}'",
+            input_node_descendant_index,
+            schema_text,
+            input_text
+        );
+
         errors.push(Error::SchemaViolation(
             SchemaViolationError::NodeContentMismatch(
                 input_node_descendant_index,
@@ -62,9 +101,13 @@ pub fn validate_matcher_node_list<'b>(
     schema_str: &'b str,
     eof: bool,
 ) -> NodeValidationResult {
-    let matcher = schema_nodes.iter().find(|n| n.kind() == "code_span");
+    let (code_node, next_node) = match find_matcher_node(schema_nodes, input_node_descendant_index)
+    {
+        Ok((code, next)) => (code, next),
+        Err(e) => return (vec![e], json!({})),
+    };
 
-    match matcher {
+    match code_node {
         None => {
             return (
                 vec![Error::SchemaError(
@@ -73,11 +116,47 @@ pub fn validate_matcher_node_list<'b>(
                 json!({}),
             );
         }
-        Some(matcher) => {
+        Some(matcher_code_node) => {
             let mut errors = Vec::new();
             let mut matches_array = Vec::new();
 
+            // We have to create a matcher to extract the ID, even though we
+            // call validate_matcher_node, which is a bit redundant.
+            // We also check to make sure we are even in repeating mode here!
+            let matcher_sr = &schema_str[matcher_code_node.byte_range()];
+            let matcher = match Matcher::new(
+                matcher_sr,
+                next_node.map(|n| node_to_str(n, schema_str)).as_deref(),
+            ) {
+                Ok(m) => m,
+                Err(_) => {
+                    return (
+                        vec![Error::SchemaError(
+                            SchemaError::NoMatcherInListNodeChildren(input_node_descendant_index),
+                        )],
+                        json!({}),
+                    );
+                }
+            };
+
+            // If we aren't in repeating mode, return an error
+            if !matcher.is_repeated() {
+                return (
+                    vec![Error::SchemaViolation(
+                        SchemaViolationError::NonRepeatingMatcherInListContext(
+                            input_node_descendant_index,
+                        ),
+                    )],
+                    json!({}),
+                );
+            }
+
             for child in input_node.children(&mut input_node.walk().clone()) {
+                debug!(
+                    "Validating list child node at byte range {:?}",
+                    child.byte_range()
+                );
+
                 // TODO: reuse the cursor that we already have
                 let (child_errors, child_matches) = validate_matcher_node(
                     &child.child(1).unwrap(),
@@ -98,21 +177,11 @@ pub fn validate_matcher_node_list<'b>(
                 }
             }
 
-            let matcher_text = &schema_str[matcher.byte_range()];
-            let matcher_obj = match Matcher::new(matcher_text) {
-                Ok(m) => m,
-                Err(_) => {
-                    return (
-                        vec![Error::SchemaError(
-                            SchemaError::NoMatcherInListNodeChildren(input_node_descendant_index),
-                        )],
-                        json!({}),
-                    );
-                }
-            };
-
             let mut matches = json!({});
-            matches[matcher_obj.id()] = serde_json::Value::Array(matches_array);
+            match matcher.id() {
+                Some(id) => matches[id] = serde_json::Value::Array(matches_array),
+                None => {}
+            }
 
             (errors, matches)
         }
@@ -137,29 +206,36 @@ pub fn validate_matcher_node<'b>(
     let mut errors = Vec::new();
     let mut matches = json!({});
 
-    let code_nodes: Vec<_> = schema_nodes
-        .iter()
-        .filter(|n| n.kind() == "code_span")
-        .collect();
+    let (code_node, next_node) = match find_matcher_node(schema_nodes, input_node_descendant_index)
+    {
+        Ok((code, next)) => (code, next),
+        Err(e) => return (vec![e], matches),
+    };
 
-    if code_nodes.len() > 1 {
-        return (
-            vec![Error::SchemaViolation(
-                SchemaViolationError::NodeContentMismatch(
-                    input_node_descendant_index,
-                    "Multiple matchers in single node".into(),
-                ),
-            )],
-            matches,
-        );
-    }
+    let matcher_node = match code_node {
+        None => {
+            errors.push(Error::SchemaError(
+                SchemaError::NoMatcherInListNodeChildren(input_node_descendant_index),
+            ));
+            return (errors, matches);
+        }
+        Some(node) => node,
+    };
 
-    let code_node = code_nodes[0];
-    let matcher_text = &schema_str[code_node.byte_range()];
+    let matcher_text = &schema_str[matcher_node.byte_range()];
 
-    let matcher = match Matcher::new(matcher_text) {
+    let matcher = match Matcher::new(
+        matcher_text,
+        next_node.map(|n| node_to_str(n, schema_str)).as_deref(),
+    ) {
         Ok(m) => m,
         Err(_) => {
+            trace!(
+                "Invalid matcher format at node index {}: '{}'",
+                input_node_descendant_index,
+                matcher_text
+            );
+
             return (
                 vec![Error::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch(
@@ -173,8 +249,8 @@ pub fn validate_matcher_node<'b>(
     };
 
     let schema_start = schema_nodes[0].byte_range().start;
-    let matcher_start = code_node.byte_range().start - schema_start;
-    let matcher_end = code_node.byte_range().end - schema_start;
+    let matcher_start = matcher_node.byte_range().start - schema_start;
+    let matcher_end = matcher_node.byte_range().end - schema_start;
 
     // Always validate prefix, even for incomplete nodes
     let prefix_schema = &schema_str[schema_start..schema_start + matcher_start];
@@ -187,6 +263,13 @@ pub fn validate_matcher_node<'b>(
             [input_node.byte_range().start..input_node.byte_range().start + matcher_start];
 
         if prefix_schema != prefix_input {
+            trace!(
+                "Prefix mismatch at node index {}: expected '{}', got '{}'",
+                input_node_descendant_index,
+                prefix_schema,
+                prefix_input
+            );
+
             errors.push(Error::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch(
                     input_node_descendant_index,
@@ -203,6 +286,12 @@ pub fn validate_matcher_node<'b>(
         debug!("Skipping matcher and suffix validation - incomplete node");
         return (errors, matches);
     }
+
+    trace!(
+        "Validating matcher at node index {}: '{}'",
+        input_node_descendant_index,
+        matcher_text
+    );
 
     let input_start = input_node.byte_range().start + matcher_start;
     let input_to_match = &input_str[input_start..];
@@ -228,12 +317,22 @@ pub fn validate_matcher_node<'b>(
         Some(matched_str) => {
             // Validate suffix
             let schema_end = schema_nodes.last().unwrap().byte_range().end;
-            let suffix_schema = &schema_str[schema_start + matcher_end..schema_end];
+
+            let suffix_schema = get_everything_after_special_chars(
+                &schema_str[schema_start + matcher_end..schema_end],
+            );
+
             let suffix_start = input_start + matched_str.len();
             let input_end = input_node.byte_range().end;
 
             // Ensure suffix_start doesn't exceed input_end
             if suffix_start > input_end {
+                trace!(
+                    "Suffix mismatch at node index {}: expected '{}', but input is too short",
+                    input_node_descendant_index,
+                    suffix_schema
+                );
+
                 // out of bounds
                 errors.push(Error::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch(
@@ -245,6 +344,13 @@ pub fn validate_matcher_node<'b>(
                 let suffix_input = &input_str[suffix_start..input_end];
 
                 if suffix_schema != suffix_input {
+                    trace!(
+                        "Suffix mismatch at node index {}: expected '{}', got '{}'",
+                        input_node_descendant_index,
+                        suffix_schema,
+                        suffix_input
+                    );
+
                     errors.push(Error::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch(
                             input_node_descendant_index,
@@ -262,6 +368,12 @@ pub fn validate_matcher_node<'b>(
             }
         }
         None => {
+            trace!(
+                "Matcher pattern mismatch at node index {}: '{}'",
+                input_node_descendant_index,
+                matcher_text
+            );
+
             errors.push(Error::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch(
                     input_node_descendant_index,
@@ -503,7 +615,7 @@ mod tests {
 
     #[test]
     fn test_validate_matcher_list_expects_errors_on_pattern_mismatch() {
-        let schema = "`test:/[0-9]/`";
+        let schema = "`test:/[0-9]/`+";
         let input = "- 1\n- a\n- 3\n- b\n- 5";
 
         let (errors, matches) = get_list_matcher_validator(schema, input, true);
@@ -512,13 +624,36 @@ mod tests {
         assert_eq!(errors.len(), 2, "Expected 2 errors for 'a' and 'b'");
 
         // Verify that valid matches were still captured
-        let matches_obj = matches.as_object().unwrap();
-        assert!(matches_obj.contains_key("num"));
+        println!("{}", matches);
+        let matches_arr = matches.as_array().unwrap();
+        assert!(matches_arr
+            .iter()
+            .find(|m| m.as_str().unwrap() == "1")
+            .is_some());
+    }
+
+    #[test]
+    fn test_duplicate_special_repeating_char_allowed() {
+        let schema = "`test:/[0-9]/`++++++";
+        let input = "- 1\n- 2\n- 3";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(matches_arr.len(), 3);
+        for i in 0..3 {
+            assert_eq!(matches_arr[i].as_str().unwrap(), (i + 1).to_string());
+        }
     }
 
     #[test]
     fn test_validate_matcher_list_for_simple_digit_pattern() {
-        let schema = "`test:/[0-9]/`";
+        let schema = "`test:/[0-9]+/`+";
         let input = "- 1\n- 2\n- 3\n- 4\n- 5";
 
         let (errors, matches) = get_list_matcher_validator(schema, input, true);
@@ -533,5 +668,20 @@ mod tests {
         for i in 0..5 {
             assert_eq!(matches_arr[i].as_str().unwrap(), (i + 1).to_string());
         }
+    }
+
+    #[test]
+    fn test_get_everything_after_special_chars() {
+        let input = "+++HelloWorld";
+        let result = get_everything_after_special_chars(input);
+        assert_eq!(result, "HelloWorld");
+
+        let input_no_special = "HelloWorld";
+        let result_no_special = get_everything_after_special_chars(input_no_special);
+        assert_eq!(result_no_special, "HelloWorld");
+
+        let input_mixed = "+-*/HelloWorld";
+        let result_mixed = get_everything_after_special_chars(input_mixed);
+        assert_eq!(result_mixed, "-*/HelloWorld");
     }
 }

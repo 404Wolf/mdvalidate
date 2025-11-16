@@ -258,8 +258,12 @@ impl Validator {
                     })
                     .unwrap_or(0)
             };
-            let is_schema_specified_list_node =
-                schema_node.kind() == "tight_list" && schema_node.child_count() == 1;
+            let is_schema_specified_list_node = schema_node.kind() == "tight_list"
+                && schema_node.child_count() == 1
+                && input_node.child_count() > 1; // When we hit the validate_matcher_list we
+                                                 // are expecting multiple items, and if we
+                                                 // don't get multiple items we say "hey, you
+                                                 // should have used +"!
             debug!(
                 "Schema node is a schema-specified list node: {}",
                 is_schema_specified_list_node
@@ -711,7 +715,7 @@ mod tests {
         println!("got matches {:?}", matches);
         assert!(
             errors.is_empty(),
-            "Expected no validation errors but found {:?}",
+            "expected no errors, but found {:?}",
             errors
         );
         // The matcher with + should collect all matches in an array
@@ -1356,7 +1360,7 @@ Content for section 3."#;
         let schema = "# Title\n\nSome content with a ruler below:\n\n---\n\nMore content.";
         let input = "# Title\n\nSome content with a ruler below:\n\n---\n\nMore content.";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1369,7 +1373,7 @@ Content for section 3."#;
         let schema = "# Title\n\nContent above rulers.\n\n***\n\nMore content.\n\n___\n\nEnd content.\n\n---";
         let input = "# Title\n\nContent above rulers.\n\n***\n\nMore content.\n\n___\n\nEnd content.\n\n---";
 
-        let (errors, _) = get_validator(schema, input, true);
+        let (errors, _) = do_validate(schema, input, true);
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",

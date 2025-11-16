@@ -80,6 +80,9 @@ pub enum SchemaViolationError {
     NodeTypeMismatch(usize, usize),
     /// Text content of node does not match expected value. Node index, text that doesn't validate
     NodeContentMismatch(usize, String),
+    /// When it looks like you meant to have a repeating list node, but there is
+    /// no "+" to indicate repeating. Index of the offending node.
+    NonRepeatingMatcherInListContext(usize),
     /// Nodes have different numbers of children. Expected number, actual number, parent node index
     ChildrenLengthMismatch(usize, usize, usize),
 }
@@ -133,6 +136,23 @@ pub fn pretty_print_error(
                     .with_label(
                         Label::new((filename, node_range))
                             .with_message(format!("Expected '{}' but found '{}'", expected, actual))
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .write((filename, Source::from(source_content)), &mut buffer)
+                    .map_err(|e| e.to_string())?;
+            }
+            SchemaViolationError::NonRepeatingMatcherInListContext(node_id) => {
+                let node = find_node_by_index(tree.root_node(), *node_id);
+                let node_range = node.start_byte()..node.end_byte();
+
+                Report::build(ReportKind::Error, (filename, node_range.clone()))
+                    .with_message("Non-repeating matcher in repeating context")
+                    .with_label(
+                        Label::new((filename, node_range))
+                            .with_message(
+                                "This matcher is in a list context but is not marked as repeating ('+')"
+                            )
                             .with_color(Color::Red),
                     )
                     .finish()

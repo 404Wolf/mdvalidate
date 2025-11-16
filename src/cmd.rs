@@ -251,7 +251,8 @@ This is a shopping list:
         let (errors, _) = get_validator(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
-            "Should have no errors for matching content with matchers"
+            "should have no errors but found: {:?}",
+            errors
         );
     }
 

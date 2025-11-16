@@ -1,7 +1,7 @@
 use tree_sitter::Parser;
 
 #[allow(dead_code)]
-pub fn node_to_str(node: tree_sitter::Node, input_str: &str) -> String {
+pub fn node_to_str(node: &tree_sitter::Node, input_str: &str) -> String {
     let mut cursor = node.walk();
     node_to_str_rec(&mut cursor, input_str, 0)
 }
@@ -70,7 +70,7 @@ mod tests {
         let mut parser = new_markdown_parser();
         let tree = parser.parse(source, None).unwrap();
         let root_node = tree.root_node();
-        let result = node_to_str(root_node, source);
+        let result = node_to_str(&root_node, source);
         println!("{}", result);
     }
 
