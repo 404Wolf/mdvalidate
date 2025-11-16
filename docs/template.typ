@@ -11,7 +11,21 @@
 #let fill-color = luma(250)
 
 #let template(
-  title: [Your Title], author: "Author", paper-size: "a4", date: none, date-format: "[month repr:long] [day padding:zero], [year repr:full]", abstract: none, preface: none, table-of-contents: outline(), bibliography: none, chapter-pagebreak: true, external-link-circle: true, figure-index: (enabled: false, title: ""), table-index: (enabled: false, title: ""), listing-index: (enabled: false, title: ""), body,
+  title: [Your Title],
+  author: "Author",
+  paper-size: "a4",
+  date: none,
+  date-format: "[month repr:long] [day padding:zero], [year repr:full]",
+  abstract: none,
+  preface: none,
+  table-of-contents: outline(),
+  bibliography: none,
+  chapter-pagebreak: true,
+  external-link-circle: true,
+  figure-index: (enabled: false, title: ""),
+  table-index: (enabled: false, title: ""),
+  listing-index: (enabled: false, title: ""),
+  body,
 ) = {
   set document(title: title, author: author)
 
@@ -22,7 +36,13 @@
       it
     } else {
       set text(font: ("Iosevka", "Fira Mono"), size: 9pt)
-      block(it, fill: rgb(250, 250, 250), radius: 0.3em, inset: 1.2em, width: 100%)
+      block(
+        it,
+        fill: rgb(250, 250, 250),
+        radius: 0.3em,
+        inset: 1.2em,
+        width: 100%,
+      )
     }
   }
 
@@ -30,7 +50,8 @@
 
   page(
     align(
-      left + horizon, block(
+      left + horizon,
+      block(
         width: 90%,
       )[
         #v(-1.5in)
@@ -47,7 +68,12 @@
             width: 80%,
           )[
             // Default leading is 0.65em.
-            #par(leading: 0.78em, justify: true, linebreaks: "optimized", abstract)
+            #par(
+              leading: 0.78em,
+              justify: true,
+              linebreaks: "optimized",
+              abstract,
+            )
           ]
         }
 
@@ -60,7 +86,10 @@
   )
 
   set par(
-    leading: 0.7em, spacing: 1.35em, justify: true, linebreaks: "optimized",
+    leading: 0.7em,
+    spacing: 1.35em,
+    justify: true,
+    linebreaks: "optimized",
   )
 
   show heading: it => {
@@ -76,7 +105,10 @@
       h(1.6pt)
       sym.wj
       super(
-        box(height: 3.8pt, circle(radius: 1.2pt, stroke: 0.7pt + rgb("#993333"))),
+        box(height: 3.8pt, circle(
+          radius: 1.2pt,
+          stroke: 0.7pt + rgb("#993333"),
+        )),
       )
     }
   }
@@ -89,7 +121,7 @@
     table-of-contents
   }
 
-  set page(footer: context{
+  set page(footer: context {
     let i = counter(page).at(here()).first()
 
     let is-odd = calc.odd(i)
@@ -122,7 +154,10 @@
   set math.equation(numbering: "(1)")
 
   show raw.where(block: false): box.with(
-    fill: fill-color.darken(2%), inset: (x: 3pt, y: 0pt), outset: (y: 3pt), radius: 2pt,
+    fill: fill-color.darken(2%),
+    inset: (x: 3pt, y: 0pt),
+    outset: (y: 3pt),
+    radius: 2pt,
   )
 
   show raw.where(block: true): block.with(inset: (x: 5pt))
@@ -146,7 +181,11 @@
   if bibliography != none {
     pagebreak()
     show std-bibliography: set text(0.85em)
-    show std-bibliography: set par(leading: 0.65em, justify: false, linebreaks: auto)
+    show std-bibliography: set par(
+      leading: 0.65em,
+      justify: false,
+      linebreaks: auto,
+    )
     bibliography
   }
 
@@ -164,17 +203,20 @@
 
       if imgs {
         outline(
-          title: figure-index.at("title", default: "Index of Figures"), target: fig-t(image),
+          title: figure-index.at("title", default: "Index of Figures"),
+          target: fig-t(image),
         )
       }
       if tbls {
         outline(
-          title: table-index.at("title", default: "Index of Tables"), target: fig-t(table),
+          title: table-index.at("title", default: "Index of Tables"),
+          target: fig-t(table),
         )
       }
       if lsts {
         outline(
-          title: listing-index.at("title", default: "Index of Listings"), target: fig-t(raw),
+          title: listing-index.at("title", default: "Index of Listings"),
+          target: fig-t(raw),
         )
       }
     }
@@ -183,6 +225,10 @@
 
 #let blockquote(body) = {
   block(
-    width: 100%, fill: fill-color, inset: 2em, stroke: (y: 0.5pt + stroke-color), body,
+    width: 100%,
+    fill: fill-color,
+    inset: 2em,
+    stroke: (y: 0.5pt + stroke-color),
+    body,
   )
 }

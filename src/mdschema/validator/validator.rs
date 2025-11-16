@@ -1380,4 +1380,101 @@ Content for section 3."#;
             errors
         );
     }
+
+    #[test]
+    fn test_with_repeater() {
+        let schema = r#"# Title
+
+Content above repeater.
+
+* `item:/\d/`+"#;
+        let good_input = r#"# Title
+
+Content above repeater.
+
+* 1
+* 2
+* 3"#;
+        let bad_input = r#"# Title
+
+Content above repeater.
+
+* 1
+* two
+* 3"#;
+
+        // We should be able to extract some useful matches even though it fails
+        let (errors, matches) = do_validate(schema, bad_input, true);
+        assert!(
+            !errors.is_empty(),
+            "Expected validation errors for bad input but found none"
+        );
+        let items = matches.get("item").unwrap().as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0], "1");
+        assert_eq!(items[1], "3");
+
+        let (errors, matches) = do_validate(schema, good_input, true);
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+        let items = matches.get("item").unwrap().as_array().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], "1");
+        assert_eq!(items[1], "2");
+        assert_eq!(items[2], "3");
+    }
+
+    #[test]
+    fn test_nested_repeater_with_limited_size() {
+        let schema = r#"
+- `item1:/\d+/`{2,4}++
+    - `item2:/\d+/`{2,4}+
+"#;
+
+        let input = r#"
+- 1
+    - 10
+    - 20
+- 2
+    - 30
+    - 40
+    - 50
+- 3
+    - 60
+    - 70
+"#;
+
+        let (errors, matches) = do_validate(schema, input, true);
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+
+        let item1 = matches.get("item1").unwrap().as_array().unwrap();
+        assert_eq!(item1.len(), 6); // 3 strings + 3 objects with nested matches
+        assert_eq!(item1[0], "1");
+        assert_eq!(item1[2], "2");
+        assert_eq!(item1[4], "3");
+
+        let item2_first = item1[1].as_object().unwrap();
+        let item2_second = item1[3].as_object().unwrap();
+        let item2_third = item1[5].as_object().unwrap();
+        let item2_first_array = item2_first.get("item2").unwrap().as_array().unwrap();
+        let item2_second_array = item2_second.get("item2").unwrap().as_array().unwrap();
+        let item2_third_array = item2_third.get("item2").unwrap().as_array().unwrap();
+        assert_eq!(item2_first_array.len(), 2);
+        assert_eq!(item2_first_array[0], "10");
+        assert_eq!(item2_first_array[1], "20");
+        assert_eq!(item2_second_array.len(), 3);
+        assert_eq!(item2_second_array[0], "30");
+        assert_eq!(item2_second_array[1], "40");
+        assert_eq!(item2_second_array[2], "50");
+        assert_eq!(item2_third_array.len(), 2);
+        assert_eq!(item2_third_array[0], "60");
+        assert_eq!(item2_third_array[1], "70");
+    }
 }

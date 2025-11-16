@@ -222,14 +222,13 @@ fn validate_matcher_node_list_rec<'b>(
                                 input_node_descendant_index
                             );
 
-                            // depth limit reached; report error and return empty matches
+                            // depth limit reached; report error
                             errors.push(Error::SchemaViolation(
                                 SchemaViolationError::NodeListTooDeep(
                                     max_allowed,
                                     input_node_descendant_index,
                                 ),
                             ));
-                            return (errors, json!({}));
                         }
                     }
 
@@ -1568,8 +1567,11 @@ mod tests {
             _ => panic!("Expected NodeListTooDeep error but got: {:?}", errors[0]),
         }
 
-        // Matches should be empty since we hit the depth limit
-        assert_eq!(matches, json!({}));
+        // Matches should be have the valid outer items
+        let num_array = matches.get("num").unwrap().as_array().unwrap();
+        assert_eq!(num_array.len(), 2);
+        assert_eq!(num_array[0].as_str().unwrap(), "1");
+        assert_eq!(num_array[1].as_str().unwrap(), "3");
     }
 
     #[test]

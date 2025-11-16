@@ -23,7 +23,7 @@
           projectRootFile = "flake.nix";
           programs.nixfmt.enable = true;
           programs.yamlfmt.enable = true;
-          programs.typstfmt.enable = true;
+          programs.typstyle.enable = true;
           programs.toml-sort.enable = true;
         };
       in
