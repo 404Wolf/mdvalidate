@@ -10,6 +10,11 @@ use crate::mdschema::validator::{
 
 pub type NodeValidationResult = (Vec<Error>, Value);
 
+/// Check if a node is a list (tight_list or loose_list).
+fn is_list_node(node: &Node) -> bool {
+    node.kind() == "tight_list" || node.kind() == "loose_list"
+}
+
 /// Find the matcher code_span node in a list of schema nodes.
 /// Returns the matcher node and the next node after it, if any.
 /// Returns an error if multiple matchers are found.
@@ -151,15 +156,18 @@ pub fn validate_matcher_node_list<'b>(
                 );
             }
 
-            for child in input_node.children(&mut input_node.walk().clone()) {
+            'list_level_validation_loop: for child in
+                input_node.children(&mut input_node.walk().clone())
+            {
                 debug!(
                     "Validating list child node at byte range {:?}",
                     child.byte_range()
                 );
 
-                // TODO: reuse the cursor that we already have
+                // Validate the paragraph content (child 1)
+                let paragraph = child.child(1).unwrap();
                 let (child_errors, child_matches) = validate_matcher_node(
-                    &child.child(1).unwrap(),
+                    &paragraph,
                     input_node_descendant_index,
                     schema_nodes,
                     input_str,
@@ -168,11 +176,68 @@ pub fn validate_matcher_node_list<'b>(
                 );
                 errors.extend(child_errors);
 
+                // Add the matched value from this list item
                 if let Some(obj) = child_matches.as_object() {
-                    // For each match object, extract the first value and add it to our array
                     if let Some((_, value)) = obj.iter().next() {
-                        // TODO: Could we have multiple?
                         matches_array.push(value.clone());
+                    }
+                }
+
+                // Check if this list item has a nested list (child at index 2)
+                if let Some(nested_list) = child.child(2) {
+                    if !is_list_node(&nested_list) {
+                        continue 'list_level_validation_loop;
+                    }
+
+                    // Parse the schema to get the nested list structure
+                    let mut schema_parser =
+                        crate::mdschema::validator::utils::new_markdown_parser();
+
+                    // This is just the excerpt we need of the schema string
+                    let Some(schema_tree) = schema_parser.parse(schema_str, None) else {
+                        continue 'list_level_validation_loop;
+                    };
+
+                    // Navigate to the nested list in the schema's first item
+                    let Some(schema_nested_list) = schema_tree
+                        .root_node()
+                        .child(0)
+                        .and_then(|n| n.child(0))
+                        .and_then(|n| n.child(2))
+                    else {
+                        continue 'list_level_validation_loop;
+                    };
+
+                    if !is_list_node(&schema_nested_list) {
+                        continue 'list_level_validation_loop;
+                    }
+
+                    let Some(schema_nested_paragraph) =
+                        schema_nested_list.child(0).and_then(|item| item.child(1))
+                    else {
+                        continue 'list_level_validation_loop;
+                    };
+
+                    let mut nested_cursor = schema_tree.walk();
+                    let nested_schema_nodes: Vec<Node> = schema_nested_paragraph
+                        .children(&mut nested_cursor)
+                        .collect();
+
+                    // Recursively validate the nested list
+                    let (nested_errors, nested_matches) = validate_matcher_node_list(
+                        &nested_list,
+                        input_node_descendant_index,
+                        &nested_schema_nodes,
+                        input_str,
+                        schema_str,
+                        eof,
+                    );
+
+                    errors.extend(nested_errors);
+
+                    // Add the nested matches as an object to the array
+                    if !nested_matches.as_object().unwrap().is_empty() {
+                        matches_array.push(nested_matches);
                     }
                 }
             }
@@ -255,13 +320,15 @@ pub fn validate_matcher_node<'b>(
     // Always validate prefix, even for incomplete nodes
     let prefix_schema = &schema_str[schema_start..schema_start + matcher_start];
 
-    // Check if we have enough input to validate the prefix
+    // Check if we have enough input to validate the prefix (the end of the
+    // prefix is the start of the matcher)
     let input_has_full_prefix = input_node.byte_range().len() >= matcher_start;
 
     if input_has_full_prefix {
         let prefix_input = &input_str
             [input_node.byte_range().start..input_node.byte_range().start + matcher_start];
 
+        // Do the actual prefix comparison
         if prefix_schema != prefix_input {
             trace!(
                 "Prefix mismatch at node index {}: expected '{}', got '{}'",
@@ -279,6 +346,25 @@ pub fn validate_matcher_node<'b>(
 
             return (errors, matches);
         }
+    } else if matcher_start > 0 && !is_incomplete {
+        // Input is too short to contain the required prefix, and we've reached EOF
+        // so this is a genuine error (not just incomplete input)
+        trace!(
+            "Input too short for prefix at node index {}: expected prefix '{}' ({} bytes) but input is only {} bytes",
+            input_node_descendant_index,
+            prefix_schema,
+            matcher_start,
+            input_node.byte_range().len()
+        );
+
+        errors.push(Error::SchemaViolation(
+            SchemaViolationError::NodeContentMismatch(
+                input_node_descendant_index,
+                prefix_schema.into(),
+            ),
+        ));
+
+        return (errors, matches);
     }
 
     // Skip matcher and suffix validation if node is incomplete
@@ -467,14 +553,30 @@ mod tests {
             .parse(schema, None)
             .expect("Failed to parse schema");
         let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<Node> = schema_tree
+
+        let schema_root_child = schema_tree
             .root_node()
             .child(0)
-            .expect("Failed to get schema root child")
-            .children(&mut schema_cursor)
-            .collect();
-        // We want the schema node to be the matcher node inside the first list item in the schema
-        assert_eq!(schema_nodes[0].kind(), "code_span");
+            .expect("Failed to get schema root child");
+
+        // If the schema is a list, we need to get the paragraph content from the first list item
+        let schema_nodes: Vec<Node> = if is_list_node(&schema_root_child) {
+            let first_list_item = schema_root_child
+                .child(0)
+                .expect("Failed to get first list item");
+            let paragraph = first_list_item
+                .child(1)
+                .expect("Failed to get paragraph from list item");
+            paragraph.children(&mut schema_cursor).collect()
+        } else {
+            schema_root_child.children(&mut schema_cursor).collect()
+        };
+
+        // The schema nodes should contain at least one code_span (the matcher)
+        assert!(
+            schema_nodes.iter().any(|n| n.kind() == "code_span"),
+            "Schema must contain at least one code_span matcher"
+        );
 
         let (errors, matches) =
             validate_matcher_node_list(&input_node, 0, &schema_nodes, input, schema, eof);
@@ -671,6 +773,304 @@ mod tests {
     }
 
     #[test]
+    fn test_prefix_on_list_node_with_repeater() {
+        let schema = "Item: `test:/[0-9]+/`+";
+        let input = "- Item: 1\n- Item: 2\n- Item: 3";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(matches_arr.len(), 3);
+        for i in 0..3 {
+            assert_eq!(matches_arr[i].as_str().unwrap(), (i + 1).to_string());
+        }
+    }
+
+    #[test]
+    fn test_prefix_with_partial_match_in_list() {
+        let schema = "- t `test:/\\d/`++";
+        let input = "- 1\n- t 2\n- 3";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        // Should have 2 errors: items "- 1" and "- 3" don't have the "t " prefix
+        assert_eq!(errors.len(), 2, "Expected 2 errors but got: {:?}", errors);
+
+        // Only the second item should match
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(
+            matches_arr.len(),
+            1,
+            "Expected 1 match but got: {:?}",
+            matches_arr
+        );
+        assert_eq!(matches_arr[0].as_str().unwrap(), "2");
+    }
+
+    #[test]
+    fn test_numbered_list_simple_pattern() {
+        let schema = "1. `test:/[0-9]+/`+";
+        let input = "1. 10\n2. 20\n3. 30";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(matches_arr.len(), 3);
+        assert_eq!(matches_arr[0].as_str().unwrap(), "10");
+        assert_eq!(matches_arr[1].as_str().unwrap(), "20");
+        assert_eq!(matches_arr[2].as_str().unwrap(), "30");
+    }
+
+    #[test]
+    fn test_numbered_list_with_prefix() {
+        let schema = "1. Value: `test:/[a-z]+/`+";
+        let input = "1. Value: foo\n2. Value: bar\n3. Value: baz";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(matches_arr.len(), 3);
+        assert_eq!(matches_arr[0].as_str().unwrap(), "foo");
+        assert_eq!(matches_arr[1].as_str().unwrap(), "bar");
+        assert_eq!(matches_arr[2].as_str().unwrap(), "baz");
+    }
+
+    #[test]
+    fn test_numbered_list_with_prefix_mismatch() {
+        let schema = "1. Item: `test:/\\d+/`+";
+        let input = "1. Item: 1\n2. Wrong: 2\n3. Item: 3";
+
+        let (errors, matches) = get_list_matcher_validator(schema, input, true);
+
+        // Should have 1 error for item 2 which has "Wrong: " instead of "Item: "
+        assert_eq!(errors.len(), 1, "Expected 1 error but got: {:?}", errors);
+
+        // Items 1 and 3 should match
+        let matches_arr = matches.as_array().unwrap();
+        assert_eq!(
+            matches_arr.len(),
+            2,
+            "Expected 2 matches but got: {:?}",
+            matches_arr
+        );
+        assert_eq!(matches_arr[0].as_str().unwrap(), "1");
+        assert_eq!(matches_arr[1].as_str().unwrap(), "3");
+    }
+
+    #[test]
+    fn test_nested_list_with_inner_repeater() {
+        let schema = "- Outer\n  - `test:/[a-z]+/`+";
+        let input = "- Outer\n  - foo\n  - bar\n  - baz";
+
+        // For nested lists, we need to manually navigate to the inner list
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+
+        // Get the outer list's first item's nested list (child at index 2)
+        let outer_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get outer list");
+        let first_item = outer_list.child(0).expect("Failed to get first list item");
+        let inner_list = first_item.child(2).expect("Failed to get nested list");
+        assert_eq!(inner_list.kind(), "tight_list");
+
+        // Parse schema and get the nested list's first item's paragraph nodes
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+
+        let schema_outer_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema outer list");
+        let schema_first_item = schema_outer_list
+            .child(0)
+            .expect("Failed to get schema first item");
+        let schema_inner_list = schema_first_item
+            .child(2)
+            .expect("Failed to get schema nested list");
+        let schema_inner_first_item = schema_inner_list
+            .child(0)
+            .expect("Failed to get schema inner first item");
+        let schema_paragraph = schema_inner_first_item
+            .child(1)
+            .expect("Failed to get schema paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        let (errors, matches) =
+            validate_matcher_node_list(&inner_list, 0, &schema_nodes, input, schema, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+        let matches_arr = matches.get("test").unwrap().as_array().unwrap();
+        assert_eq!(matches_arr.len(), 3);
+        assert_eq!(matches_arr[0].as_str().unwrap(), "foo");
+        assert_eq!(matches_arr[1].as_str().unwrap(), "bar");
+        assert_eq!(matches_arr[2].as_str().unwrap(), "baz");
+    }
+
+    #[test]
+    fn test_nested_lists_both_with_repeaters() {
+        let schema = "- Outer `outer:/[0-9]+/`+\n  - Inner `inner:/[a-z]+/`+";
+        let input = "- Outer 1\n  - Inner a\n  - Inner b\n- Outer 2\n  - Inner c\n  - Inner d";
+
+        // For this test, we'll parse the outer list only since the helper
+        // function only handles one level of lists with repeaters
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+
+        let input_node = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input node");
+        assert_eq!(input_node.kind(), "tight_list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let mut schema_cursor = schema_tree.walk();
+
+        let schema_root_child = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema root child");
+
+        let schema_nodes: Vec<tree_sitter::Node> = if is_list_node(&schema_root_child) {
+            let first_list_item = schema_root_child
+                .child(0)
+                .expect("Failed to get first list item");
+            let paragraph = first_list_item
+                .child(1)
+                .expect("Failed to get paragraph from list item");
+            paragraph.children(&mut schema_cursor).collect()
+        } else {
+            schema_root_child.children(&mut schema_cursor).collect()
+        };
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_node, 0, &schema_nodes, input, schema, true);
+
+        // Now captures nested structure too!
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+
+        // Should have outer values and nested structures
+        let expected = json!({
+            "outer": [
+                "1",
+                {"inner": ["a", "b"]},
+                "2",
+                {"inner": ["c", "d"]}
+            ]
+        });
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
+    fn test_fully_nested_lists_with_repeaters() {
+        let schema = "- `num1:/\\d/`++\n  - `num2:/\\d/`++";
+        let input = "- 1\n  - 2\n- 3\n  - 4";
+
+        // Parse input
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input list");
+        assert_eq!(input_list.kind(), "tight_list");
+
+        // Parse schema
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema list");
+        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
+        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        // Validate the outer list
+        let (errors, matches) =
+            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+
+        println!("Errors: {:?}", errors);
+        println!(
+            "Matches: {}",
+            serde_json::to_string_pretty(&matches).unwrap()
+        );
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+
+        // Now we should get the full nested structure!
+        let num1_matches = matches.get("num1").unwrap().as_array().unwrap();
+        assert_eq!(num1_matches.len(), 4); // 2 outer values + 2 nested objects
+        assert_eq!(num1_matches[0].as_str().unwrap(), "1");
+        assert_eq!(
+            num1_matches[1].get("num2").unwrap().as_array().unwrap()[0]
+                .as_str()
+                .unwrap(),
+            "2"
+        );
+        assert_eq!(num1_matches[2].as_str().unwrap(), "3");
+        assert_eq!(
+            num1_matches[3].get("num2").unwrap().as_array().unwrap()[0]
+                .as_str()
+                .unwrap(),
+            "4"
+        );
+
+        // Verify the full structure
+        let expected = json!({
+            "num1": ["1", {"num2": ["2"]}, "3", {"num2": ["4"]}]
+        });
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
     fn test_get_everything_after_special_chars() {
         let input = "+++HelloWorld";
         let result = get_everything_after_special_chars(input);
@@ -683,5 +1083,327 @@ mod tests {
         let input_mixed = "+-*/HelloWorld";
         let result_mixed = get_everything_after_special_chars(input_mixed);
         assert_eq!(result_mixed, "-*/HelloWorld");
+    }
+
+    #[test]
+    fn test_nested_list_with_multiple_inner_items() {
+        let schema = "- `num1:/\\d/`++\n  - `num2:/\\d/`++";
+        let input = "- 1\n  - 2\n  - 3\n  - 4\n- 5\n  - 6";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema list");
+        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
+        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+
+        let expected = json!({
+            "num1": ["1", {"num2": ["2", "3", "4"]}, "5", {"num2": ["6"]}]
+        });
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
+    fn test_nested_list_without_nested_items() {
+        let schema = "- `num1:/\\d/`++\n  - `num2:/\\d/`++";
+        let input = "- 1\n- 2";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema list");
+        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
+        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+
+        // Just outer values, no nested objects
+        let expected = json!({
+            "num1": ["1", "2"]
+        });
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
+    fn test_nested_list_with_prefix() {
+        let schema = "- Item `num1:/\\d/`++\n  - Sub `num2:/\\d/`++";
+        let input = "- Item 1\n  - Sub 2\n- Item 3\n  - Sub 4";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema list");
+        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
+        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+
+        let expected = json!({
+            "num1": ["1", {"num2": ["2"]}, "3", {"num2": ["4"]}]
+        });
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
+    fn test_nested_numbered_lists() {
+        let schema = "1. `num1:/\\d/`++\n   1. `num2:/\\d/`++";
+        let input = "1. 1\n   1. 2\n2. 3\n   1. 4";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema list");
+        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
+        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+
+        let expected = json!({
+            "num1": ["1", {"num2": ["2"]}, "3", {"num2": ["4"]}]
+        });
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
+    fn test_nested_list_with_complex_patterns() {
+        let schema = "- `name:/[a-z]+/`++\n  - `value:/[0-9]+/`++";
+        let input = "- alice\n  - 100\n  - 200\n- bob\n  - 300";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema list");
+        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
+        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+
+        let expected = json!({
+            "name": ["alice", {"value": ["100", "200"]}, "bob", {"value": ["300"]}]
+        });
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
+    fn test_nested_list_with_mismatched_inner_pattern() {
+        let schema = "- `num1:/\\d/`++\n  - `num2:/\\d/`++";
+        let input = "- 1\n  - 2\n  - bad\n- 3\n  - 4";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema list");
+        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
+        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+
+        // Should have 1 error for "bad" not matching the pattern
+        assert_eq!(errors.len(), 1, "Expected 1 error but got: {:?}", errors);
+
+        // Should still capture valid matches
+        let num1_array = matches.get("num1").unwrap().as_array().unwrap();
+        assert_eq!(num1_array[0].as_str().unwrap(), "1");
+        assert_eq!(
+            num1_array[1].get("num2").unwrap().as_array().unwrap()[0]
+                .as_str()
+                .unwrap(),
+            "2"
+        );
+        assert_eq!(num1_array[2].as_str().unwrap(), "3");
+        assert_eq!(
+            num1_array[3].get("num2").unwrap().as_array().unwrap()[0]
+                .as_str()
+                .unwrap(),
+            "4"
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_three_levels() {
+        // This tests that we properly handle recursive nesting
+        // The implementation actually supports arbitrary depth!
+        let schema = "- `l1:/\\d/`++\n  - `l2:/\\d/`++";
+        let input = "- 1\n  - 2\n    - 3\n- 4\n  - 5";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema list");
+        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
+        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but got: {:?}",
+            errors
+        );
+
+        // The implementation recursively handles nesting, so item "2" has a nested list "3"
+        // which gets captured as l2: [2, {l2: [3]}]
+        let expected = json!({
+            "l1": ["1", {"l2": ["2", {"l2": ["3"]}]}, "4", {"l2": ["5"]}]
+        });
+        assert_eq!(matches, expected);
     }
 }

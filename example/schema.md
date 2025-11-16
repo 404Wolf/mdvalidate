@@ -1,1 +1,2 @@
-Prefix `test:/[0-9]/` Suffix+
+- `num1:/\d/`++
+  - `num2:/\d/`++
