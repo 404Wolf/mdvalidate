@@ -314,9 +314,8 @@ impl Validator {
 
                 // Validate the input text against the matchers in the schema
                 let (errors, matches) = validate_matcher_node(
-                    &text_node_to_validate,
-                    input_cursor.descendant_index(),
-                    &schema_children,
+                    &mut input_cursor,
+                    &mut schema_cursor,
                     &self.last_input_str,
                     &self.schema_str,
                     self.got_eof,
@@ -329,29 +328,23 @@ impl Validator {
 
                 continue;
             } else if is_schema_specified_list_node {
-                // Get the first list item, then get its children excluding the list marker
-                let first_list_item = schema_node.child(0).unwrap();
-
-                // Get the paragraph child of the list item (which contains the actual content)
-                let first_list_item_paragraph = first_list_item
-                    .children(&mut schema_cursor.clone())
-                    .skip(1) // Skip the list_marker_minus node
-                    .next()
-                    .unwrap(); // Get the paragraph node
-
-                // Now get the children of the paragraph (text + code nodes)
-                let schema_list_item_children: Vec<_> = first_list_item_paragraph
-                    .children(&mut schema_cursor.clone())
-                    .collect();
+                // move the cursor to the first list item
+                schema_cursor.goto_first_child(); // list_item
+                schema_cursor.goto_next_sibling(); // list_marker
+                schema_cursor.goto_next_sibling(); // paragraph
+                assert_eq!(schema_cursor.node().kind(), "paragraph");
 
                 let (errors, matches) = validate_matcher_node_list(
-                    &input_node,
-                    input_cursor.descendant_index(),
-                    &schema_list_item_children,
+                    &mut input_cursor,
+                    &mut schema_cursor,
                     &self.last_input_str,
                     &self.schema_str,
                     self.got_eof,
                 );
+
+                // move the cursor back to the parent list node
+                schema_cursor.goto_parent();
+                assert_eq!(schema_cursor.node().kind(), "list");
 
                 self.errors_so_far.extend(errors);
 
@@ -376,9 +369,8 @@ impl Validator {
                 );
 
                 let (errors, matches) = validate_text_node(
-                    &input_node,
-                    input_cursor.descendant_index(),
-                    &schema_node,
+                    &mut input_cursor,
+                    &mut schema_cursor,
                     &self.last_input_str,
                     &self.schema_str,
                     self.got_eof,

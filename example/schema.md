@@ -1,2 +1,4 @@
-- `test:/test/`++{1,2}
-    - `test:/test/`+{2,2}
+# Shopping List
+
+- `item:/[A-Z][a-z]+/`++
+    - `foo:/.*/`+

@@ -1,6 +1,6 @@
 use log::{debug, trace};
 use serde_json::{json, Value};
-use tree_sitter::Node;
+use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
     errors::{Error, SchemaError, SchemaViolationError},
@@ -19,9 +19,15 @@ fn is_list_node(node: &Node) -> bool {
 /// Returns the matcher node and the next node after it, if any.
 /// Returns an error if multiple matchers are found.
 fn find_matcher_node<'b>(
-    schema_nodes: &'b [Node<'b>],
-    input_node_descendant_index: usize,
-) -> Result<(Option<&'b Node<'b>>, Option<&'b Node<'b>>), Error> {
+    schema_cursor: &mut TreeCursor<'b>,
+    input_cursor: &mut TreeCursor<'b>,
+) -> Result<(Option<Node<'b>>, Option<Node<'b>>), Error> {
+    let schema_nodes: Vec<Node> = schema_cursor
+        .node()
+        .children(&mut schema_cursor.clone())
+        .collect();
+    let input_node_descendant_index = input_cursor.descendant_index();
+
     let mut code_node = None;
     let mut next_node = None;
 
@@ -40,8 +46,8 @@ fn find_matcher_node<'b>(
                     ),
                 ));
             }
-            code_node = Some(node);
-            next_node = schema_nodes.get(i + 1);
+            code_node = Some(*node);
+            next_node = schema_nodes.get(i + 1).copied();
         }
     }
 
@@ -53,13 +59,17 @@ fn find_matcher_node<'b>(
 /// This is a node that is just a simple literal text node. We validate that
 /// the text content is identical.
 pub fn validate_text_node<'b>(
-    input_node: &Node<'b>,
-    input_node_descendant_index: usize,
-    schema_node: &Node<'b>,
+    input_cursor: &mut TreeCursor<'b>,
+    schema_cursor: &mut TreeCursor<'b>,
     input_str: &'b str,
     schema_str: &'b str,
     eof: bool,
 ) -> NodeValidationResult {
+    let input_node = input_cursor.node();
+    let schema_node = schema_cursor.node();
+
+    let input_node_descendant_index = input_cursor.descendant_index();
+
     let mut errors = Vec::new();
 
     let schema_text = &schema_str[schema_node.byte_range()];
@@ -86,7 +96,7 @@ pub fn validate_text_node<'b>(
         ));
     }
 
-    if !eof && is_last_node(input_str, input_node) {
+    if !eof && is_last_node(input_str, &input_node) {
         debug!("Skipping error reporting, incomplete last node");
         (vec![], json!({}))
     } else {
@@ -99,39 +109,22 @@ pub fn validate_text_node<'b>(
 /// This works by re-running the validation using validate_matcher_node on each input node in the
 /// list.
 pub fn validate_matcher_node_list<'b>(
-    input_node: &Node<'b>,
-    input_node_descendant_index: usize,
-    schema_nodes: &[Node<'b>],
+    input_cursor: &mut TreeCursor<'b>,
+    schema_cursor: &mut TreeCursor<'b>,
     input_str: &'b str,
     schema_str: &'b str,
     eof: bool,
 ) -> NodeValidationResult {
-    // entry wrapper starts recursion at depth 1
-    validate_matcher_node_list_rec(
-        input_node,
-        input_node_descendant_index,
-        schema_nodes,
-        input_str,
-        schema_str,
-        eof,
-        1,
-    )
-}
+    let (code_node, next_node) =
+        match find_matcher_node(&mut schema_cursor.clone(), &mut input_cursor.clone()) {
+            Ok((code, next)) => (code, next),
+            Err(e) => return (vec![e], json!({})),
+        };
 
-fn validate_matcher_node_list_rec<'b>(
-    input_node: &Node<'b>,
-    input_node_descendant_index: usize,
-    schema_nodes: &[Node<'b>],
-    input_str: &'b str,
-    schema_str: &'b str,
-    eof: bool,
-    current_depth: usize,
-) -> NodeValidationResult {
-    let (code_node, next_node) = match find_matcher_node(schema_nodes, input_node_descendant_index)
-    {
-        Ok((code, next)) => (code, next),
-        Err(e) => return (vec![e], json!({})),
-    };
+    let input_root_node = input_cursor.node();
+    let input_node_descendant_index = input_cursor.descendant_index();
+
+    let schema_root_node = schema_cursor.node();
 
     match code_node {
         None => {
@@ -177,138 +170,127 @@ fn validate_matcher_node_list_rec<'b>(
                 );
             }
 
+            let current_depth = 0;
+
             // Count the number of list items at this depth level
-            let num_list_items = input_node.child_count();
+            let num_list_items = input_root_node.child_count();
 
-            'list_level_validation_loop: for input_node_list_item in
-                input_node.children(&mut input_node.walk().clone())
+            let mut child_lists_to_validate = vec![(
+                input_cursor.descendant_index(),
+                schema_cursor.descendant_index(),
+                Box::new(|| json!([])) as Box<dyn Fn() -> Value>,
+            )];
+
+            while let Some((input_descendant_index, schema_descendant_index, _nested_matches)) =
+                child_lists_to_validate.pop()
             {
-                debug!(
-                    "Validating list child node at byte range {:?}",
-                    input_node_list_item.byte_range()
-                );
+                input_cursor.reset(input_root_node);
+                schema_cursor.reset(schema_root_node);
 
-                // list_item -> paragraph (child 1)
-                let paragraph = input_node_list_item.child(1).unwrap();
-                let (child_errors, child_matches) = validate_matcher_node(
-                    &paragraph,
-                    input_node_descendant_index,
-                    schema_nodes,
-                    input_str,
-                    schema_str,
-                    eof,
-                );
-                errors.extend(child_errors);
+                input_cursor.goto_descendant(input_descendant_index);
+                schema_cursor.goto_descendant(schema_descendant_index);
 
-                // Add the matched value from this list item
-                if let Some(obj) = child_matches.as_object() {
-                    if let Some((_, value)) = obj.iter().next() {
-                        matches_array.push(value.clone());
-                    }
-                }
-
-                // Check if this list item has a nested list (child at index 2)
-                if let Some(nested_list) = input_node_list_item.child(2) {
-                    if !is_list_node(&nested_list) {
-                        continue 'list_level_validation_loop;
-                    }
-
-                    // Before doing anything else, check if we're allowed to go deeper
-                    if let Some(max_allowed) = matcher.max_depth() {
-                        if current_depth >= max_allowed {
-                            trace!(
-                                "Maximum list nesting depth of {} exceeded at node index {}",
-                                max_allowed,
-                                input_node_descendant_index
-                            );
-
-                            // depth limit reached; report error
-                            errors.push(Error::SchemaViolation(
-                                SchemaViolationError::NodeListTooDeep(
-                                    max_allowed,
-                                    input_node_descendant_index,
-                                ),
-                            ));
-                        }
-                    }
-
-                    // Parse the schema to get the nested list structure
-                    let mut schema_parser = new_markdown_parser();
-
-                    // This is just the excerpt we need of the schema string
-                    let Some(schema_tree) = schema_parser.parse(schema_str, None) else {
-                        continue 'list_level_validation_loop;
-                    };
-
-                    // Navigate to the nested list in the schema's first item
-                    let Some(schema_nested_list) = schema_tree
-                        .root_node()
-                        // document -> list
-                        .child(0)
-                        // list -> list_item
-                        .and_then(|n| n.child(0))
-                        // list_item -> nested list ???
-                        .and_then(|n| n.child(2))
-                    else {
-                        trace!(
-                            "No nested list found in schema at node index {}",
-                            input_node_descendant_index
-                        );
-
-                        continue 'list_level_validation_loop;
-                    };
-
-                    // Actually check!
-                    if !is_list_node(&schema_nested_list) {
-                        trace!(
-                            "No nested list found in schema at node index {}",
-                            input_node_descendant_index
-                        );
-
-                        continue 'list_level_validation_loop;
-                    }
-
-                    // nested list -> list_item -> paragraph
-                    let Some(schema_nested_paragraph) =
-                        schema_nested_list.child(0).and_then(|item| item.child(1))
-                    else {
-                        trace!(
-                            "No paragraph found in nested schema list at node index {}",
-                            input_node_descendant_index
-                        );
-
-                        continue 'list_level_validation_loop;
-                    };
-
-                    // the paragraph in the schema node is the one that contains the matcher
-                    let mut nested_cursor = schema_tree.walk();
-                    let nested_schema_nodes: Vec<Node> = schema_nested_paragraph
-                        .children(&mut nested_cursor)
-                        .collect();
-
-                    // Recursively validate the nested list
-                    let (nested_errors, nested_matches) = validate_matcher_node_list_rec(
-                        &nested_list,
-                        input_node_descendant_index,
-                        &nested_schema_nodes,
+                'list_level_validation_loop: for input_node_list_item in
+                    input_root_node.children(&mut input_root_node.walk())
+                {
+                    // list_item -> paragraph (child 1)
+                    let _paragraph = input_node_list_item.child(1).unwrap();
+                    let (child_errors, child_matches) = validate_matcher_node(
+                        input_cursor,
+                        schema_cursor,
                         input_str,
                         schema_str,
                         eof,
-                        current_depth + 1,
                     );
+                    errors.extend(child_errors);
 
-                    trace!(
-                        "Nested list validation at node index {} produced {} errors",
-                        input_node_descendant_index,
-                        nested_errors.len()
-                    );
+                    // Add the matched value from this list item
+                    if let Some(obj) = child_matches.as_object() {
+                        if let Some((_, value)) = obj.iter().next() {
+                            matches_array.push(value.clone());
+                        }
+                    }
 
-                    errors.extend(nested_errors);
+                    // Check if this list item has a nested list (child at index 2)
+                    if let Some(nested_list) = input_node_list_item.child(2) {
+                        if !is_list_node(&nested_list) {
+                            continue 'list_level_validation_loop;
+                        }
 
-                    // Add the nested matches as an object to the array
-                    if !nested_matches.as_object().unwrap().is_empty() {
-                        matches_array.push(nested_matches);
-                        // {"num1":["1",{"num2":["2"]},"3",{"num2":["4"]}]}
+                        // Before doing anything else, check if we're allowed to go deeper
+                        if let Some(max_allowed) = matcher.max_depth() {
+                            if current_depth >= max_allowed {
+                                trace!(
+                                    "Maximum list nesting depth of {} exceeded at node index {}",
+                                    max_allowed,
+                                    input_node_descendant_index
+                                );
+
+                                // depth limit reached; report error
+                                errors.push(Error::SchemaViolation(
+                                    SchemaViolationError::NodeListTooDeep(
+                                        max_allowed,
+                                        input_node_descendant_index,
+                                    ),
+                                ));
+                            }
+                        }
+
+                        // Parse the schema to get the nested list structure
+                        let mut schema_parser = new_markdown_parser();
+
+                        // This is just the excerpt we need of the schema string
+                        let Some(schema_tree) = schema_parser.parse(schema_str, None) else {
+                            continue 'list_level_validation_loop;
+                        };
+
+                        // Navigate to the nested list in the schema's first item
+                        let Some(schema_nested_list) = schema_tree
+                            .root_node()
+                            // document -> list
+                            .child(0)
+                            // list -> list_item
+                            .and_then(|n| n.child(0))
+                            // list_item -> nested list ???
+                            .and_then(|n| n.child(2))
+                        else {
+                            trace!(
+                                "No nested list found in schema at node index {}",
+                                input_node_descendant_index
+                            );
+
+                            continue 'list_level_validation_loop;
+                        };
+
+                        // Actually check!
+                        if !is_list_node(&schema_nested_list) {
+                            trace!(
+                                "No nested list found in schema at node index {}",
+                                input_node_descendant_index
+                            );
+
+                            continue 'list_level_validation_loop;
+                        }
+
+                        // nested list -> list_item -> paragraph
+                        let Some(_schema_nested_paragraph) =
+                            schema_nested_list.child(0).and_then(|item| item.child(1))
+                        else {
+                            trace!(
+                                "No paragraph found in nested schema list at node index {}",
+                                input_node_descendant_index
+                            );
+
+                            continue 'list_level_validation_loop;
+                        };
+
+                        // recurse, get matches at the next layer deep, then put
+                        // them in the array at this level (using a callback to do this)
+                        child_lists_to_validate.push((
+                            nested_list.walk().descendant_index(),
+                            schema_nested_list.walk().descendant_index(),
+                            Box::new(|| json!([])) as Box<dyn Fn() -> Value>,
+                        ));
                     }
                 }
             }
@@ -366,26 +348,31 @@ fn validate_matcher_node_list_rec<'b>(
     }
 }
 
-/// Validate a matcher node against the input node.
+/// Validate a non-repeating matcher node against the input node. A matcher node
+/// looks like `id:/pattern/` in the schema. Pass the parent of the matcher
+/// node, and the corresponding input node.
 ///
-/// A matcher node looks like `id:/pattern/` in the schema.
-///
-/// Pass the parent of the matcher node, and the corresponding input node.
+/// This method will use the cursors to walk around the input and schema nodes,
+/// but will not modify them (we will walk back to their original positions).
 pub fn validate_matcher_node<'b>(
-    input_node: &Node<'b>,
-    input_node_descendant_index: usize,
-    schema_nodes: &[Node<'b>],
+    input_cursor: &mut TreeCursor<'b>,
+    schema_cursor: &mut TreeCursor<'b>,
     input_str: &'b str,
     schema_str: &'b str,
     eof: bool,
 ) -> NodeValidationResult {
-    let is_incomplete = !eof && is_last_node(input_str, input_node);
+    let input_node = input_cursor.node();
+    let schema_node = schema_cursor.node();
+
+    let schema_node_children: Vec<Node> = schema_node.children(schema_cursor).collect();
+    let input_node_descendant_index = input_cursor.descendant_index();
+
+    let is_incomplete = !eof && is_last_node(input_str, &input_node);
 
     let mut errors = Vec::new();
     let mut matches = json!({});
 
-    let (code_node, next_node) = match find_matcher_node(schema_nodes, input_node_descendant_index)
-    {
+    let (code_node, next_node) = match find_matcher_node(input_cursor, schema_cursor) {
         Ok((code, next)) => (code, next),
         Err(e) => return (vec![e], matches),
     };
@@ -426,7 +413,7 @@ pub fn validate_matcher_node<'b>(
         }
     };
 
-    let schema_start = schema_nodes[0].byte_range().start;
+    let schema_start = schema_node_children[0].byte_range().start;
     let matcher_start = matcher_node.byte_range().start - schema_start;
     let matcher_end = matcher_node.byte_range().end - schema_start;
 
@@ -515,7 +502,7 @@ pub fn validate_matcher_node<'b>(
     match matcher.match_str(input_to_match) {
         Some(matched_str) => {
             // Validate suffix
-            let schema_end = schema_nodes.last().unwrap().byte_range().end;
+            let schema_end = schema_node_children.last().unwrap().byte_range().end;
 
             let suffix_schema = get_everything_after_special_chars(
                 &schema_str[schema_start + matcher_end..schema_end],
@@ -1421,12 +1408,12 @@ mod tests {
 
     #[test]
     fn test_nested_list_with_mismatched_inner_pattern() {
-        let schema = "- `num1:/\\d/`++\n  - `num2:/\\d/`++";
-        let input = "- 1\n  - 2\n  - bad\n- 3\n  - 4";
+        let schema_str = "- `num1:/\\d/`++\n  - `num2:/\\d/`++";
+        let input_str = "- 1\n  - 2\n  - bad\n- 3\n  - 4";
 
         let mut input_parser = new_markdown_parser();
         let input_tree = input_parser
-            .parse(input, None)
+            .parse(input_str, None)
             .expect("Failed to parse input");
         let input_list = input_tree
             .root_node()
@@ -1435,21 +1422,19 @@ mod tests {
 
         let mut schema_parser = new_markdown_parser();
         let schema_tree = schema_parser
-            .parse(schema, None)
+            .parse(schema_str, None)
             .expect("Failed to parse schema");
-        let schema_list = schema_tree
-            .root_node()
-            .child(0)
-            .expect("Failed to get schema list");
-        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
-        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
 
         let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<tree_sitter::Node> =
-            schema_paragraph.children(&mut schema_cursor).collect();
+        let mut input_cursor = input_list.walk();
 
-        let (errors, matches) =
-            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+        let (errors, matches) = validate_matcher_node_list(
+            &mut input_cursor,
+            &mut schema_cursor,
+            input_str,
+            schema_str,
+            true,
+        );
 
         // Should have 1 error for "bad" not matching the pattern
         assert_eq!(errors.len(), 1, "Expected 1 error but got: {:?}", errors);
@@ -1483,28 +1468,17 @@ mod tests {
         let input_tree = input_parser
             .parse(input, None)
             .expect("Failed to parse input");
-        let input_list = input_tree
-            .root_node()
-            .child(0)
-            .expect("Failed to get input list");
 
         let mut schema_parser = new_markdown_parser();
         let schema_tree = schema_parser
             .parse(schema, None)
             .expect("Failed to parse schema");
-        let schema_list = schema_tree
-            .root_node()
-            .child(0)
-            .expect("Failed to get schema list");
-        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
-        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
 
         let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<tree_sitter::Node> =
-            schema_paragraph.children(&mut schema_cursor).collect();
+        let mut input_cursor = input_tree.walk();
 
         let (errors, matches) =
-            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+            validate_matcher_node_list(&mut input_cursor, &mut schema_cursor, input, schema, true);
 
         assert!(
             errors.is_empty(),
@@ -1524,35 +1498,29 @@ mod tests {
     fn test_depth_limit_enforced_with_error() {
         // Use + (1 plus) to allow max depth of 1 (no nesting allowed)
         // But provide 2 levels of nesting - should error on the second level
-        let schema = "- `num:/\\d/`+";
-        let input = "- 1\n  - 2\n- 3";
+        let schema_str = "- `num:/\\d/`+";
+        let input_str = "- 1\n  - 2\n- 3";
 
         let mut input_parser = new_markdown_parser();
         let input_tree = input_parser
-            .parse(input, None)
+            .parse(input_str, None)
             .expect("Failed to parse input");
-        let input_list = input_tree
-            .root_node()
-            .child(0)
-            .expect("Failed to get input list");
 
         let mut schema_parser = new_markdown_parser();
         let schema_tree = schema_parser
-            .parse(schema, None)
+            .parse(schema_str, None)
             .expect("Failed to parse schema");
-        let schema_list = schema_tree
-            .root_node()
-            .child(0)
-            .expect("Failed to get schema list");
-        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
-        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
 
         let mut schema_cursor = schema_tree.walk();
-        let schema_nodes: Vec<tree_sitter::Node> =
-            schema_paragraph.children(&mut schema_cursor).collect();
+        let mut input_cursor = input_tree.walk();
 
-        let (errors, matches) =
-            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+        let (errors, matches) = validate_matcher_node_list(
+            &mut input_cursor,
+            &mut schema_cursor,
+            input_str,
+            schema_str,
+            true,
+        );
 
         // Should have an error about nesting too deep
         assert_eq!(errors.len(), 1, "Expected 1 error but got: {:?}", errors);

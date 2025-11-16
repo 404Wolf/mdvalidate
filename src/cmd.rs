@@ -332,4 +332,39 @@ This is a test"#;
             "Output JSON should match expected matches"
         );
     }
+
+    #[test]
+    fn test_streaming_with_repeaters() {
+        let schema_str = r#"# Shopping List
+
+- `item:/[A-Z][a-z]+/`++
+    - `note:/.*/`+"#
+            .to_string();
+
+        let input_data = r#"# Shopping List
+
+- Apples
+    - Red and fresh
+    - From the market
+- Bananas
+    - Organic
+- Carrots
+    - For the soup"#;
+
+        // Use a very small buffer size to simulate slow streaming
+        let cursor = Cursor::new(input_data.as_bytes());
+        let reader = LimitedReader::new(cursor, 500);
+
+        let (errors, matches) = get_validator(&schema_str, reader, false);
+
+        assert!(
+            errors.is_empty(),
+            "Expected no errors but found: {:?}",
+            errors
+        );
+
+        println!("Errors: {:?}", errors);
+        println!("Matches: {:?}", matches);
+        panic!("This is a test panic");
+    }
 }
