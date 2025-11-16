@@ -5,7 +5,7 @@ use tree_sitter::Node;
 use crate::mdschema::validator::{
     errors::{Error, SchemaError, SchemaViolationError},
     matcher::{get_everything_after_special_chars, Matcher},
-    utils::{is_last_node, new_markdown_parser, node_to_str},
+    utils::{is_last_node, new_markdown_parser},
 };
 
 pub type NodeValidationResult = (Vec<Error>, Value);
@@ -106,6 +106,27 @@ pub fn validate_matcher_node_list<'b>(
     schema_str: &'b str,
     eof: bool,
 ) -> NodeValidationResult {
+    // entry wrapper starts recursion at depth 1
+    validate_matcher_node_list_rec(
+        input_node,
+        input_node_descendant_index,
+        schema_nodes,
+        input_str,
+        schema_str,
+        eof,
+        1,
+    )
+}
+
+fn validate_matcher_node_list_rec<'b>(
+    input_node: &Node<'b>,
+    input_node_descendant_index: usize,
+    schema_nodes: &[Node<'b>],
+    input_str: &'b str,
+    schema_str: &'b str,
+    eof: bool,
+    current_depth: usize,
+) -> NodeValidationResult {
     let (code_node, next_node) = match find_matcher_node(schema_nodes, input_node_descendant_index)
     {
         Ok((code, next)) => (code, next),
@@ -131,7 +152,7 @@ pub fn validate_matcher_node_list<'b>(
             let matcher_sr = &schema_str[matcher_code_node.byte_range()];
             let matcher = match Matcher::new(
                 matcher_sr,
-                next_node.map(|n| node_to_str(n, schema_str)).as_deref(),
+                next_node.map(|n| &schema_str[n.byte_range()]).as_deref(),
             ) {
                 Ok(m) => m,
                 Err(_) => {
@@ -156,16 +177,16 @@ pub fn validate_matcher_node_list<'b>(
                 );
             }
 
-            'list_level_validation_loop: for child in
+            'list_level_validation_loop: for input_node_list_item in
                 input_node.children(&mut input_node.walk().clone())
             {
                 debug!(
                     "Validating list child node at byte range {:?}",
-                    child.byte_range()
+                    input_node_list_item.byte_range()
                 );
 
-                // Validate the paragraph content (child 1)
-                let paragraph = child.child(1).unwrap();
+                // list_item -> paragraph (child 1)
+                let paragraph = input_node_list_item.child(1).unwrap();
                 let (child_errors, child_matches) = validate_matcher_node(
                     &paragraph,
                     input_node_descendant_index,
@@ -184,7 +205,7 @@ pub fn validate_matcher_node_list<'b>(
                 }
 
                 // Check if this list item has a nested list (child at index 2)
-                if let Some(nested_list) = child.child(2) {
+                if let Some(nested_list) = input_node_list_item.child(2) {
                     if !is_list_node(&nested_list) {
                         continue 'list_level_validation_loop;
                     }
@@ -228,14 +249,29 @@ pub fn validate_matcher_node_list<'b>(
                         .children(&mut nested_cursor)
                         .collect();
 
+                    // Before recursing, check max depth (if specified for this matcher)
+                    if let Some(max_allowed) = matcher.max_depth() {
+                        if current_depth >= max_allowed {
+                            // depth limit reached; report error and skip validating deeper nested lists
+                            errors.push(Error::SchemaViolation(
+                                SchemaViolationError::NodeListTooDeep(
+                                    max_allowed,
+                                    input_node_descendant_index,
+                                ),
+                            ));
+                            continue 'list_level_validation_loop;
+                        }
+                    }
+
                     // Recursively validate the nested list
-                    let (nested_errors, nested_matches) = validate_matcher_node_list(
+                    let (nested_errors, nested_matches) = validate_matcher_node_list_rec(
                         &nested_list,
                         input_node_descendant_index,
                         &nested_schema_nodes,
                         input_str,
                         schema_str,
                         eof,
+                        current_depth + 1,
                     );
 
                     errors.extend(nested_errors);
@@ -297,7 +333,7 @@ pub fn validate_matcher_node<'b>(
 
     let matcher = match Matcher::new(
         matcher_text,
-        next_node.map(|n| node_to_str(n, schema_str)).as_deref(),
+        next_node.map(|n| &schema_str[n.byte_range()]).as_deref(),
     ) {
         Ok(m) => m,
         Err(_) => {
@@ -942,7 +978,7 @@ mod tests {
 
     #[test]
     fn test_nested_lists_both_with_repeaters() {
-        let schema = "- Outer `outer:/[0-9]+/`+\n  - Inner `inner:/[a-z]+/`+";
+        let schema = "- Outer `outer:/[0-9]+/`++\n  - Inner `inner:/[a-z]+/`++";
         let input = "- Outer 1\n  - Inner a\n  - Inner b\n- Outer 2\n  - Inner c\n  - Inner d";
 
         // For this test, we'll parse the outer list only since the helper
@@ -1368,8 +1404,8 @@ mod tests {
     #[test]
     fn test_deeply_nested_three_levels() {
         // This tests that we properly handle recursive nesting
-        // The implementation actually supports arbitrary depth!
-        let schema = "- `l1:/\\d/`++\n  - `l2:/\\d/`++";
+        // Use +++ (3 pluses) to allow 3 levels of depth
+        let schema = "- `l1:/\\d/`+++\n  - `l2:/\\d/`+++";
         let input = "- 1\n  - 2\n    - 3\n- 4\n  - 5";
 
         let mut input_parser = new_markdown_parser();
@@ -1410,6 +1446,58 @@ mod tests {
         let expected = json!({
             "l1": ["1", {"l2": ["2", {"l2": ["3"]}]}, "4", {"l2": ["5"]}]
         });
+        assert_eq!(matches, expected);
+    }
+
+    #[test]
+    fn test_depth_limit_enforced_with_error() {
+        // Use ++ (2 pluses) to allow max depth of 2
+        // But provide 3 levels of nesting - should error on the deepest level
+        let schema = "- `l1:/\\d/`++\n  - `l2:/\\d/`++";
+        let input = "- 1\n  - 2\n    - 3\n- 4\n  - 5";
+
+        let mut input_parser = new_markdown_parser();
+        let input_tree = input_parser
+            .parse(input, None)
+            .expect("Failed to parse input");
+        let input_list = input_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get input list");
+
+        let mut schema_parser = new_markdown_parser();
+        let schema_tree = schema_parser
+            .parse(schema, None)
+            .expect("Failed to parse schema");
+        let schema_list = schema_tree
+            .root_node()
+            .child(0)
+            .expect("Failed to get schema list");
+        let schema_first_item = schema_list.child(0).expect("Failed to get first item");
+        let schema_paragraph = schema_first_item.child(1).expect("Failed to get paragraph");
+
+        let mut schema_cursor = schema_tree.walk();
+        let schema_nodes: Vec<tree_sitter::Node> =
+            schema_paragraph.children(&mut schema_cursor).collect();
+
+        let (errors, matches) =
+            validate_matcher_node_list(&input_list, 0, &schema_nodes, input, schema, true);
+
+        // Should have an error about nesting too deep
+        assert_eq!(errors.len(), 1, "Expected 1 error but got: {:?}", errors);
+
+        match &errors[0] {
+            Error::SchemaViolation(SchemaViolationError::NodeListTooDeep(
+                max_depth,
+                _node_index,
+            )) => {
+                assert_eq!(*max_depth, 2, "Expected max_depth to be 2");
+            }
+            _ => panic!("Expected NodeListTooDeep error but got: {:?}", errors[0]),
+        }
+
+        // Matches should be empty since we hit the depth limit
+        let expected = json!({});
         assert_eq!(matches, expected);
     }
 }

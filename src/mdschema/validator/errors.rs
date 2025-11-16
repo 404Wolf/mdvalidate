@@ -85,6 +85,8 @@ pub enum SchemaViolationError {
     NonRepeatingMatcherInListContext(usize),
     /// Nodes have different numbers of children. Expected number, actual number, parent node index
     ChildrenLengthMismatch(usize, usize, usize),
+    /// Nested list exceeds the maximum allowed depth. Max depth allowed, node index of deepest list
+    NodeListTooDeep(usize, usize),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -163,7 +165,7 @@ pub fn pretty_print_error(
                 let parent = find_node_by_index(tree.root_node(), *parent_index);
                 let parent_range = parent.start_byte()..parent.end_byte();
 
-                Report::build(ReportKind::Error, (filename, parent_range.clone()))
+                let mut report = Report::build(ReportKind::Error, (filename, parent_range.clone()))
                     .with_message("Children length mismatch")
                     .with_label(
                         Label::new((filename, parent_range))
@@ -172,6 +174,43 @@ pub fn pretty_print_error(
                                 expected, actual
                             ))
                             .with_color(Color::Red),
+                    );
+
+                if parent.kind() == "list_item" {
+                    report = report.with_help(
+                        "If you want to allow any number of list items, add a '+' after the matcher \
+                         (e.g., `item:/pattern/`+)",
+                    );
+                }
+
+                report
+                    .finish()
+                    .write((filename, Source::from(source_content)), &mut buffer)
+                    .map_err(|e| e.to_string())?;
+            }
+            SchemaViolationError::NodeListTooDeep(max_depth, node_index) => {
+                let node = find_node_by_index(tree.root_node(), *node_index);
+                let node_range = node.start_byte()..node.end_byte();
+
+                Report::build(ReportKind::Error, (filename, node_range.clone()))
+                    .with_message("Nested list exceeds maximum depth")
+                    .with_label(
+                        Label::new((filename, node_range))
+                            .with_message(format!(
+                                "List nesting exceeds maximum depth of {} level(s)",
+                                max_depth
+                            ))
+                            .with_color(Color::Red),
+                    )
+                    .with_help(
+                        "For schemas like:\n\
+                         - `num1:/\\d/`+\n\
+                         \u{20} - `num2:/\\d/`++\n\
+                         \n\
+                         You may need to adjust the number of '+' signs for the first matcher\n\
+                         to allow for the depth of the following ones. For example, you could\n\
+                         make that `num1:/\\d/`+++ to allow for three levels of nesting (the one
+                         below it, and the two allowed below that).",
                     )
                     .finish()
                     .write((filename, Source::from(source_content)), &mut buffer)

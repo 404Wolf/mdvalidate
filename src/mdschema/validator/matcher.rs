@@ -27,6 +27,8 @@ pub struct Matcher {
     pattern: MatcherType,
     /// Extra flags, which we receive via extra text that corresponds to the matcher
     extras: HashSet<MatcherExtras>,
+    /// Optional maximum recursion depth for nested lists (parsed from +N after the plus)
+    max_depth: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,22 +71,29 @@ impl Matcher {
             }
         };
 
-        let extras = match extras {
+        let (extras_set, max_depth) = match extras {
             Some(text) => Self::extract_matcher_extras(text),
-            None => HashSet::new(),
+            None => (HashSet::new(), None),
         };
 
         Ok(Matcher {
             id,
-            extras,
+            extras: extras_set,
             pattern: matcher,
+            max_depth,
         })
     }
 
     /// Extract any extra flags from the text following the matcher.
-    fn extract_matcher_extras(text: &str) -> HashSet<MatcherExtras> {
+    /// Extract any extra flags and optional max_depth from the text following the matcher.
+    /// Returns (extras_set, optional_max_depth)
+    /// The max_depth is determined by the number of '+' characters (e.g., ++ = depth 2)
+    fn extract_matcher_extras(text: &str) -> (HashSet<MatcherExtras>, Option<usize>) {
         let set_of_chars = text.chars().collect::<HashSet<char>>();
         let mut extras = HashSet::new();
+
+        // Count the number of '+' characters for both repeated flag and max depth
+        let plus_count = text.chars().filter(|&c| c == '+').count();
 
         for char in set_of_chars {
             match char {
@@ -95,7 +104,14 @@ impl Matcher {
             }
         }
 
-        extras
+        // The max depth is the number of plus signs (if any)
+        let max_depth = if plus_count > 0 {
+            Some(plus_count)
+        } else {
+            None
+        };
+
+        (extras, max_depth)
     }
 
     /// Extract the ID and pattern from the regex captures.
@@ -157,6 +173,11 @@ impl Matcher {
 
     pub fn id(&self) -> Option<&String> {
         self.id.as_ref()
+    }
+
+    /// Return optional maximum depth for nested lists
+    pub fn max_depth(&self) -> Option<usize> {
+        self.max_depth
     }
 }
 
