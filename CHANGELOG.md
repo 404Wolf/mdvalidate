@@ -1,6 +1,35 @@
 # Changelog
 
 
+### <!-- 0 -->🚀 Features
+
+- begin work on collecting json (ff7d173…)
+
+- storing by key works (e642601…)
+
+- prepare for output (bb04580…)
+
+- fix output json (0678b9d…)
+
+- get rulers working (59ab56e…)
+
+
+### <!-- 3 -->📚 Documentation
+
+- add documentation for special matcher 'ruler' with examples (a482f10…)
+
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- reset example (b96a4f4…)
+
+- update cargo deps nix hash (a6e6cde…)
+
+- format code (115f75c…)
+
+- Release mdvalidate version 0.1.27 (a802d65…)
+
+
 ### <!-- 1 -->🐛 Bug Fixes
 
 - use hash set (c7c62d3…)
@@ -13,6 +42,10 @@
 - remove check (03789ae…)
 
 - update CHANGELOG.md (ecaa5ce…)
+
+- update CHANGELOG.md (edf83f5…)
+
+- Release mdvalidate version 0.1.26 (bc7760d…)
 
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks
@@ -106,6 +139,18 @@
 - update workflow (81e7efd…)
 
 - Release mdvalidate version 0.1.6 (e534ae4…)
+
+
+### <!-- 0 -->🚀 Features
+
+- basic working rulers (788fe90…)
+
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- handle special 'ruler' case and allow matchers witouth id (521831c…)
+
+- update matcher test to handle backticks and special characters (10939b8…)
 
 
 ### <!-- 7 -->⚙️ Miscellaneous Tasks

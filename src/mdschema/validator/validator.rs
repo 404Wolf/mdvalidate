@@ -1350,4 +1350,30 @@ Content for section 3."#;
             errors
         );
     }
+
+    #[test]
+    fn test_with_rulers() {
+        let schema = "# Title\n\nSome content with a ruler below:\n\n---\n\nMore content.";
+        let input = "# Title\n\nSome content with a ruler below:\n\n---\n\nMore content.";
+
+        let (errors, _) = get_validator(schema, input, true);
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_with_underscore_and_star_and_dash_ruler_in_same_file() {
+        let schema = "# Title\n\nContent above rulers.\n\n***\n\nMore content.\n\n___\n\nEnd content.\n\n---";
+        let input = "# Title\n\nContent above rulers.\n\n***\n\nMore content.\n\n___\n\nEnd content.\n\n---";
+
+        let (errors, _) = get_validator(schema, input, true);
+        assert!(
+            errors.is_empty(),
+            "Expected no validation errors but found {:?}",
+            errors
+        );
+    }
 }
