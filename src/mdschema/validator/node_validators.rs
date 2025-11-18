@@ -1,6 +1,6 @@
 use log::{debug, trace};
 use serde_json::{json, Value};
-use tree_sitter::Node;
+use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
     errors::{Error, SchemaError, SchemaViolationError},
@@ -15,51 +15,20 @@ fn is_list_node(node: &Node) -> bool {
     node.kind() == "tight_list" || node.kind() == "loose_list"
 }
 
-/// Find the matcher code_span node in a list of schema nodes.
-/// Returns the matcher node and the next node after it, if any.
-/// Returns an error if multiple matchers are found.
-fn find_matcher_node<'b>(
-    schema_nodes: &'b [Node<'b>],
-    input_node_descendant_index: usize,
-) -> Result<(Option<&'b Node<'b>>, Option<&'b Node<'b>>), Error> {
-    let mut code_node = None;
-    let mut next_node = None;
-
-    for (i, node) in schema_nodes.iter().enumerate() {
-        if node.kind() == "code_span" {
-            if code_node.is_some() {
-                trace!(
-                    "Multiple matchers found in single node at index {}",
-                    input_node_descendant_index
-                );
-
-                return Err(Error::SchemaViolation(
-                    SchemaViolationError::NodeContentMismatch(
-                        input_node_descendant_index,
-                        "Multiple matchers in single node".into(),
-                    ),
-                ));
-            }
-            code_node = Some(node);
-            next_node = schema_nodes.get(i + 1);
-        }
-    }
-
-    Ok((code_node, next_node))
-}
-
 /// Validate a text node against the schema text node.
 ///
 /// This is a node that is just a simple literal text node. We validate that
 /// the text content is identical.
-pub fn validate_text_node<'b>(
-    input_node: &Node<'b>,
-    input_node_descendant_index: usize,
-    schema_node: &Node<'b>,
-    input_str: &'b str,
-    schema_str: &'b str,
+pub fn validate_text_node(
+    input_cursor: &mut TreeCursor,
+    schema_curosr: &mut TreeCursor,
+    input_str: &str,
+    schema_str: &str,
     eof: bool,
 ) -> NodeValidationResult {
+    let schema_node = schema_curosr.node();
+    let input_node = input_cursor.node();
+
     let mut errors = Vec::new();
 
     let schema_text = &schema_str[schema_node.byte_range()];
@@ -73,20 +42,20 @@ pub fn validate_text_node<'b>(
     if schema_text != input_text {
         trace!(
             "Text content mismatch at node index {}: expected '{}', got '{}'",
-            input_node_descendant_index,
+            input_cursor.descendant_index(),
             schema_text,
             input_text
         );
 
         errors.push(Error::SchemaViolation(
             SchemaViolationError::NodeContentMismatch(
-                input_node_descendant_index,
+                input_cursor.descendant_index(),
                 schema_text.into(),
             ),
         ));
     }
 
-    if !eof && is_last_node(input_str, input_node) {
+    if !eof && is_last_node(input_str, &input_node) {
         debug!("Skipping error reporting, incomplete last node");
         (vec![], json!({}))
     } else {
@@ -592,6 +561,39 @@ pub fn validate_matcher_node<'b>(
     }
 }
 
+/// Find the matcher code_span node in a list of schema nodes.
+/// Returns the matcher node and the next node after it, if any.
+/// Returns an error if multiple matchers are found.
+fn find_matcher_node<'b>(
+    schema_nodes: &'b [Node<'b>],
+    input_node_descendant_index: usize,
+) -> Result<(Option<&'b Node<'b>>, Option<&'b Node<'b>>), Error> {
+    let mut code_node = None;
+    let mut next_node = None;
+
+    for (i, node) in schema_nodes.iter().enumerate() {
+        if node.kind() == "code_span" {
+            if code_node.is_some() {
+                trace!(
+                    "Multiple matchers found in single node at index {}",
+                    input_node_descendant_index
+                );
+
+                return Err(Error::SchemaViolation(
+                    SchemaViolationError::NodeContentMismatch(
+                        input_node_descendant_index,
+                        "Multiple matchers in single node".into(),
+                    ),
+                ));
+            }
+            code_node = Some(node);
+            next_node = schema_nodes.get(i + 1);
+        }
+    }
+
+    Ok((code_node, next_node))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -601,45 +603,34 @@ mod tests {
     /// Helper function to create parsers and nodes for text validation tests
     fn get_text_validator(schema: &str, input: &str, eof: bool) -> (Vec<Error>, Value) {
         let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser
-            .parse(input, None)
-            .expect("Failed to parse input");
-        let input_node = input_tree
-            .root_node()
-            .child(0)
-            .expect("Failed to get input node");
+        let input_tree = input_parser.parse(input, None).unwrap();
+        let input_node = input_tree.root_node().child(0).unwrap();
 
         let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser
-            .parse(schema, None)
-            .expect("Failed to parse schema");
-        let schema_node = schema_tree
-            .root_node()
-            .child(0)
-            .expect("Failed to get schema node");
+        let schema_tree = schema_parser.parse(schema, None).unwrap();
+        let schema_node = schema_tree.root_node().child(0).unwrap();
 
-        validate_text_node(&input_node, 0, &schema_node, input, schema, eof)
+        let mut input_cursor = input_tree.walk();
+        input_cursor.goto_descendant(input_node.id());
+
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_descendant(schema_node.id());
+
+        validate_text_node(&mut input_cursor, &mut schema_cursor, input, schema, eof)
     }
 
     fn get_matcher_validator(schema: &str, input: &str, eof: bool) -> (Vec<Error>, Value) {
         let mut input_parser = new_markdown_parser();
-        let input_tree = input_parser
-            .parse(input, None)
-            .expect("Failed to parse input");
-        let input_node = input_tree
-            .root_node()
-            .child(0)
-            .expect("Failed to get input node");
+        let input_tree = input_parser.parse(input, None).unwrap();
+        let input_node = input_tree.root_node().child(0).unwrap();
 
         let mut schema_parser = new_markdown_parser();
-        let schema_tree = schema_parser
-            .parse(schema, None)
-            .expect("Failed to parse schema");
+        let schema_tree = schema_parser.parse(schema, None).unwrap();
         let mut schema_cursor = schema_tree.walk();
         let schema_nodes: Vec<Node> = schema_tree
             .root_node()
             .child(0)
-            .expect("Failed to get schema root child")
+            .unwrap()
             .children(&mut schema_cursor)
             .collect();
 

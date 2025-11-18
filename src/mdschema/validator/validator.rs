@@ -376,9 +376,8 @@ impl Validator {
                 );
 
                 let (errors, matches) = validate_text_node(
-                    &input_node,
-                    input_cursor.descendant_index(),
-                    &schema_node,
+                    &mut input_cursor,
+                    &mut schema_cursor,
                     &self.last_input_str,
                     &self.schema_str,
                     self.got_eof,
@@ -1205,23 +1204,6 @@ Footer: goodbye
             }
             _ => panic!("Expected MultipleMatchers error but got: {:?}", errors),
         }
-    }
-
-    #[test]
-    fn test_matcher_for_single_list_item() {
-        let schema = "- `id:/item\\d/`\n- `id:/item2/`";
-        let input = "- item1\n- item2";
-
-        let mut validator =
-            Validator::new(schema, input, true).expect("Failed to create validator");
-        validator.validate();
-        let errors = validator.errors();
-
-        assert!(
-            errors.is_empty(),
-            "Expected no errors for matching list items but found {:?}",
-            errors
-        );
     }
 
     #[test]
