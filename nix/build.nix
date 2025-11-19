@@ -5,7 +5,7 @@ rustPlatform.buildRustPackage {
 
   src = ../.;
 
-  cargoHash = "sha256-FlD8Gpk8PzB+7+MqKlnmSDSmzxpvMLcOBbHUgvP1hCc=";
+  cargoHash = "sha256-FlD8Gpk8PzB+7+MqKlnmSDSmjxpvMLcOBbHUgvP1hCc=";
 
   meta = {
     description = "Markdown Schema validator";
