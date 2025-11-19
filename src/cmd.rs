@@ -1,6 +1,6 @@
 use crate::mdschema::validator::{
     errors::{pretty_print_error, ValidationError},
-    node_validators::NodeValidationResult,
+    nodes::NodeValidationResult,
     validator::Validator,
 };
 use colored::Colorize;
@@ -55,13 +55,13 @@ pub fn process<R: Read>(
         validator.validate();
 
         // Check for fast-fail AFTER validation
-        if fast_fail && !validator.errors().is_empty() {
+        if fast_fail && validator.errors_so_far().count() > 0 {
             break;
         }
     }
 
-    let errors = validator.errors();
-    let matches = validator.matches();
+    let errors: Vec<_> = validator.errors_so_far().cloned().collect();
+    let matches = validator.matches_so_far().clone();
     let input_tree = validator.input_tree;
 
     Ok(((errors, matches), input_tree, input_str))

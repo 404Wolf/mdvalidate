@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use line_col::LineColLookup;
 use log::{debug, trace};
 use serde_json::{json, Value};
@@ -7,7 +5,8 @@ use tree_sitter::Tree;
 
 use crate::mdschema::validator::{
     errors::{Error, ParserError, SchemaError, SchemaViolationError},
-    node_validators::{validate_matcher_node, validate_matcher_node_list, validate_text_node},
+    nodes::NodeValidator,
+    state::ValidatorState,
     utils::new_markdown_parser,
 };
 
@@ -22,18 +21,7 @@ pub struct Validator {
     last_schema_descendant_index: usize,
     /// The last descendant index we validated up to in the input tree. In preorder.
     last_input_descendant_index: usize,
-    /// The full input string as last read. Not used internally but useful for
-    /// debugging or reporting.
-    last_input_str: String,
-    /// The full schema string. Does not change.
-    schema_str: String,
-    /// Whether we have received the end of the input. This means that last
-    /// input tree descendant index is at the end of the input.
-    got_eof: bool,
-    /// Map of matches found so far.
-    matches_so_far: Value,
-    /// Any errors encountered during validation.
-    errors_so_far: HashSet<Error>,
+    state: ValidatorState,
 }
 
 impl Validator {
@@ -70,29 +58,25 @@ impl Validator {
             }
         };
 
+        let mut initial_state =
+            ValidatorState::new(schema_str.to_string(), input_str.to_string(), eof);
+        initial_state.set_got_eof(eof);
+
         Some(Validator {
             input_tree,
             schema_tree,
             last_input_descendant_index: 0,
             last_schema_descendant_index: 0,
-            // We revalidate some nodes multiple times if the cursor leaves off,
-            // so we use a set to automatically weed out duplicates
-            errors_so_far: HashSet::new(),
-            last_input_str: input_str.to_string(),
-            schema_str: schema_str.to_string(),
-            got_eof: eof,
-            matches_so_far: json!({}),
+            state: initial_state,
         })
     }
 
-    /// Get all the errors that we have encountered
-    pub fn errors(&self) -> Vec<Error> {
-        self.errors_so_far.iter().cloned().collect()
+    pub fn errors_so_far(&self) -> impl Iterator<Item = &Error> + std::fmt::Debug {
+        self.state.errors_so_far()
     }
 
-    /// Get all the matches that we have encountered
-    pub fn matches(&self) -> Value {
-        self.matches_so_far.clone()
+    pub fn matches_so_far(&self) -> &Value {
+        self.state.matches_so_far()
     }
 
     /// Read new input. Updates the input tree with a new input tree for the full new input.
@@ -100,25 +84,25 @@ impl Validator {
     /// Does not update the schema tree or change the descendant indices. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
-    pub fn read_input(&mut self, input: &str, eof: bool) -> Result<(), Error> {
+    pub fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), Error> {
         debug!(
             "Reading new input: length={}, eof={}, current_index={}",
             input.len(),
-            eof,
+            got_eof,
             self.last_input_descendant_index
         );
 
         // Update internal state of the last input string
-        self.last_input_str = input.to_string();
+        self.state.set_last_input_str(input.to_string());
 
         // If we already got EOF, do not accept more input
-        if self.got_eof {
+        if self.state.got_eof() {
             return Err(Error::ParserError(ParserError::ReadAfterGotEOF));
         }
 
-        self.got_eof = eof;
+        self.state.set_got_eof(got_eof);
 
-        if eof {
+        if got_eof {
             // After we got EOF, we want to validate from the parent of the latest offsets and down
             let input_tree_clone = self.input_tree.clone();
             let mut input_cursor = input_tree_clone.walk();
@@ -277,9 +261,10 @@ impl Validator {
             {
                 trace!("Schema node has multiple matcher children, reporting error");
 
-                self.errors_so_far.insert(Error::SchemaError(
+                self.state.add_new_error(Error::SchemaError(
                     SchemaError::MultipleMatchersInNodeChildren(schema_children_code_node_count),
                 ));
+
                 continue;
             }
 
@@ -300,68 +285,31 @@ impl Validator {
                     schema_cursor.descendant_index()
                 );
 
-                // Collect schema node children for validation
-                let schema_children: Vec<_> =
-                    schema_node.children(&mut schema_cursor.clone()).collect();
                 schema_cursor.goto_parent(); // Reset cursor after children iteration
 
-                // Get the actual text node to validate
-                let text_node_to_validate = if input_node.kind() == "text" {
-                    input_node
-                } else {
-                    input_node.child(0).unwrap()
-                };
-
                 // Validate the input text against the matchers in the schema
-                let (errors, matches) = validate_matcher_node(
-                    &text_node_to_validate,
-                    input_cursor.descendant_index(),
-                    &schema_children,
-                    &self.last_input_str,
-                    &self.schema_str,
-                    self.got_eof,
-                );
-                self.errors_so_far.extend(errors);
-                self.matches_so_far
-                    .as_object_mut()
-                    .unwrap() // Safe unwrap since matches is always an object
-                    .extend(matches.as_object().unwrap().clone());
+                let node_validator = NodeValidator::new(&self.state);
+                let (errors, matches) =
+                    node_validator.validate_matcher_node(&mut input_cursor, &mut schema_cursor);
+                for error in errors {
+                    self.state.add_new_error(error);
+                }
+                self.state.add_new_matches(matches);
 
                 continue;
             } else if is_schema_specified_list_node {
-                // Get the first list item, then get its children excluding the list marker
-                let first_list_item = schema_node.child(0).unwrap();
+                let node_validator = NodeValidator::new(&self.state);
+                let (errors, matches) = node_validator
+                    .validate_matcher_node_list(&mut input_cursor, &mut schema_cursor);
 
-                // Get the paragraph child of the list item (which contains the actual content)
-                let first_list_item_paragraph = first_list_item
-                    .children(&mut schema_cursor.clone())
-                    .skip(1) // Skip the list_marker_minus node
-                    .next()
-                    .unwrap(); // Get the paragraph node
-
-                // Now get the children of the paragraph (text + code nodes)
-                let schema_list_item_children: Vec<_> = first_list_item_paragraph
-                    .children(&mut schema_cursor.clone())
-                    .collect();
-
-                let (errors, matches) = validate_matcher_node_list(
-                    &input_node,
-                    input_cursor.descendant_index(),
-                    &schema_list_item_children,
-                    &self.last_input_str,
-                    &self.schema_str,
-                    self.got_eof,
-                );
-
-                self.errors_so_far.extend(errors);
+                for error in errors {
+                    self.state.add_new_error(error);
+                }
 
                 // For list matchers, replace the entire array since validate_matcher_node_list
                 // revalidates all items and returns the complete array
                 for (key, new_value) in matches.as_object().unwrap() {
-                    self.matches_so_far
-                        .as_object_mut()
-                        .unwrap()
-                        .insert(key.clone(), new_value.clone());
+                    self.state.add_new_match(key.clone(), new_value.clone());
                 }
 
                 continue;
@@ -375,20 +323,16 @@ impl Validator {
                     schema_cursor.descendant_index()
                 );
 
-                let (errors, matches) = validate_text_node(
-                    &mut input_cursor,
-                    &mut schema_cursor,
-                    &self.last_input_str,
-                    &self.schema_str,
-                    self.got_eof,
-                );
+                let node_validator = NodeValidator::new(&self.state);
+                let (errors, matches) =
+                    node_validator.validate_text_node(&mut input_cursor, &mut schema_cursor);
 
-                self.errors_so_far.extend(errors);
-                self.matches_so_far
-                    .as_object_mut()
-                    .unwrap() // Safe unwrap since matches is always an object
-                    .extend(matches.as_object().unwrap().clone());
-
+                for error in errors {
+                    self.state.add_new_error(error);
+                }
+                for (key, value) in matches.as_object().unwrap() {
+                    self.state.add_new_match(key.clone(), value.clone());
+                }
                 continue;
             }
 
@@ -412,7 +356,7 @@ impl Validator {
                     debug!(
                         "Skipping children length mismatch check for schema-specified list node"
                     );
-                } else if self.got_eof {
+                } else if self.state.got_eof() {
                     debug!(
                         "Children length mismatch at input_index={}, schema_index={}: input_child_count={}, schema_child_count={}",
                         input_cursor.descendant_index(),
@@ -421,7 +365,7 @@ impl Validator {
                         schema_node.child_count()
                     );
 
-                    self.errors_so_far.insert(Error::SchemaViolation(
+                    self.state.add_new_error(Error::SchemaViolation(
                         SchemaViolationError::ChildrenLengthMismatch(
                             input_node.child_count(),
                             schema_node.child_count(),
@@ -483,7 +427,7 @@ impl Validator {
         }
 
         // Go back to parents if we have not gotten EOF yet
-        if !self.got_eof {
+        if !self.state.got_eof() {
             input_cursor.goto_parent();
             schema_cursor.goto_parent();
         }
@@ -491,7 +435,7 @@ impl Validator {
         // Print errors so far and node indexes so far
         debug!(
             "Validation complete. Total errors so far: {}. Current input_index={}, schema_index={}",
-            self.errors_so_far.len(),
+            self.state.errors_so_far().count(),
             input_cursor.descendant_index(),
             schema_cursor.descendant_index()
         );
@@ -520,7 +464,10 @@ mod tests {
     fn do_validate(schema: &str, input: &str, eof: bool) -> (Vec<Error>, Value) {
         let mut validator = Validator::new(schema, input, eof).expect("Failed to create validator");
         validator.validate();
-        (validator.errors(), validator.matches())
+        (
+            validator.errors_so_far().cloned().collect(),
+            validator.state.matches_so_far().clone(),
+        )
     }
 
     /// Helper function to create a validator for incremental testing
@@ -534,20 +481,20 @@ mod tests {
         // Check that read_input updates the last_input_str correctly
         let mut validator = get_validator_for_incremental("# Schema", "Initial input", false);
 
-        assert_eq!(validator.last_input_str, "Initial input");
+        assert_eq!(validator.state.last_input_str(), "Initial input");
 
         validator
             .read_input("Updated input", false)
             .expect("Failed to read input");
 
-        assert_eq!(validator.last_input_str, "Updated input");
+        assert_eq!(validator.state.last_input_str(), "Updated input");
 
         // Check that it updates the tree correctly
         assert_eq!(
             validator
                 .input_tree
                 .root_node()
-                .utf8_text(&validator.last_input_str.as_bytes())
+                .utf8_text(&validator.state.last_input_str().as_bytes())
                 .expect("Failed to get input text"),
             "Updated input"
         );
@@ -582,12 +529,8 @@ mod tests {
 
         // First validate with empty input
         validator.validate();
-        let errors = validator.errors();
-        eprintln!(
-            "Errors after first validate (should be empty): {:?}",
-            errors
-        );
-        assert!(errors.is_empty());
+        let errors = validator.errors_so_far();
+        assert_eq!(errors.count(), 0,);
 
         // Now read more input to complete it
         validator
@@ -597,15 +540,8 @@ mod tests {
         // Validate again
         validator.validate();
 
-        let report = validator.errors();
-        eprintln!(
-            "Errors after second validate (should have errors): {:?}",
-            report
-        );
-        assert!(
-            !report.is_empty(),
-            "Expected validation errors, but found none"
-        );
+        let errors = validator.errors_so_far();
+        assert_eq!(errors.count(), 0,);
     }
 
     #[test]
@@ -617,8 +553,8 @@ mod tests {
 
         // First validate with incomplete input
         validator.validate();
-        let report = validator.errors();
-        assert!(report.is_empty());
+        let errors = validator.errors_so_far();
+        assert_eq!(errors.count(), 0);
 
         // Now read more input to complete it
         validator
@@ -628,12 +564,8 @@ mod tests {
         // Validate again
         validator.validate();
 
-        let errors = validator.errors();
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors, but found {:?}",
-            errors
-        );
+        let errors = validator.errors_so_far();
+        assert_eq!(errors.count(), 0);
     }
 
     #[test]
@@ -989,7 +921,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let mut validator = get_validator_for_incremental(schema, initial_input, false);
 
         validator.validate();
-        assert!(validator.errors().is_empty());
+        assert!(validator.errors_so_far().count() == 0);
 
         // Complete the input
         validator
@@ -997,7 +929,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
             .expect("Failed to read input");
 
         validator.validate();
-        let errors = validator.errors();
+        let errors: Vec<_> = validator.errors_so_far().collect();
         assert!(
             errors.is_empty(),
             "Expected no validation errors but found {:?}",
@@ -1012,22 +944,23 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let mut validator =
             Validator::new(schema, "# ", false).expect("Failed to create validator");
         validator.validate();
-        assert!(validator.errors().is_empty());
+        assert!(validator.errors_so_far().count() == 0);
 
         validator
             .read_input("# Title\n", false)
             .expect("Failed to read");
         validator.validate();
-        assert!(validator.errors().is_empty());
+        assert!(validator.errors_so_far().count() == 0);
 
         validator
             .read_input("# Title\n\nParagraph text\n", true)
             .expect("Failed to read");
         validator.validate();
+        let errors: Vec<_> = validator.errors_so_far().collect();
         assert!(
-            validator.errors().is_empty(),
+            errors.is_empty(),
             "Expected no errors but found {:?}",
-            validator.errors()
+            errors
         );
     }
 
@@ -1138,23 +1071,23 @@ Footer: `footer:/[a-z]+/`
 
         let input = r#"# Document Title
 
-This is a paragraph with some content.
+            This is a paragraph with some content.
 
-- First item is literal
-- Second item ends with Alice
-- Third item is just literal
-- Fourth item has 22 in it
-    - Fourth item has 22 in it
+            - First item is literal
+            - Second item ends with Alice
+            - Third item is just literal
+            - Fourth item has 22 in it
+                - Fourth item has 22 in it
 
-Footer: goodbye
-"#;
+            Footer: goodbye
+            "#;
 
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
 
         validator.validate();
 
-        let errors = validator.errors();
+        let errors: Vec<_> = validator.errors_so_far().collect();
         match &errors[0] {
             Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(
                 expected,
@@ -1177,13 +1110,13 @@ Footer: goodbye
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
         validator.validate();
-        assert_eq!(validator.errors().len(), 0);
+        assert_eq!(validator.errors_so_far().count(), 0);
 
         let input2 = "fhuaeifhwiuehfu";
         let mut validator =
             Validator::new(schema, input2, true).expect("Failed to create validator");
         validator.validate();
-        assert_eq!(validator.errors().len(), 1);
+        assert_eq!(validator.errors_so_far().count(), 1);
     }
 
     #[test]
@@ -1195,9 +1128,9 @@ Footer: goodbye
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
         validator.validate();
-        let errors = validator.errors();
 
-        match errors.first() {
+        let mut errors = validator.errors_so_far();
+        match errors.next() {
             Some(Error::SchemaError(SchemaError::MultipleMatchersInNodeChildren(count))) => {
                 println!("Got expected MultipleMatchers error with count: {}", count);
                 assert_eq!(*count, 2, "Expected 2 matchers");
@@ -1214,9 +1147,9 @@ Footer: goodbye
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
         validator.validate();
-        let errors = validator.errors();
+        let mut errors = validator.errors_so_far();
 
-        match errors.first() {
+        match errors.next() {
             Some(Error::SchemaViolation(err)) => {
                 println!("Got expected SchemaViolation error: {:?}", err);
             }
@@ -1232,9 +1165,9 @@ Footer: goodbye
         let mut validator =
             Validator::new(schema, input, true).expect("Failed to create validator");
         validator.validate();
-        let errors = validator.errors();
+        let mut errors = validator.errors_so_far();
 
-        match errors.first() {
+        match errors.next() {
             Some(Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(
                 _,
                 expected,
@@ -1329,12 +1262,8 @@ Content for section 3."#;
             }
         }
 
-        let errors = validator.errors();
-        assert!(
-            errors.is_empty(),
-            "Expected no validation errors for matching content but found {:?}",
-            errors
-        );
+        let errors = validator.errors_so_far();
+        assert_eq!(errors.count(), 0,);
     }
 
     #[test]
