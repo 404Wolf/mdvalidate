@@ -1,10 +1,10 @@
 use line_col::LineColLookup;
-use log::{debug, trace};
-use serde_json::{json, Value};
+use log::debug;
+use serde_json::Value;
 use tree_sitter::Tree;
 
 use crate::mdschema::validator::{
-    errors::{Error, ParserError, SchemaError, SchemaViolationError},
+    errors::{Error, ParserError},
     nodes::NodeValidator,
     state::ValidatorState,
     utils::new_markdown_parser,
@@ -85,13 +85,6 @@ impl Validator {
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
     pub fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), Error> {
-        debug!(
-            "Reading new input: length={}, eof={}, current_index={}",
-            input.len(),
-            got_eof,
-            self.last_input_descendant_index
-        );
-
         // Update internal state of the last input string
         self.state.set_last_input_str(input.to_string());
 
@@ -122,17 +115,8 @@ impl Validator {
 
         // Only parse if there's actually new content
         if new_len <= old_len {
-            debug!(
-                "No new content to parse (new_len={}, old_len={})",
-                new_len, old_len
-            );
             return Ok(());
         }
-
-        debug!(
-            "Parsing incrementally: old_len={}, new_len={}",
-            old_len, new_len
-        );
 
         // Parse incrementally, providing the edit information
         let edit = tree_sitter::InputEdit {
@@ -160,26 +144,7 @@ impl Validator {
     }
 
     /// Validates the input markdown against the schema by traversing both trees
-    /// in parallel to the ends.
-    ///
-    /// This method performs a breadth-first traversal of both the input and
-    /// schema trees simultaneously, comparing nodes at each level. It uses a
-    /// work queue of (input_index, schema_index) pairs to track which nodes
-    /// need validation. For each pair:
-    ///
-    /// 1. **Text nodes** (base case): If schema node is text, directly compare it with input using `validate_text_node`
-    /// 2. **Parent nodes**: Collect all child pairs and add them to the validation queue
-    /// 3. **Mismatch detection**: Reports errors when child counts differ (only if EOF received)
-    /// 4. **Progressive validation**: Starts from the last validated position (`last_input_descendant_index`,
-    ///    `last_schema_descendant_index`) and continues until all nodes are processed
-    ///
-    /// The method mutates `self.errors` to accumulate validation errors and updates the descendant
-    /// indices to track validation progress, enabling incremental validation on subsequent calls.
-    ///
-    /// - Uses tree cursors positioned at the last validated descendant indices
-    /// - Maintains a stack of (input_idx, schema_idx) pairs representing nodes to validate
-    /// - When child counts mismatch, only reports error if `got_eof` is true (allowing partial validation)
-    /// - Updates `last_input_descendant_index` and `last_schema_descendant_index` after completion
+    /// in parallel to the ends, starting from where we last left off.
     pub fn validate(&mut self) {
         let mut input_cursor = self.input_tree.walk();
         input_cursor.goto_descendant(self.last_input_descendant_index);
@@ -197,6 +162,10 @@ impl Validator {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
+    use crate::mdschema::validator::errors::{SchemaError, SchemaViolationError};
+
     use super::*;
 
     /// Helper function to create a validator and run validation, returning errors

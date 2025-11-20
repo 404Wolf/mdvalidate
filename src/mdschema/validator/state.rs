@@ -61,17 +61,6 @@ impl ValidatorState {
         }
     }
 
-    pub fn add_new_matches(&mut self, new_matches: Value) {
-        // Merge new_matches into matches_so_far
-        if let (Value::Object(ref mut existing_map), Value::Object(new_map)) =
-            (&mut self.matches_so_far, new_matches)
-        {
-            for (key, value) in new_map {
-                existing_map.insert(key, value);
-            }
-        }
-    }
-
     pub fn errors_so_far(&self) -> impl Iterator<Item = &Error> + std::fmt::Debug {
         self.errors_so_far.iter()
     }
@@ -80,9 +69,7 @@ impl ValidatorState {
         self.errors_so_far.insert(new_error);
     }
 
-    pub fn add_new_errors(&mut self, new_errors: HashSet<Error>) {
-        for error in new_errors {
-            self.errors_so_far.insert(error);
-        }
+    pub fn add_new_errors(&mut self, new_errors: impl IntoIterator<Item = Error>) {
+        self.errors_so_far.extend(new_errors);
     }
 }
