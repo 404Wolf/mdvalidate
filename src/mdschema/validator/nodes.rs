@@ -64,39 +64,41 @@ impl<'a> NodeValidator<'a> {
             && is_last_node(self.state.last_input_str(), &self.input_cursor.node())
     }
 
-    /// Whether the current schema node is a single list node and the input node is multiple list items.
+    /// Whether both the schema and input node are lists nodes, but the schema node has only one child while the input node has multiple children.
     fn is_schema_specified_list_node(&self) -> bool {
         self.is_list_node(&self.schema_cursor.node())
+            && self.is_list_node(&self.input_cursor.node())
             && self.schema_cursor.node().child_count() == 1
             && self.input_cursor.node().child_count() > 1
     }
 
+    /// Validate the next pair of nodes in our stack.
+    ///
+    /// Returns whether there were more pairs to validate.
     fn validate_node_pair(&mut self) -> bool {
         let (input_node, schema_node) = match self.pairs_to_validate.pop() {
             Some(pair) => pair,
             None => return false,
         };
 
-        let is_schema_specified_list_node = self.is_schema_specified_list_node();
-
         self.input_cursor.goto_descendant(input_node);
         self.schema_cursor.goto_descendant(schema_node);
 
         let schema_children_code_node_count =
-            Self::children_code_node_count(&self.schema_cursor.node(), &mut self.schema_cursor);
+            children_code_node_count(&self.schema_cursor.node(), &mut self.schema_cursor);
 
         let schema_node_first_list_item_code_node_count = {
             self.schema_cursor
                 .node()
                 .child(0)
                 .map(|first_child| {
-                    Self::children_code_node_count(&first_child, &mut self.schema_cursor.clone())
+                    children_code_node_count(&first_child, &mut self.schema_cursor.clone())
                 })
                 .unwrap_or(0)
         };
 
         if schema_children_code_node_count > 1
-            || (self.schema_cursor.node().kind() == "tight_list"
+            || (self.is_list_node(&self.schema_cursor.node())
                 && schema_node_first_list_item_code_node_count > 0)
         {
             self.state.add_new_error(Error::SchemaError(
@@ -116,20 +118,20 @@ impl<'a> NodeValidator<'a> {
                     .unwrap_or(false));
 
         if schema_children_code_node_count == 1 && input_is_text_only {
-            self.schema_cursor.goto_parent();
-
             // Save cursor positions
             let saved_input_idx = self.input_cursor.descendant_index();
             let saved_schema_idx = self.schema_cursor.descendant_index();
 
-            self.validate_matcher_vs_text();
+            let (errors, matches) = self.validate_matcher_vs_text();
+            self.state.add_new_errors(errors);
+            self.state.join_new_matches(matches);
 
             // Restore cursor positions
             self.input_cursor.goto_descendant(saved_input_idx);
             self.schema_cursor.goto_descendant(saved_schema_idx);
 
             return true;
-        } else if is_schema_specified_list_node {
+        } else if self.is_schema_specified_list_node() {
             self.validate_matcher_vs_list();
 
             return true;
@@ -140,7 +142,7 @@ impl<'a> NodeValidator<'a> {
         }
 
         if self.input_cursor.node().child_count() != self.schema_cursor.node().child_count() {
-            if is_schema_specified_list_node {
+            if self.is_schema_specified_list_node() {
             } else if self.state.got_eof() {
                 self.state.add_new_error(Error::SchemaViolation(
                     SchemaViolationError::ChildrenLengthMismatch(
@@ -197,8 +199,18 @@ impl<'a> NodeValidator<'a> {
     }
 
     fn validate_matcher_vs_list(&mut self) {
-        assert!(self.is_list_node(&self.input_cursor.node()));
-        assert!(self.is_list_node(&self.schema_cursor.node()));
+        assert!(
+            self.is_list_node(&self.input_cursor.node()),
+            "Input node is not a list, got {}",
+            self.input_cursor.node().kind()
+        );
+        assert!(
+            self.is_list_node(&self.schema_cursor.node()),
+            "Schema node is not a list, got {}",
+            self.schema_cursor.node().kind()
+        );
+
+        let input_list_node = self.input_cursor.node();
 
         self.schema_cursor.goto_first_child();
         self.schema_cursor.goto_first_child();
@@ -216,21 +228,51 @@ impl<'a> NodeValidator<'a> {
         self.input_cursor.goto_next_sibling();
         assert_eq!(self.input_cursor.node().kind(), "paragraph");
 
-        loop {
-            self.validate_matcher_vs_text();
+        let mut match_arr = Value::Array(Vec::new());
 
-            if !self.input_cursor.goto_next_sibling() || !self.input_cursor.goto_next_sibling() {
-                break;
+        for child in input_list_node.children(&mut self.input_cursor.clone()) {
+            // Move cursor to the current child
+            self.input_cursor.reset(child);
+            self.input_cursor.goto_first_child();
+            self.input_cursor.goto_next_sibling();
+            assert_eq!(self.input_cursor.node().kind(), "paragraph");
+
+            let (errors, matches) = self.validate_matcher_vs_text();
+
+            self.state.add_new_errors(errors);
+
+            // Each match is under the same keys, so we need to aggregate them into arrays
+            for (_, value) in matches.as_object().unwrap() {
+                match_arr.as_array_mut().unwrap().push(json!(value));
             }
+        }
+
+        // We have to create a matcher to get its id
+        let matcher = Matcher::new(
+            &self.state.schema_str()[self.schema_cursor.node().child(0).unwrap().byte_range()],
+            None,
+        )
+        .unwrap(); // TODO: don't unwrap
+
+        match matcher.id() {
+            Some(id) => {
+                self.state.add_new_match(id.clone(), match_arr);
+                return;
+            }
+            None => {}
         }
     }
 
-    fn validate_matcher_vs_text(&mut self) {
+    fn validate_matcher_vs_text(&mut self) -> (Vec<Error>, Value) {
+        let mut errors = Vec::new();
+        let mut matches = json!({});
+
         if self.is_list_node(&self.input_cursor.node())
             && self.is_list_node(&self.schema_cursor.node())
         {
             // If the input node is a list, delegate to validate_matcher_node_list
-            return self.validate_matcher_vs_list();
+            self.validate_matcher_vs_list();
+            return (errors, matches);
         }
 
         let schema_nodes = self
@@ -245,17 +287,17 @@ impl<'a> NodeValidator<'a> {
             match Self::find_matcher_node(&schema_nodes, input_node_descendant_index) {
                 Ok((code, next)) => (code, next),
                 Err(e) => {
-                    self.state.add_new_error(e.clone());
-                    return;
+                    errors.push(e.clone());
+                    return (errors, matches);
                 }
             };
 
         let matcher_node = match code_node {
             None => {
-                self.state.add_new_error(Error::SchemaError(
+                errors.push(Error::SchemaError(
                     SchemaError::NoMatcherInListNodeChildren(input_node_descendant_index),
                 ));
-                return;
+                return (errors, matches);
             }
             Some(node) => node,
         };
@@ -270,14 +312,14 @@ impl<'a> NodeValidator<'a> {
         ) {
             Ok(m) => m,
             Err(_) => {
-                self.state.add_new_errors(vec![Error::SchemaViolation(
+                errors.push(Error::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch(
                         input_node_descendant_index,
                         matcher_text.into(),
                     ),
-                )]);
+                ));
 
-                return;
+                return (errors, matches);
             }
         };
 
@@ -299,30 +341,30 @@ impl<'a> NodeValidator<'a> {
 
             // Do the actual prefix comparison
             if prefix_schema != prefix_input {
-                self.state.add_new_error(Error::SchemaViolation(
+                errors.push(Error::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch(
                         input_node_descendant_index,
                         prefix_schema.into(),
                     ),
                 ));
 
-                return;
+                return (errors, matches);
             }
         } else if matcher_start > 0 && !self.is_incomplete() {
             // Input is too short to contain the required prefix, and we've reached EOF
             // so this is a genuine error (not just incomplete input)
-            self.state.add_new_error(Error::SchemaViolation(
+            errors.push(Error::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch(
                     input_node_descendant_index,
                     prefix_schema.into(),
                 ),
             ));
-            return;
+            return (errors, matches);
         }
 
         // Skip matcher and suffix validation if node is incomplete
         if self.is_incomplete() {
-            return;
+            return (errors, matches);
         }
 
         let input_start = self.input_cursor.node().byte_range().start + matcher_start;
@@ -331,17 +373,17 @@ impl<'a> NodeValidator<'a> {
         // If the matcher is for a ruler, we should expect the entire input node to be a ruler
         if matcher.is_ruler() {
             if self.input_cursor.node().kind() != "thematic_break" {
-                self.state.add_new_error(Error::SchemaViolation(
+                errors.push(Error::SchemaViolation(
                     SchemaViolationError::NodeTypeMismatch(
                         input_node_descendant_index,
                         input_node_descendant_index, // should be the same as the schema's.
                                                      // TODO: is this really true though?
                     ),
                 ));
-                return;
+                return (errors, matches);
             } else {
                 // It's a ruler, no further validation needed
-                return;
+                return (errors, matches);
             }
         }
 
@@ -360,7 +402,7 @@ impl<'a> NodeValidator<'a> {
                 // Ensure suffix_start doesn't exceed input_end
                 if suffix_start > input_end {
                     // Out of bounds
-                    self.state.add_new_error(Error::SchemaViolation(
+                    errors.push(Error::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch(
                             input_node_descendant_index,
                             suffix_schema.into(),
@@ -370,7 +412,7 @@ impl<'a> NodeValidator<'a> {
                     let suffix_input = &self.state.last_input_str()[suffix_start..input_end];
 
                     if suffix_schema != suffix_input {
-                        self.state.add_new_error(Error::SchemaViolation(
+                        errors.push(Error::SchemaViolation(
                             SchemaViolationError::NodeContentMismatch(
                                 input_node_descendant_index,
                                 suffix_schema.into(),
@@ -381,13 +423,13 @@ impl<'a> NodeValidator<'a> {
                 // Good match! Add the matched node to the matches (if it has an id)
                 match matcher.id() {
                     Some(id) => {
-                        self.state.add_new_match(id.to_string(), json!(matched_str));
+                        matches[id] = json!(matched_str);
                     }
                     None => {}
                 }
             }
             None => {
-                self.state.add_new_error(Error::SchemaViolation(
+                errors.push(Error::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch(
                         input_node_descendant_index,
                         matcher_text.into(),
@@ -403,6 +445,8 @@ impl<'a> NodeValidator<'a> {
             // If the input node is a list, delegate to validate_matcher_node_list
             self.validate_matcher_vs_list();
         }
+
+        (errors, matches)
     }
 
     /// Find the matcher code_span node in a list of schema nodes.
@@ -433,16 +477,6 @@ impl<'a> NodeValidator<'a> {
         Ok((code_node, next_node))
     }
 
-    /// Count the number of nodes that are code nodes.
-    fn children_code_node_count(
-        node: &tree_sitter::Node,
-        cursor: &mut tree_sitter::TreeCursor,
-    ) -> usize {
-        node.children(&mut cursor.clone())
-            .filter(|child| child.kind() == "code_span")
-            .count()
-    }
-
     /// Check if a node is a list (tight_list or loose_list).
     fn is_list_node(&self, node: &Node) -> bool {
         match node.kind() {
@@ -450,6 +484,16 @@ impl<'a> NodeValidator<'a> {
             _ => false,
         }
     }
+}
+
+/// Count the number of nodes that are code nodes under some node.
+fn children_code_node_count(
+    node: &tree_sitter::Node,
+    cursor: &mut tree_sitter::TreeCursor,
+) -> usize {
+    node.children(&mut cursor.clone())
+        .filter(|child| child.kind() == "code_span")
+        .count()
 }
 
 #[cfg(test)]
@@ -472,7 +516,11 @@ mod tests {
             node_validator.validate();
         }
 
-        let errors = state.errors_so_far().cloned().collect::<Vec<Error>>();
+        let errors = state
+            .errors_so_far()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<Error>>();
         let matches = state.matches_so_far().clone();
 
         (matches, errors)

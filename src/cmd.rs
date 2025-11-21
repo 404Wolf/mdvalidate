@@ -17,12 +17,9 @@ pub fn process<R: Read>(
 ) -> Result<(NodeValidationResult, Tree, String), ValidationError> {
     let buffer_size = get_buffer_size();
 
-    debug!("Starting validation");
-
     let mut input_str = String::new();
     let mut buffer = vec![0; buffer_size];
 
-    debug!("Creating validator with buffer size: {}", buffer_size);
     let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
         .ok_or(ValidationError::ValidatorCreationFailed)?;
 
@@ -30,14 +27,11 @@ pub fn process<R: Read>(
 
     loop {
         iteration_count += 1;
-        trace!("Reading iteration #{}", iteration_count);
 
         let bytes_read = input.read(&mut buffer)?;
 
         // If we're done reading, mark EOF
         if bytes_read == 0 {
-            debug!("Reached EOF, processing final input");
-
             if let Err(e) = validator.read_input(&input_str, true) {
                 return Err(ValidationError::ReadInputFailed(e));
             }

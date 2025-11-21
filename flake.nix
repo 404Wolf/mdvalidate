@@ -24,6 +24,7 @@
           programs.nixfmt.enable = true;
           programs.yamlfmt.enable = true;
           programs.typstfmt.enable = true;
+          programs.black.enable = true;
           programs.toml-sort.enable = true;
         };
       in
@@ -49,6 +50,7 @@
               fira-mono
               git-cliff
               cargo-release
+              python312
             ]
           );
           shellHook = ''

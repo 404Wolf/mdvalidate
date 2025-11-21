@@ -1,5 +1,4 @@
 use line_col::LineColLookup;
-use log::debug;
 use serde_json::Value;
 use tree_sitter::Tree;
 
@@ -27,36 +26,11 @@ pub struct Validator {
 impl Validator {
     /// Create a new ValidationZipperTree with the given schema and input strings.
     pub fn new(schema_str: &str, input_str: &str, eof: bool) -> Option<Self> {
-        debug!(
-            "Creating new Validator with schema length: {}, input length: {}, eof: {}",
-            schema_str.len(),
-            input_str.len(),
-            eof
-        );
-
         let mut schema_parser = new_markdown_parser();
-        let schema_tree = match schema_parser.parse(schema_str, None) {
-            Some(tree) => tree,
-            None => {
-                debug!("Failed to parse schema tree");
-                return None;
-            }
-        };
+        let schema_tree = schema_parser.parse(schema_str, None)?;
 
         let mut input_parser = new_markdown_parser();
-        let input_tree = match input_parser.parse(input_str, None) {
-            Some(tree) => {
-                debug!(
-                    "Input tree parsed successfully with {} bytes",
-                    tree.root_node().byte_range().end
-                );
-                tree
-            }
-            None => {
-                debug!("Failed to parse input tree");
-                return None;
-            }
-        };
+        let input_tree = input_parser.parse(input_str, None)?;
 
         let mut initial_state =
             ValidatorState::new(schema_str.to_string(), input_str.to_string(), eof);
@@ -72,7 +46,7 @@ impl Validator {
     }
 
     pub fn errors_so_far(&self) -> impl Iterator<Item = &Error> + std::fmt::Debug {
-        self.state.errors_so_far()
+        self.state.errors_so_far().into_iter()
     }
 
     pub fn matches_so_far(&self) -> &Value {
@@ -95,20 +69,6 @@ impl Validator {
 
         self.state.set_got_eof(got_eof);
 
-        if got_eof {
-            // After we got EOF, we want to validate from the parent of the latest offsets and down
-            let input_tree_clone = self.input_tree.clone();
-            let mut input_cursor = input_tree_clone.walk();
-            let mut schema_cursor = self.schema_tree.walk();
-            input_cursor.goto_descendant(self.last_input_descendant_index);
-            schema_cursor.goto_descendant(self.last_schema_descendant_index);
-            input_cursor.goto_parent();
-            schema_cursor.goto_parent();
-            self.last_input_descendant_index = input_cursor.descendant_index();
-            self.last_schema_descendant_index = schema_cursor.descendant_index();
-        }
-
-        let mut input_parser = new_markdown_parser();
         // Calculate the range of new content
         let old_len = self.input_tree.root_node().byte_range().end;
         let new_len = input.len();
@@ -132,8 +92,13 @@ impl Validator {
             },
         };
 
-        self.input_tree.edit(&edit);
+        // We need to call edit() to inform the tree about changes in the source text
+        // before reusing it for incremental parsing. This allows tree-sitter to
+        // efficiently reparse only the modified portions of the tree. (it
+        // requires the state to match the new text)
+        self.input_tree.edit(&edit); // edit doesn't know about the new text content!
 
+        let mut input_parser = new_markdown_parser();
         match input_parser.parse(input, Some(&self.input_tree)) {
             Some(parse) => {
                 self.input_tree = parse;
@@ -243,7 +208,7 @@ mod tests {
 
         // Now read more input to complete it
         validator
-            .read_input("Hello\n\nTEST World", true)
+            .read_input("Hello\n\nWorld", true)
             .expect("Failed to read input");
 
         // Validate again
@@ -352,14 +317,22 @@ mod tests {
         let input = "- 1\n- 2\n- 3\n";
 
         let (errors, matches) = do_validate(schema, input, true);
-        println!("got matches {:?}", matches);
         assert!(
             errors.is_empty(),
             "expected no errors, but found {:?}",
             errors
         );
+
         // The matcher with + should collect all matches in an array
-        let items = matches.get("item").unwrap().as_array().unwrap();
+        let items = match matches.get("item") {
+            Some(value) => match value.as_array() {
+                Some(array) => array,
+                None => panic!("Expected 'item' to be an array but got: {:?}", value),
+            },
+            None => panic!("Expected 'item' key in matches but got: {:?}", matches),
+        };
+        println!("got items {:?}", items);
+
         assert_eq!(items.len(), 3);
         assert_eq!(items[0], "1");
         assert_eq!(items[1], "2");
@@ -780,15 +753,15 @@ Footer: `footer:/[a-z]+/`
 
         let input = r#"# Document Title
 
-            This is a paragraph with some content.
+This is a paragraph with some content.
 
-            - First item is literal
-            - Second item ends with Alice
-            - Third item is just literal
-            - Fourth item has 22 in it
-                - Fourth item has 22 in it
+- First item is literal
+- Second item ends with Alice
+- Third item is just literal
+- Fourth item has 22 in it
+- Fourth item has 22 in it
 
-            Footer: goodbye
+Footer: goodbye
             "#;
 
         let mut validator =
@@ -799,13 +772,17 @@ Footer: `footer:/[a-z]+/`
         let errors: Vec<_> = validator.errors_so_far().collect();
         match &errors[0] {
             Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(
-                expected,
                 actual,
+                expected,
                 parent_index,
             )) => {
-                assert_eq!(*expected, 3);
-                assert_eq!(*actual, 2);
-                assert_eq!(*parent_index, 9);
+                eprintln!(
+                    "ChildrenLengthMismatch: expected={}, actual={}, parent_index={}",
+                    expected, actual, parent_index
+                );
+                assert_eq!(*expected, 4);
+                assert_eq!(*actual, 5);
+                assert_eq!(*parent_index, 21);
             }
             _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),
         }

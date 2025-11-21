@@ -61,8 +61,22 @@ impl ValidatorState {
         }
     }
 
-    pub fn errors_so_far(&self) -> impl Iterator<Item = &Error> + std::fmt::Debug {
-        self.errors_so_far.iter()
+    pub fn join_new_matches(&mut self, new_matches: Value) {
+        match (&mut self.matches_so_far, new_matches) {
+            (Value::Object(ref mut existing_map), Value::Object(new_map)) => {
+                for (key, value) in new_map {
+                    existing_map.insert(key, value);
+                }
+            }
+            (Value::Array(ref mut existing_array), Value::Array(new_array)) => {
+                existing_array.extend(new_array);
+            }
+            _ => {}
+        }
+    }
+
+    pub fn errors_so_far(&self) -> Vec<&Error> {
+        self.errors_so_far.iter().collect()
     }
 
     pub fn add_new_error(&mut self, new_error: Error) {
@@ -71,5 +85,53 @@ impl ValidatorState {
 
     pub fn add_new_errors(&mut self, new_errors: impl IntoIterator<Item = Error>) {
         self.errors_so_far.extend(new_errors);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_join_new_matches_objects() {
+        let mut state = ValidatorState::new("{}".to_string(), "".to_string(), false);
+        state.add_new_match("key1".to_string(), Value::String("value1".to_string()));
+
+        let new_matches = Value::Object({
+            let mut map = Map::new();
+            map.insert("key2".to_string(), Value::String("value2".to_string()));
+            map
+        });
+
+        state.join_new_matches(new_matches);
+
+        if let Value::Object(ref map) = state.matches_so_far() {
+            assert_eq!(map.get("key1"), Some(&Value::String("value1".to_string())));
+            assert_eq!(map.get("key2"), Some(&Value::String("value2".to_string())));
+        } else {
+            panic!("matches_so_far is not an object");
+        }
+    }
+
+    #[test]
+    fn test_join_new_matches_arrays() {
+        let mut state = ValidatorState::new("{}".to_string(), "".to_string(), false);
+        state.matches_so_far = Value::Array(vec![Value::String("value1".to_string())]);
+
+        let new_matches = Value::Array(vec![
+            Value::String("value2".to_string()),
+            Value::String("value3".to_string()),
+        ]);
+
+        state.join_new_matches(new_matches);
+
+        if let Value::Array(ref array) = state.matches_so_far() {
+            assert_eq!(array.len(), 3);
+            assert_eq!(array[0], Value::String("value1".to_string()));
+            assert_eq!(array[1], Value::String("value2".to_string()));
+            assert_eq!(array[2], Value::String("value3".to_string()));
+        } else {
+            panic!("matches_so_far is not an array");
+        }
     }
 }
