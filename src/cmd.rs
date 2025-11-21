@@ -23,11 +23,7 @@ pub fn process<R: Read>(
     let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
         .ok_or(ValidationError::ValidatorCreationFailed)?;
 
-    let mut iteration_count = 0;
-
     loop {
-        iteration_count += 1;
-
         let bytes_read = input.read(&mut buffer)?;
 
         // If we're done reading, mark EOF

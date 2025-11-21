@@ -44,7 +44,7 @@ impl<'a> NodeValidator<'a> {
         ));
 
         // Do validation until there's no more pairs to validate (skipping incomplete last nodes)
-        while !self.is_incomplete() && self.validate_node_pair() {}
+        while !self.is_incomplete() && self.validate_node_pair() {} // validate_node_pair also DOES the validation
 
         // Return to parent nodes if not at EOF, we'll need to revalidate them on the next run
         if !self.state.got_eof() {
@@ -91,9 +91,7 @@ impl<'a> NodeValidator<'a> {
             self.schema_cursor
                 .node()
                 .child(0)
-                .map(|first_child| {
-                    children_code_node_count(&first_child, &mut self.schema_cursor.clone())
-                })
+                .map(|first_child| children_code_node_count(&first_child, &mut self.schema_cursor))
                 .unwrap_or(0)
         };
 
@@ -118,17 +116,10 @@ impl<'a> NodeValidator<'a> {
                     .unwrap_or(false));
 
         if schema_children_code_node_count == 1 && input_is_text_only {
-            // Save cursor positions
-            let saved_input_idx = self.input_cursor.descendant_index();
-            let saved_schema_idx = self.schema_cursor.descendant_index();
-
             let (errors, matches) = self.validate_matcher_vs_text();
+
             self.state.add_new_errors(errors);
             self.state.join_new_matches(matches);
-
-            // Restore cursor positions
-            self.input_cursor.goto_descendant(saved_input_idx);
-            self.schema_cursor.goto_descendant(saved_schema_idx);
 
             return true;
         } else if self.is_schema_specified_list_node() {
@@ -143,7 +134,10 @@ impl<'a> NodeValidator<'a> {
 
         if self.input_cursor.node().child_count() != self.schema_cursor.node().child_count() {
             if self.is_schema_specified_list_node() {
+                // In the repeating list node case that we already took care of this situation is fine
+                // TODO: have we made sure that the repeating list had a +?
             } else if self.state.got_eof() {
+                // TODO: this feels wrong, we should check to make sure that when eof is false we detect nested incomplete nodes too
                 self.state.add_new_error(Error::SchemaViolation(
                     SchemaViolationError::ChildrenLengthMismatch(
                         self.input_cursor.node().child_count(),
@@ -154,6 +148,7 @@ impl<'a> NodeValidator<'a> {
             }
         }
 
+        // TODO: what if one node has children and the other doesn't?
         if self.input_cursor.goto_first_child() && self.schema_cursor.goto_first_child() {
             self.pairs_to_validate.push((
                 self.input_cursor.descendant_index(),
@@ -161,6 +156,7 @@ impl<'a> NodeValidator<'a> {
             ));
 
             loop {
+                // TODO: handle case where one has more children than the other
                 let input_had_sibling = self.input_cursor.goto_next_sibling();
                 let schema_had_sibling = self.schema_cursor.goto_next_sibling();
 
@@ -170,13 +166,9 @@ impl<'a> NodeValidator<'a> {
                         self.schema_cursor.descendant_index(),
                     ));
                 } else {
-                    debug!("No more siblings to process in current nodes");
                     break;
                 }
             }
-
-            self.input_cursor.goto_parent();
-            self.schema_cursor.goto_parent();
         }
 
         true
@@ -199,6 +191,10 @@ impl<'a> NodeValidator<'a> {
     }
 
     fn validate_matcher_vs_list(&mut self) {
+        // Called when we have our cursors pointed at a schema list node and an
+        // input list node where the schema has only one child (the list item to
+        // match against all input list items) and the input has (>=1) children.
+
         assert!(
             self.is_list_node(&self.input_cursor.node()),
             "Input node is not a list, got {}",
@@ -212,14 +208,16 @@ impl<'a> NodeValidator<'a> {
 
         let input_list_node = self.input_cursor.node();
 
-        self.schema_cursor.goto_first_child();
-        self.schema_cursor.goto_first_child();
-        self.schema_cursor.goto_next_sibling();
+        self.schema_cursor.goto_first_child(); // we're at a list_marker
+        self.schema_cursor.goto_first_child(); // we're at a list_item
+        self.schema_cursor.goto_next_sibling(); // we're at the paragraph inside the list_item
         assert_eq!(self.schema_cursor.node().kind(), "paragraph");
 
         // Now validate each input node's list items against the schema's single list item
 
+        // TODO: what if we have an empty list and a matcher?
         if !self.input_cursor.goto_first_child() {
+            // list_marker, or nothing, if nothing we're done
             // No children to validate
             return;
         }
@@ -228,13 +226,14 @@ impl<'a> NodeValidator<'a> {
         self.input_cursor.goto_next_sibling();
         assert_eq!(self.input_cursor.node().kind(), "paragraph");
 
-        let mut match_arr = Value::Array(Vec::new());
+        let mut match_arr = json!([]);
 
+        // TODO: can we avoid the clone?
         for child in input_list_node.children(&mut self.input_cursor.clone()) {
             // Move cursor to the current child
-            self.input_cursor.reset(child);
-            self.input_cursor.goto_first_child();
-            self.input_cursor.goto_next_sibling();
+            self.input_cursor.reset(child); // list_item
+            self.input_cursor.goto_first_child(); // list_marker
+            self.input_cursor.goto_next_sibling(); // paragraph
             assert_eq!(self.input_cursor.node().kind(), "paragraph");
 
             let (errors, matches) = self.validate_matcher_vs_text();
@@ -491,7 +490,7 @@ fn children_code_node_count(
     node: &tree_sitter::Node,
     cursor: &mut tree_sitter::TreeCursor,
 ) -> usize {
-    node.children(&mut cursor.clone())
+    node.children(&mut cursor.clone()) // TODO: remove clone
         .filter(|child| child.kind() == "code_span")
         .count()
 }
@@ -551,5 +550,28 @@ mod tests {
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
         assert_eq!(matches, json!({"name": "Wolf"}));
+    }
+
+    #[test]
+    fn test_nested_repeater_list() {
+        let schema = r#"
+- `item1:/\w+/`{1,1}
+    - `item2:/\w+/`{1,1}
+"#;
+        let input = r#"
+- apple
+    - banana
+    - cherry
+"#;
+
+        let (matches, errors) = validate_str(schema, input);
+
+        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(
+            matches,
+            json!({
+                "item1": ["apple", {"item2": ["banana", "cherry"]}]
+            }),
+        );
     }
 }
