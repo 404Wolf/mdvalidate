@@ -16,10 +16,8 @@ pub struct Validator {
     pub input_tree: Tree,
     /// The schema tree, which does not change after initialization.
     pub schema_tree: Tree,
-    /// The last descendant index we validated up to in the schema tree. In preorder.
-    last_schema_descendant_index: usize,
-    /// The last descendant index we validated up to in the input tree. In preorder.
-    last_input_descendant_index: usize,
+    /// The farthest reached descendant index pair (input_index, schema_index) we validated up to. In preorder.
+    farthest_reached_descendant_index_pair: (usize, usize),
     state: ValidatorState,
 }
 

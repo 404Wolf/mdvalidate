@@ -81,6 +81,9 @@ impl<'a> NodeValidator<'a> {
         input_cursor: &mut TreeCursor,
         schema_cursor: &mut TreeCursor,
     ) -> Value {
+        debug!("Input sexpr: {}", input_cursor.node().to_sexp());
+        debug!("Schema sexpr: {}", schema_cursor.node().to_sexp());
+
         let input_cursor = &mut input_cursor.clone();
         let schema_cursor = &mut schema_cursor.clone();
 
@@ -227,14 +230,16 @@ impl<'a> NodeValidator<'a> {
     }
 
     #[instrument(skip(self, input_cursor, schema_cursor), level = "debug", fields(
-        input = %input_cursor.node().kind(),
-        schema = %schema_cursor.node().kind()
-    ), ret)]
+         input = %input_cursor.node().kind(),
+         schema = %schema_cursor.node().kind()
+     ), ret)]
     fn validate_matcher_vs_list(
         &mut self,
         input_cursor: &mut TreeCursor,
         schema_cursor: &mut TreeCursor,
     ) -> Value {
+        let mut matches = json!({});
+
         // Called when we have our cursors pointed at a schema list node and an
         // input list node where the schema has only one child (the list item to
         // match against all input list items) and the input has (>=1) children.
@@ -252,76 +257,96 @@ impl<'a> NodeValidator<'a> {
 
         let input_list_node = input_cursor.node();
 
-        schema_cursor.goto_first_child(); // we're at a list_marker
         schema_cursor.goto_first_child(); // we're at a list_item
-        schema_cursor.goto_next_sibling(); // we're at the paragraph inside the list_item
-        assert_eq!(schema_cursor.node().kind(), "paragraph");
+        assert_eq!(schema_cursor.node().kind(), "list_item");
+        schema_cursor.goto_first_child(); // we're at a list_marker
+        assert_eq!(schema_cursor.node().kind(), "list_marker");
+        schema_cursor.goto_next_sibling(); // list_marker -> content (may be paragraph)
 
-        // Now validate each input node's list items against the schema's single list item
-
-        println!("Input cursor sexpr: {}", input_cursor.node().to_sexp());
-        println!(
-            "Input text so far: `{}`",
-            &self.state.last_input_str()[input_cursor.node().byte_range()]
-        );
-
-        if !input_cursor.goto_first_child() // -> list_marker
-            || !input_cursor.goto_first_child() // -> list_item
-            || !input_cursor.goto_next_sibling()
-        // -> paragraph
-        {
-            // No children to validate
-            return json!({});
-        }
-
-        if input_cursor.node().kind() != "paragraph" {
-            if !self.state.got_eof() {
-                // Invalid input node
-                return json!({});
-            } else {
-                self.state
-                    .add_new_error(Error::SchemaError(SchemaError::UnclosedMatcher(
-                        input_cursor.descendant_index(),
-                    )));
-                return json!({});
-            }
-        }
-
-        let mut match_arr = json!([]);
-
-        // TODO: can we avoid the clone?
-        for child in input_list_node.children(&mut input_cursor.clone()) {
-            // Move cursor to the current child
-            input_cursor.reset(child); // list_item
-            input_cursor.goto_first_child(); // list_marker
-            input_cursor.goto_next_sibling(); // paragraph
-            assert_eq!(input_cursor.node().kind(), "paragraph");
-
-            let matches = self.validate_node_pair(input_cursor, schema_cursor);
-
-            // Each match is under the same keys, so we need to aggregate them into arrays
-            for (_, value) in matches.as_object().unwrap() {
-                match_arr.as_array_mut().unwrap().push(json!(value));
-            }
-        }
-
-        // We have to create a matcher to get its id
-        let matcher = Matcher::new(
+        // Get the matcher for this level
+        let main_matcher = Matcher::new(
             &self.state.schema_str()[schema_cursor.node().child(0).unwrap().byte_range()],
             None,
         )
         .unwrap(); // TODO: don't unwrap
 
-        match matcher.id() {
-            Some(id) => {
-                let mut matches = json!({});
-                matches[id] = match_arr;
-                return matches;
+        if !main_matcher.is_repeated() {
+            self.state.add_new_error(Error::SchemaViolation(
+                SchemaViolationError::NonRepeatingMatcherInListContext(
+                    schema_cursor.descendant_index(),
+                ),
+            ));
+        }
+
+        let main_matcher_id = main_matcher.id();
+        let mut main_items = Vec::new();
+        let mut notes_objects = Vec::new();
+
+        // Process each list item at this level
+        for child in input_list_node.children(&mut input_cursor.clone()) {
+            if child.kind() != "list_item" {
+                continue;
             }
-            None => {
-                return json!({});
+
+            let mut child_cursor = input_list_node.walk();
+            child_cursor.reset(child);
+
+            // Process this list item
+            child_cursor.goto_first_child(); // list_marker
+            if child_cursor.node().kind() != "list_marker" {
+                continue;
+            }
+
+            let has_content = child_cursor.goto_next_sibling(); // Move to content after the list marker
+
+            // Process paragraph if present
+            if has_content && child_cursor.node().kind() == "paragraph" {
+                // Get the text content of the paragraph
+                let paragraph_text =
+                    self.state.last_input_str()[child_cursor.node().byte_range()].trim();
+
+                // Add the text as a separate item in the main array
+                main_items.push(json!(paragraph_text));
+
+                // Check for nested list - move to next sibling
+                // A sibling of the paragraph is the next node
+                let has_nested_list = child_cursor.goto_next_sibling();
+
+                // Process nested list if present
+                if has_nested_list && self.is_list_node(&child_cursor.node()) {
+                    // Save a copy of the schema cursor
+                    let mut schema_list_cursor = schema_cursor.clone();
+
+                    // Navigate to the nested list in the schema
+                    let schema_has_nested_list = schema_list_cursor.goto_next_sibling();
+
+                    if schema_has_nested_list && self.is_list_node(&schema_list_cursor.node()) {
+                        // Process the nested list
+                        let nested_matches = self
+                            .validate_matcher_vs_list(&mut child_cursor, &mut schema_list_cursor);
+
+                        // Add each nested match as a separate object in the notes_objects array
+                        for (key, value) in nested_matches.as_object().unwrap() {
+                            let mut note_obj = json!({});
+                            note_obj[key] = value.clone();
+                            notes_objects.push(note_obj);
+                        }
+                    }
+                }
             }
         }
+
+        // Add all notes objects to the main items array
+        for note_obj in notes_objects {
+            main_items.push(note_obj);
+        }
+
+        // Add the main items to the result
+        if let Some(id) = main_matcher_id {
+            matches[id] = json!(main_items);
+        }
+
+        return matches;
     }
 
     #[instrument(skip(self, input_cursor, schema_cursor), level = "debug", fields(

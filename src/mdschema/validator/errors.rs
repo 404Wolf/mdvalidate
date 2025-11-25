@@ -85,7 +85,7 @@ pub enum SchemaViolationError {
     /// Text content of node does not match expected value. Node index, text that doesn't validate
     NodeContentMismatch(usize, String),
     /// When it looks like you meant to have a repeating list node, but there is
-    /// no "+" to indicate repeating. Index of the offending node.
+    /// no {} to indicate repeating. Index of the offending node.
     NonRepeatingMatcherInListContext(usize),
     /// Nodes have different numbers of children. Expected number, actual number, parent node index
     ChildrenLengthMismatch(usize, usize, usize),
