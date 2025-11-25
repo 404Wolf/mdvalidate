@@ -68,10 +68,14 @@ pub enum ParserError {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SchemaError {
-    MultipleMatchersInNodeChildren(usize),
+    /// When a node has multiple matchers in its children, which is not allowed.
+    /// Has node index and number of matchers.
+    MultipleMatchersInNodeChildren(usize, usize),
     /// When you call `validate_matcher_node_list` with a schema node whose
     /// children contain no matchers, which should never happen.
     NoMatcherInListNodeChildren(usize),
+    /// When you create a matcher and don't close it.
+    UnclosedMatcher(usize),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -81,7 +85,7 @@ pub enum SchemaViolationError {
     /// Text content of node does not match expected value. Node index, text that doesn't validate
     NodeContentMismatch(usize, String),
     /// When it looks like you meant to have a repeating list node, but there is
-    /// no "+" to indicate repeating. Index of the offending node.
+    /// no {} to indicate repeating. Index of the offending node.
     NonRepeatingMatcherInListContext(usize),
     /// Nodes have different numbers of children. Expected number, actual number, parent node index
     ChildrenLengthMismatch(usize, usize, usize),
@@ -273,10 +277,10 @@ pub fn pretty_print_error(
         Error::SchemaError(schema_err) => {
             let root_range = 0..source_content.len();
             let message = match schema_err {
-                SchemaError::MultipleMatchersInNodeChildren(node_id) => {
+                SchemaError::MultipleMatchersInNodeChildren(node_id, count) => {
                     format!(
-                        "Multiple matchers found in node children at index {}",
-                        node_id
+                        "Multiple matchers ({}) found in node children at index {}",
+                        count, node_id
                     )
                 }
                 SchemaError::NoMatcherInListNodeChildren(node_id) => {
@@ -286,6 +290,9 @@ pub fn pretty_print_error(
                         node_id,
                         actual_node.kind()
                     )
+                }
+                SchemaError::UnclosedMatcher(node_id) => {
+                    format!("Unclosed matcher at index {}", node_id)
                 }
             };
             Report::build(ReportKind::Error, (filename, root_range.clone()))

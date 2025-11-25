@@ -13,6 +13,8 @@ regex = "1.12.2"
 serde = "1.0.228"
 serde_json = "1.0.145"
 tempfile = "3.23.0"
+tracing = "0.1"
+tracing-subscriber = {version = "0.3", features = ["env-filter"]}
 tree-sitter = "0.25.10"
 tree-sitter-markdown = {package = "tree-sitter-markdown-fork", version = "0.7.1"}
 

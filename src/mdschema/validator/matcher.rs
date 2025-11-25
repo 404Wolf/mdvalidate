@@ -8,7 +8,8 @@ static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
 });
 
-pub static SPECIAL_CHARS_START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[+\{\},0-9]*").unwrap());
+pub static SPECIAL_CHARS_START: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[+\{\},0-9]*").unwrap());
 
 pub fn get_everything_after_special_chars(text: &str) -> &str {
     let captures = SPECIAL_CHARS_START.captures(text);
@@ -131,12 +132,22 @@ impl Matcher {
     fn extract_item_count_limits(text: &str) -> (Option<usize>, Option<usize>) {
         // Look for {min,max} pattern
         let re = Regex::new(r"\{(\d*),(\d*)\}").unwrap();
-        
+
         if let Some(caps) = re.captures(text) {
-            let min = caps.get(1)
-                .and_then(|m| if m.as_str().is_empty() { None } else { m.as_str().parse::<usize>().ok() });
-            let max = caps.get(2)
-                .and_then(|m| if m.as_str().is_empty() { None } else { m.as_str().parse::<usize>().ok() });
+            let min = caps.get(1).and_then(|m| {
+                if m.as_str().is_empty() {
+                    None
+                } else {
+                    m.as_str().parse::<usize>().ok()
+                }
+            });
+            let max = caps.get(2).and_then(|m| {
+                if m.as_str().is_empty() {
+                    None
+                } else {
+                    m.as_str().parse::<usize>().ok()
+                }
+            });
             (min, max)
         } else {
             (None, None)
