@@ -31,9 +31,6 @@ impl<'a> NodeValidator<'a> {
         }
     }
 
-    /// Validates nodes starting from the current cursor positions and walks them to completion.
-    ///
-    /// Returns the final descendant indices (input_index, schema_index).
     pub fn validate(&mut self) -> (usize, usize) {
         let new_matches = self.validate_node_pair(
             &mut self.input_cursor.clone(),
@@ -57,7 +54,6 @@ impl<'a> NodeValidator<'a> {
         !self.state.got_eof() && is_last_node(self.state.last_input_str(), &input_cursor.node())
     }
 
-    /// Whether both the schema and input node are lists nodes, but the schema node has only one child while the input node has multiple children.
     fn is_schema_specified_list_node(
         &self,
         input_cursor: &TreeCursor,
@@ -69,9 +65,6 @@ impl<'a> NodeValidator<'a> {
             && input_cursor.node().child_count() >= 1
     }
 
-    /// Validate the next pair of nodes in our stack.
-    ///
-    /// Returns whether there were more pairs to validate.
     #[instrument(skip(self, input_cursor, schema_cursor), level = "trace", fields(
         input = %input_cursor.node().kind(),
         schema = %schema_cursor.node().kind()
@@ -536,6 +529,7 @@ impl<'a> NodeValidator<'a> {
     }
 
     /// Find the matcher code_span node in a list of schema nodes.
+    ///
     /// Returns the matcher node and the next node after it, if any.
     /// Returns an error if multiple matchers are found.
     fn find_matcher_node<'b>(
