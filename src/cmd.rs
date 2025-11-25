@@ -4,7 +4,6 @@ use crate::mdschema::validator::{
     validator::Validator,
 };
 use colored::Colorize;
-use log::{debug, trace};
 use std::io::{Read, Write};
 use tree_sitter::Tree;
 

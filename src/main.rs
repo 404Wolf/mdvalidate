@@ -1,7 +1,7 @@
 use clap::Parser;
-use env_logger;
 use std::io::{BufReader, Read, Write};
 use std::process::exit;
+use tracing_subscriber::EnvFilter;
 
 pub mod cmd;
 pub mod mdschema;
@@ -29,7 +29,18 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+        )
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_span_events(
+            tracing_subscriber::fmt::format::FmtSpan::ENTER
+                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+        )
+        .init();
 
     let args = Args::parse();
 
