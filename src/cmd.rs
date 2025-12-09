@@ -1,10 +1,9 @@
 use crate::mdschema::validator::{
     errors::{pretty_print_error, ValidationError},
-    node_validators::NodeValidationResult,
+    nodes::NodeValidationResult,
     validator::Validator,
 };
 use colored::Colorize;
-use log::{debug, trace};
 use std::io::{Read, Write};
 use tree_sitter::Tree;
 
@@ -17,27 +16,17 @@ pub fn process<R: Read>(
 ) -> Result<(NodeValidationResult, Tree, String), ValidationError> {
     let buffer_size = get_buffer_size();
 
-    debug!("Starting validation");
-
     let mut input_str = String::new();
     let mut buffer = vec![0; buffer_size];
 
-    debug!("Creating validator with buffer size: {}", buffer_size);
     let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
         .ok_or(ValidationError::ValidatorCreationFailed)?;
 
-    let mut iteration_count = 0;
-
     loop {
-        iteration_count += 1;
-        trace!("Reading iteration #{}", iteration_count);
-
         let bytes_read = input.read(&mut buffer)?;
 
         // If we're done reading, mark EOF
         if bytes_read == 0 {
-            debug!("Reached EOF, processing final input");
-
             if let Err(e) = validator.read_input(&input_str, true) {
                 return Err(ValidationError::ReadInputFailed(e));
             }
@@ -55,13 +44,13 @@ pub fn process<R: Read>(
         validator.validate();
 
         // Check for fast-fail AFTER validation
-        if fast_fail && !validator.errors().is_empty() {
+        if fast_fail && validator.errors_so_far().count() > 0 {
             break;
         }
     }
 
-    let errors = validator.errors();
-    let matches = validator.matches();
+    let errors: Vec<_> = validator.errors_so_far().cloned().collect();
+    let matches = validator.matches_so_far().clone();
     let input_tree = validator.input_tree;
 
     Ok(((errors, matches), input_tree, input_str))
