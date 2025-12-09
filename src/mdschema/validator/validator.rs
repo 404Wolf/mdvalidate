@@ -37,9 +37,8 @@ impl Validator {
         Some(Validator {
             input_tree,
             schema_tree,
-            last_input_descendant_index: 0,
-            last_schema_descendant_index: 0,
             state: initial_state,
+            farthest_reached_descendant_index_pair: (0, 0),
         })
     }
 
@@ -110,16 +109,15 @@ impl Validator {
     /// in parallel to the ends, starting from where we last left off.
     pub fn validate(&mut self) {
         let mut input_cursor = self.input_tree.walk();
-        input_cursor.goto_descendant(self.last_input_descendant_index);
+        input_cursor.goto_descendant(self.farthest_reached_descendant_index_pair.0);
 
         let mut schema_cursor = self.schema_tree.walk();
-        schema_cursor.goto_descendant(self.last_schema_descendant_index);
+        schema_cursor.goto_descendant(self.farthest_reached_descendant_index_pair.1);
 
         let mut node_validator = NodeValidator::new(&mut self.state, input_cursor, schema_cursor);
         let (new_input_index, new_schema_index) = node_validator.validate();
 
-        self.last_input_descendant_index = new_input_index;
-        self.last_schema_descendant_index = new_schema_index;
+        self.farthest_reached_descendant_index_pair = (new_input_index, new_schema_index);
     }
 }
 
@@ -905,20 +903,14 @@ Content for section 3."#;
         for (i, chunk) in chunks.iter().enumerate() {
             let is_eof = i == chunks.len() - 1;
 
-            let indices_before = (
-                validator.last_input_descendant_index,
-                validator.last_schema_descendant_index,
-            );
+            let indices_before = validator.farthest_reached_descendant_index_pair;
 
             validator
                 .read_input(chunk, is_eof)
                 .expect("Failed to read input");
             validator.validate();
 
-            let indices_after = (
-                validator.last_input_descendant_index,
-                validator.last_schema_descendant_index,
-            );
+            let indices_after = validator.farthest_reached_descendant_index_pair;
 
             // Indices should advance (or stay the same if nothing new to validate)
             // They should NOT reset to 0

@@ -1,3 +1,6 @@
-- Item 1
-  - Nested item
-- Item 2\n";
+# Test
+
+`label:/\w+/`
+
+- `line:/\w+/`{1,4}
+

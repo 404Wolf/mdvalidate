@@ -1,3 +1,5 @@
+use core::panic;
+
 use serde_json::{json, Value};
 use tracing::{debug, instrument};
 use tree_sitter::{Node, TreeCursor};
@@ -37,10 +39,10 @@ impl<'a> NodeValidator<'a> {
             &mut self.schema_cursor.clone(),
         );
 
-        if !self.state.got_eof() {
-            self.input_cursor.goto_parent();
-            self.schema_cursor.goto_parent();
-        }
+        // if !self.state.got_eof() {
+        //     self.input_cursor.goto_parent();
+        //     self.schema_cursor.goto_parent();
+        // }
 
         self.state.join_new_matches(new_matches);
 
@@ -52,17 +54,6 @@ impl<'a> NodeValidator<'a> {
 
     fn is_incomplete(&self, input_cursor: &mut TreeCursor) -> bool {
         !self.state.got_eof() && is_last_node(self.state.last_input_str(), &input_cursor.node())
-    }
-
-    fn is_schema_specified_list_node(
-        &self,
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-    ) -> bool {
-        self.is_list_node(&schema_cursor.node())
-            && self.is_list_node(&input_cursor.node())
-            && schema_cursor.node().child_count() == 1
-            && input_cursor.node().child_count() >= 1
     }
 
     #[instrument(skip(self, input_cursor, schema_cursor), level = "trace", fields(
@@ -82,8 +73,8 @@ impl<'a> NodeValidator<'a> {
 
         let mut matches = json!({});
 
-        let is_schema_specified_list_node =
-            self.is_schema_specified_list_node(input_cursor, schema_cursor);
+        let is_schema_specified_list_node_result =
+            is_schema_specified_list_node(input_cursor, schema_cursor);
 
         let input_is_text_node = input_cursor.node().kind() == "text";
         let input_has_single_text_child = input_cursor.node().child_count() == 1
@@ -124,7 +115,7 @@ impl<'a> NodeValidator<'a> {
             }
 
             return new_matches;
-        } else if is_schema_specified_list_node {
+        } else if is_schema_specified_list_node_result {
             let new_matches = self.validate_matcher_vs_list(input_cursor, schema_cursor);
 
             // Add the validation matches to our top-level matches
@@ -143,7 +134,7 @@ impl<'a> NodeValidator<'a> {
         }
 
         if input_cursor.node().child_count() != schema_cursor.node().child_count() {
-            if self.is_schema_specified_list_node(input_cursor, schema_cursor) {
+            if is_schema_specified_list_node(input_cursor, schema_cursor) {
                 // In the repeating list node case that we already took care of this situation is fine
                 // TODO: have we made sure that the repeating list had a +?
             } else if self.state.got_eof() {
@@ -238,17 +229,20 @@ impl<'a> NodeValidator<'a> {
         // match against all input list items) and the input has (>=1) children.
 
         assert!(
-            self.is_list_node(&input_cursor.node()),
+            is_list_node(&input_cursor.node()),
             "Input node is not a list, got {}",
             input_cursor.node().kind()
         );
         assert!(
-            self.is_list_node(&schema_cursor.node()),
+            is_list_node(&schema_cursor.node()),
             "Schema node is not a list, got {}",
             schema_cursor.node().kind()
         );
 
         let input_list_node = input_cursor.node();
+
+        // TODO: don't clone
+        let input_list_children_count = input_list_node.children(&mut input_cursor.clone()).count();
 
         schema_cursor.goto_first_child(); // we're at a list_item
         assert_eq!(schema_cursor.node().kind(), "list_item");
@@ -257,13 +251,20 @@ impl<'a> NodeValidator<'a> {
         schema_cursor.goto_next_sibling(); // list_marker -> content (may be paragraph)
 
         // Get the matcher for this level
-        let main_matcher = Matcher::new(
-            &self.state.schema_str()[schema_cursor.node().child(0).unwrap().byte_range()],
-            None,
-        )
-        .unwrap(); // TODO: don't unwrap
+        let matcher_str = &self.state.schema_str()
+            [schema_cursor.node().child(0).unwrap().byte_range()]
+        .to_string();
 
-        if !main_matcher.is_repeated() {
+        let child1_text = schema_cursor
+            .node()
+            .child(1)
+            .map(|child1| &self.state.schema_str()[child1.byte_range()]);
+
+        let main_matcher = Matcher::new(matcher_str.as_str(), child1_text).unwrap(); // TODO: don't unwrap
+
+        // When there are multiple nodes in the input list we require a
+        // repeating matcher
+        if !main_matcher.is_repeated() && input_list_children_count > 1 {
             self.state.add_new_error(Error::SchemaViolation(
                 SchemaViolationError::NonRepeatingMatcherInListContext(
                     schema_cursor.descendant_index(),
@@ -276,44 +277,39 @@ impl<'a> NodeValidator<'a> {
         let mut notes_objects = Vec::new();
 
         // Process each list item at this level
-        for child in input_list_node.children(&mut input_cursor.clone()) {
-            if child.kind() != "list_item" {
+        for child in input_list_node.children(
+            &mut input_cursor.clone(), // TODO: don't clone cursor
+        ) {
+            let mut child_cursor = child.walk();
+
+            assert_eq!(child_cursor.node().kind(), "list_item");
+
+            if !child_cursor.goto_first_child() {
                 continue;
             }
 
-            let mut child_cursor = input_list_node.walk();
-            child_cursor.reset(child);
+            assert_eq!(child_cursor.node().kind(), "list_marker");
 
-            // Process this list item
-            child_cursor.goto_first_child(); // list_marker
-            if child_cursor.node().kind() != "list_marker" {
+            if !child_cursor.goto_next_sibling() {
                 continue;
             }
-
-            let has_content = child_cursor.goto_next_sibling(); // Move to content after the list marker
 
             // Process paragraph if present
-            if has_content && child_cursor.node().kind() == "paragraph" {
-                // Get the text content of the paragraph
+            if child_cursor.node().kind() == "paragraph" {
                 let paragraph_text =
                     self.state.last_input_str()[child_cursor.node().byte_range()].trim();
 
-                // Add the text as a separate item in the main array
                 main_items.push(json!(paragraph_text));
 
-                // Check for nested list - move to next sibling
-                // A sibling of the paragraph is the next node
                 let has_nested_list = child_cursor.goto_next_sibling();
-
-                // Process nested list if present
-                if has_nested_list && self.is_list_node(&child_cursor.node()) {
+                if has_nested_list && is_list_node(&child_cursor.node()) {
                     // Save a copy of the schema cursor
                     let mut schema_list_cursor = schema_cursor.clone();
 
                     // Navigate to the nested list in the schema
                     let schema_has_nested_list = schema_list_cursor.goto_next_sibling();
 
-                    if schema_has_nested_list && self.is_list_node(&schema_list_cursor.node()) {
+                    if schema_has_nested_list && is_list_node(&schema_list_cursor.node()) {
                         // Process the nested list
                         let nested_matches = self
                             .validate_matcher_vs_list(&mut child_cursor, &mut schema_list_cursor);
@@ -326,6 +322,11 @@ impl<'a> NodeValidator<'a> {
                         }
                     }
                 }
+            } else {
+                todo!(
+                    "nested lists not supported, got {}",
+                    child_cursor.node().kind()
+                )
             }
         }
 
@@ -342,6 +343,55 @@ impl<'a> NodeValidator<'a> {
         return matches;
     }
 
+    // #[instrument(skip(self, input_cursor, schema_cursor), level = "debug", fields(
+    //      input = %input_cursor.node().kind(),
+    //      schema = %schema_cursor.node().kind()
+    //  ), ret)]
+    // fn validate_matcher_vs_list(
+    //     &mut self,
+    //     input_cursor: &mut TreeCursor,
+    //     schema_cursor: &mut TreeCursor,
+    // ) -> Value {
+    //     let mut matches = json!({});
+
+    //     // Called when we have our cursors pointed at a schema list node and an
+    //     // input list node where the schema has only one child (the list item to
+    //     // match against all input list items) and the input has (>=1) children.
+
+    //     assert!(
+    //         is_list_node(&input_cursor.node()),
+    //         "Input node is not a list, got {}",
+    //         input_cursor.node().kind()
+    //     );
+    //     assert!(
+    //         is_list_node(&schema_cursor.node()),
+    //         "Schema node is not a list, got {}",
+    //         schema_cursor.node().kind()
+    //     );
+
+    //     let input_list_node = input_cursor.node();
+    //     let schema_list_node = schema_cursor.node();
+
+    //     // Input example: | Schema example:
+    //     // - Item1       | - `/l1:/\w+/`{,}
+    //     // - Item2       |   - `/l1:/\w+/`{2,2}
+    //     //   - Item3     |
+    //     //   - Item4     |
+
+    //     // Input example: | Schema example:
+    //     // - Item1       | - `/l1:/\w+/`{,}
+    //     //   - Item3     |   - `/l1:/\w+/`{,}
+    //     // - 222         | - `/l1:/\d+/`{,}
+
+    //     // 1) For each schema node in the schema list node:
+    //     //    a) Iterate over children of the input list node and take while all the
+    //     //       list items have paragraphs.
+    //     //    b) Then tick the schema node forward (downward/rightward)
+    //     // 2) Then tick the schema node forward.
+
+    //     todo!()
+    // }
+
     #[instrument(skip(self, input_cursor, schema_cursor), level = "debug", fields(
         input = %input_cursor.node().kind(),
         schema = %schema_cursor.node().kind()
@@ -356,7 +406,7 @@ impl<'a> NodeValidator<'a> {
 
         let mut matches = json!({});
 
-        if self.is_list_node(&input_cursor.node()) && self.is_list_node(&schema_cursor.node()) {
+        if is_list_node(&input_cursor.node()) && is_list_node(&schema_cursor.node()) {
             // If the input node is a list, delegate to validate_matcher_node_list
             return self.validate_matcher_vs_list(input_cursor, schema_cursor);
         }
@@ -520,7 +570,7 @@ impl<'a> NodeValidator<'a> {
         };
 
         // Otherwise, check if the nodes are both list nodes
-        if self.is_list_node(&input_cursor.node()) && self.is_list_node(&schema_cursor.node()) {
+        if is_list_node(&input_cursor.node()) && is_list_node(&schema_cursor.node()) {
             // If the input node is a list, delegate to validate_matcher_node_list
             self.validate_matcher_vs_list(input_cursor, schema_cursor);
         }
@@ -556,14 +606,22 @@ impl<'a> NodeValidator<'a> {
 
         Ok((code_node, next_node))
     }
+}
 
-    /// Check if a node is a list (tight_list or loose_list).
-    fn is_list_node(&self, node: &Node) -> bool {
-        match node.kind() {
-            "tight_list" | "loose_list" => true,
-            _ => false,
-        }
+/// Check if a node is a list (tight_list or loose_list).
+fn is_list_node(node: &Node) -> bool {
+    match node.kind() {
+        "tight_list" | "loose_list" => true,
+        _ => false,
     }
+}
+
+/// Check if a node is a schema-specified list node.
+fn is_schema_specified_list_node(input_cursor: &TreeCursor, schema_cursor: &TreeCursor) -> bool {
+    is_list_node(&schema_cursor.node())
+        && is_list_node(&input_cursor.node())
+        && schema_cursor.node().child_count() == 1
+        && input_cursor.node().child_count() >= 1
 }
 
 #[cfg(test)]

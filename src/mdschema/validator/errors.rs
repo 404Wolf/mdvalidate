@@ -160,10 +160,14 @@ pub fn pretty_print_error(
                     .with_label(
                         Label::new((filename, node_range))
                             .with_message(
-                                "This matcher is in a list context but is not marked as repeating ('+')"
+                                "This matcher is in a list context but is not marked as repeating"
                             )
                             .with_color(Color::Red),
                     )
+                    .with_help(r#"
+You can mark a list node as repeating by adding a '{<min_count>,<max_count>} directly after the matcher, like
+- `myLabel:/foo/`{1,12}
+"#)
                     .finish()
                     .write((filename, Source::from(source_content)), &mut buffer)
                     .map_err(|e| e.to_string())?;

@@ -8,6 +8,10 @@ static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
 });
 
+static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\{(\d*),(\d*)\}").unwrap()
+});
+
 pub static SPECIAL_CHARS_START: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[+\{\},0-9]*").unwrap());
 
@@ -22,18 +26,90 @@ pub fn get_everything_after_special_chars(text: &str) -> &str {
     }
 }
 
+/// Features of the given matcher, like max count if it is repeated
+#[derive(Debug, Clone)]
+pub struct MatcherExtras {
+    /// Optional minimum number of list items at this level
+    min_items: Option<usize>,
+    /// Optional maximum number of list items at this level
+    max_items: Option<usize>,
+    /// Whether min/max constraints were specified
+    had_min_max: bool,
+}
+
+impl MatcherExtras {
+    /// Create new MatcherExtras by parsing the text following a matcher.
+    /// Extract item count limits from {min,max} syntax in the text.
+    /// Examples: {2,5} = min 2, max 5; {3,} = min 3, no max; {,10} = no min, max 10
+    pub fn new(text: Option<&str>) -> Self {
+        match text {
+            Some(text) => {
+                let (min_items, max_items, had_range_syntax) = Self::extract_item_count_limits(text);
+                Self {
+                    min_items,
+                    max_items,
+                    had_min_max: had_range_syntax,
+                }
+            }
+            None => Self {
+                min_items: None,
+                max_items: None,
+                had_min_max: false,
+            },
+        }
+    }
+
+    /// Extract item count limits from {min,max} syntax in the text following the matcher.
+    /// Returns (min_items, max_items, had_range_syntax) where the first two can be None.
+    /// had_range_syntax is true if the {min,max} pattern was found, even if both are empty.
+    fn extract_item_count_limits(text: &str) -> (Option<usize>, Option<usize>, bool) {
+        // Look for {min,max} pattern
+        if let Some(caps) = RANGE_PATTERN.captures(text) {
+            let min = caps.get(1).and_then(|m| {
+                if m.as_str().is_empty() {
+                    None
+                } else {
+                    m.as_str().parse::<usize>().ok()
+                }
+            });
+            let max = caps.get(2).and_then(|m| {
+                if m.as_str().is_empty() {
+                    None
+                } else {
+                    m.as_str().parse::<usize>().ok()
+                }
+            });
+            (min, max, true)
+        } else {
+            (None, None, false)
+        }
+    }
+
+    /// Return optional minimum number of items at this list level
+    pub fn min_items(&self) -> Option<usize> {
+        self.min_items
+    }
+
+    /// Return optional maximum number of items at this list level
+    pub fn max_items(&self) -> Option<usize> {
+        self.max_items
+    }
+
+    /// Whether min/max constraints were specified
+    pub fn had_min_max(&self) -> bool {
+        self.had_min_max
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Matcher {
     id: Option<String>,
     /// A compiled regex for the pattern.
     pattern: MatcherType,
     /// Extra flags, which we receive via extra text that corresponds to the matcher
-    extras: HashSet<MatcherExtras>,
-    /// Optional maximum recursion depth for nested lists (parsed from +N after the plus)
-    max_depth: Option<usize>,
-    /// Optional minimum number of list items at this level
-    min_items: Option<usize>,
-    /// Optional maximum number of list items at this level
-    max_items: Option<usize>,
+    flags: HashSet<MatcherFlags>,
+    /// Extra configuration options
+    extras: MatcherExtras,
 }
 
 #[derive(Debug, Clone)]
@@ -49,14 +125,14 @@ enum SpecialMatchers {
 
 /// Special matcher types that extend the meaning of a group.
 ///
-/// This is the text that comes directly after the matcher codeblock.  For
-/// example, '+' indicates that the matcher is repeated (and allows many list
-/// items).
+/// This is the text that comes directly after the matcher codeblock. For
+/// example, '?' indicates that the matcher is optional.
 ///
-/// Make sure to update SPECIAL_CHARS_START when adding new extras.
+/// Make sure to update SPECIAL_CHARS_START when adding new flags.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum MatcherExtras {
-    Repeated,
+enum MatcherFlags {
+    /// The {min,max} flag indicates that the matcher has a minimum and maximum number of items.
+    MinMax,
 }
 
 impl Matcher {
@@ -76,82 +152,12 @@ impl Matcher {
             }
         };
 
-        let (extras_set, max_depth) = match extras {
-            Some(text) => Self::extract_matcher_extras(text),
-            None => (HashSet::new(), None),
-        };
-
-        let (min_items, max_items) = match extras {
-            Some(text) => Self::extract_item_count_limits(text),
-            None => (None, None),
-        };
-
         Ok(Matcher {
             id,
-            extras: extras_set,
+            flags: HashSet::new(),
             pattern: matcher,
-            max_depth,
-            min_items,
-            max_items,
+            extras: MatcherExtras::new(extras),
         })
-    }
-
-    /// Extract any extra flags from the text following the matcher.
-    /// Extract any extra flags and optional max_depth from the text following the matcher.
-    /// Returns (extras_set, optional_max_depth)
-    /// The max_depth is determined by the number of '+' characters (e.g., ++ = depth 2)
-    fn extract_matcher_extras(text: &str) -> (HashSet<MatcherExtras>, Option<usize>) {
-        let set_of_chars = text.chars().collect::<HashSet<char>>();
-        let mut extras = HashSet::new();
-
-        // Count the number of '+' characters for both repeated flag and max depth
-        let plus_count = text.chars().filter(|&c| c == '+').count();
-
-        for char in set_of_chars {
-            match char {
-                '+' => {
-                    extras.insert(MatcherExtras::Repeated);
-                }
-                _ => {}
-            }
-        }
-
-        // The max depth is the number of plus signs (if any)
-        let max_depth = if plus_count > 0 {
-            Some(plus_count)
-        } else {
-            None
-        };
-
-        (extras, max_depth)
-    }
-
-    /// Extract item count limits from {min,max} syntax in the text following the matcher.
-    /// Returns (min_items, max_items) where either can be None.
-    /// Examples: {2,5} = min 2, max 5; {3,} = min 3, no max; {,10} = no min, max 10
-    fn extract_item_count_limits(text: &str) -> (Option<usize>, Option<usize>) {
-        // Look for {min,max} pattern
-        let re = Regex::new(r"\{(\d*),(\d*)\}").unwrap();
-
-        if let Some(caps) = re.captures(text) {
-            let min = caps.get(1).and_then(|m| {
-                if m.as_str().is_empty() {
-                    None
-                } else {
-                    m.as_str().parse::<usize>().ok()
-                }
-            });
-            let max = caps.get(2).and_then(|m| {
-                if m.as_str().is_empty() {
-                    None
-                } else {
-                    m.as_str().parse::<usize>().ok()
-                }
-            });
-            (min, max)
-        } else {
-            (None, None)
-        }
     }
 
     /// Extract the ID and pattern from the regex captures.
@@ -208,26 +214,17 @@ impl Matcher {
 
     /// Whether the matcher repeats.
     pub fn is_repeated(&self) -> bool {
-        self.extras.contains(&MatcherExtras::Repeated)
+        self.extras().had_min_max()
     }
 
+    /// The ID of the matcher. This is the key in the final JSON.
     pub fn id(&self) -> Option<&String> {
         self.id.as_ref()
     }
 
-    /// Return optional maximum depth for nested lists
-    pub fn max_depth(&self) -> Option<usize> {
-        self.max_depth
-    }
-
-    /// Return optional minimum number of items at this list level
-    pub fn min_items(&self) -> Option<usize> {
-        self.min_items
-    }
-
-    /// Return optional maximum number of items at this list level
-    pub fn max_items(&self) -> Option<usize> {
-        self.max_items
+    /// Get a reference to the extras
+    pub fn extras(&self) -> &MatcherExtras {
+        &self.extras
     }
 }
 
@@ -311,33 +308,73 @@ mod tests {
     fn test_item_count_limits() {
         // Test {min,max} parsing
         let matcher = Matcher::new("`test:/\\d+/`", Some("{2,5}++")).unwrap();
-        assert_eq!(matcher.min_items(), Some(2));
-        assert_eq!(matcher.max_items(), Some(5));
-        assert_eq!(matcher.max_depth(), Some(2));
+        assert_eq!(matcher.extras().min_items(), Some(2));
+        assert_eq!(matcher.extras().max_items(), Some(5));
         assert!(matcher.is_repeated());
 
         // Test {min,} (no max)
         let matcher = Matcher::new("`test:/\\d+/`", Some("{3,}+")).unwrap();
-        assert_eq!(matcher.min_items(), Some(3));
-        assert_eq!(matcher.max_items(), None);
-        assert_eq!(matcher.max_depth(), Some(1));
+        assert_eq!(matcher.extras().min_items(), Some(3));
+        assert_eq!(matcher.extras().max_items(), None);
 
         // Test {,max} (no min)
         let matcher = Matcher::new("`test:/\\d+/`", Some("{,10}+++")).unwrap();
-        assert_eq!(matcher.min_items(), None);
-        assert_eq!(matcher.max_items(), Some(10));
-        assert_eq!(matcher.max_depth(), Some(3));
+        assert_eq!(matcher.extras().min_items(), None);
+        assert_eq!(matcher.extras().max_items(), Some(10));
 
         // Test with + before {}
         let matcher = Matcher::new("`test:/\\d+/`", Some("++{1,3}")).unwrap();
-        assert_eq!(matcher.min_items(), Some(1));
-        assert_eq!(matcher.max_items(), Some(3));
-        assert_eq!(matcher.max_depth(), Some(2));
+        assert_eq!(matcher.extras().min_items(), Some(1));
+        assert_eq!(matcher.extras().max_items(), Some(3));
 
         // Test without {} - should have no limits
         let matcher = Matcher::new("`test:/\\d+/`", Some("+")).unwrap();
-        assert_eq!(matcher.min_items(), None);
-        assert_eq!(matcher.max_items(), None);
-        assert_eq!(matcher.max_depth(), Some(1));
+        assert_eq!(matcher.extras().min_items(), None);
+        assert_eq!(matcher.extras().max_items(), None);
+    }
+
+    #[test]
+    fn test_had_min_max() {
+        // No extras text at all - should not have min/max
+        let matcher = Matcher::new("`foo:/bar/`", None).unwrap();
+        assert!(!matcher.is_repeated());
+        assert_eq!(matcher.extras().min_items(), None);
+        assert_eq!(matcher.extras().max_items(), None);
+
+        // Extras text without {,} syntax - should not have min/max
+        let matcher = Matcher::new("`foo:/bar/`", Some("+")).unwrap();
+        assert!(!matcher.is_repeated());
+        assert_eq!(matcher.extras().min_items(), None);
+        assert_eq!(matcher.extras().max_items(), None);
+
+        // Empty {,} syntax - should have min/max even though values are None
+        let matcher = Matcher::new("`foo:/bar/`", Some("{,}")).unwrap();
+        assert!(matcher.is_repeated());
+        assert_eq!(matcher.extras().min_items(), None);
+        assert_eq!(matcher.extras().max_items(), None);
+
+        // {min,max} with actual values
+        let matcher = Matcher::new("`foo:/bar/`", Some("{2,5}")).unwrap();
+        assert!(matcher.is_repeated());
+        assert_eq!(matcher.extras().min_items(), Some(2));
+        assert_eq!(matcher.extras().max_items(), Some(5));
+
+        // {min,} with only min
+        let matcher = Matcher::new("`foo:/bar/`", Some("{3,}")).unwrap();
+        assert!(matcher.is_repeated());
+        assert_eq!(matcher.extras().min_items(), Some(3));
+        assert_eq!(matcher.extras().max_items(), None);
+
+        // {,max} with only max
+        let matcher = Matcher::new("`foo:/bar/`", Some("{,10}")).unwrap();
+        assert!(matcher.is_repeated());
+        assert_eq!(matcher.extras().min_items(), None);
+        assert_eq!(matcher.extras().max_items(), Some(10));
+
+        // {,} with other text before/after
+        let matcher = Matcher::new("`foo:/bar/`", Some("++{,}+")).unwrap();
+        assert!(matcher.extras().had_min_max());
+        assert_eq!(matcher.extras().min_items(), None);
+        assert_eq!(matcher.extras().max_items(), None);
     }
 }

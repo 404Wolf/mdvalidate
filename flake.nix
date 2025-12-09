@@ -51,6 +51,7 @@
               git-cliff
               cargo-release
               python312
+              lldb
             ]
           );
           shellHook = ''
