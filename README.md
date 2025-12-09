@@ -85,5 +85,4 @@ typst compile docs/software_requirements_specification.typ
 
 ## Authors
 
-By *Wolf Mermelstein* and *Alessandro Mason*, for Software Engineering class @
-Case Western
+By *Wolf Mermelstein* and *Alessandro Mason*.
