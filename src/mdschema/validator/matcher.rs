@@ -2,15 +2,11 @@ use core::fmt;
 use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
 
-use super::errors::ValidationError;
-
 static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
 });
 
-static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\{(\d*),(\d*)\}").unwrap()
-});
+static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
 
 pub static SPECIAL_CHARS_START: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[+\{\},0-9]*").unwrap());
@@ -24,6 +20,12 @@ pub fn get_everything_after_special_chars(text: &str) -> &str {
         }
         None => text,
     }
+}
+
+/// Errors specific to the matcher.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum Error {
+    MatcherRegexInvalid(String),
 }
 
 /// Features of the given matcher, like max count if it is repeated
@@ -44,7 +46,8 @@ impl MatcherExtras {
     pub fn new(text: Option<&str>) -> Self {
         match text {
             Some(text) => {
-                let (min_items, max_items, had_range_syntax) = Self::extract_item_count_limits(text);
+                let (min_items, max_items, had_range_syntax) = extract_item_count_limits(text);
+
                 Self {
                     min_items,
                     max_items,
@@ -56,32 +59,6 @@ impl MatcherExtras {
                 max_items: None,
                 had_min_max: false,
             },
-        }
-    }
-
-    /// Extract item count limits from {min,max} syntax in the text following the matcher.
-    /// Returns (min_items, max_items, had_range_syntax) where the first two can be None.
-    /// had_range_syntax is true if the {min,max} pattern was found, even if both are empty.
-    fn extract_item_count_limits(text: &str) -> (Option<usize>, Option<usize>, bool) {
-        // Look for {min,max} pattern
-        if let Some(caps) = RANGE_PATTERN.captures(text) {
-            let min = caps.get(1).and_then(|m| {
-                if m.as_str().is_empty() {
-                    None
-                } else {
-                    m.as_str().parse::<usize>().ok()
-                }
-            });
-            let max = caps.get(2).and_then(|m| {
-                if m.as_str().is_empty() {
-                    None
-                } else {
-                    m.as_str().parse::<usize>().ok()
-                }
-            });
-            (min, max, true)
-        } else {
-            (None, None, false)
         }
     }
 
@@ -101,6 +78,32 @@ impl MatcherExtras {
     }
 }
 
+/// Extract item count limits from {min,max} syntax in the text following the matcher.
+/// Returns (min_items, max_items, had_range_syntax) where the first two can be None.
+/// had_range_syntax is true if the {min,max} pattern was found, even if both are empty.
+fn extract_item_count_limits(text: &str) -> (Option<usize>, Option<usize>, bool) {
+    // Look for {min,max} pattern
+    if let Some(caps) = RANGE_PATTERN.captures(text) {
+        let min = caps.get(1).and_then(|m| {
+            if m.as_str().is_empty() {
+                None
+            } else {
+                m.as_str().parse::<usize>().ok()
+            }
+        });
+        let max = caps.get(2).and_then(|m| {
+            if m.as_str().is_empty() {
+                None
+            } else {
+                m.as_str().parse::<usize>().ok()
+            }
+        });
+        (min, max, true)
+    } else {
+        (None, None, false)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Matcher {
     id: Option<String>,
@@ -113,14 +116,31 @@ pub struct Matcher {
 }
 
 #[derive(Debug, Clone)]
-enum MatcherType {
+pub enum MatcherType {
     Regex(Regex),
     Special(SpecialMatchers),
 }
 
+impl fmt::Display for MatcherType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MatcherType::Regex(regex) => write!(f, "{}", regex.as_str()),
+            MatcherType::Special(special) => write!(f, "{}", special),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-enum SpecialMatchers {
+pub enum SpecialMatchers {
     Ruler,
+}
+
+impl fmt::Display for SpecialMatchers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SpecialMatchers::Ruler => write!(f, "Ruler"),
+        }
+    }
 }
 
 /// Special matcher types that extend the meaning of a group.
@@ -138,14 +158,14 @@ enum MatcherFlags {
 impl Matcher {
     /// Create a new Matcher given the text in a matcher codeblock and the text node's contents
     /// immediately proceeding the matcher.
-    pub fn new(pattern: &str, extras: Option<&str>) -> Result<Matcher, ValidationError> {
+    pub fn new(pattern: &str, extras: Option<&str>) -> Result<Matcher, Error> {
         let pattern = pattern[1..pattern.len() - 1].trim(); // Remove surrounding backticks
         let captures = MATCHER_PATTERN.captures(pattern);
 
         let (id, matcher) = match captures {
-            Some(caps) => Self::extract_id_and_pattern(&caps, &pattern)?,
+            Some(caps) => extract_id_and_pattern(&caps, &pattern)?,
             None => {
-                return Err(ValidationError::InvalidMatcherFormat(format!(
+                return Err(Error::MatcherRegexInvalid(format!(
                     "Expected format: 'id:/regex/', got {}",
                     pattern
                 )));
@@ -158,36 +178,6 @@ impl Matcher {
             pattern: matcher,
             extras: MatcherExtras::new(extras),
         })
-    }
-
-    /// Extract the ID and pattern from the regex captures.
-    fn extract_id_and_pattern(
-        captures: &regex::Captures,
-        pattern: &str,
-    ) -> Result<(Option<String>, MatcherType), ValidationError> {
-        let id = captures.name("id").map(|m| m.as_str().to_string());
-        let regex_pattern = captures.name("regex").map(|m| m.as_str().to_string());
-        let special = captures.name("special").map(|m| m.as_str().to_string());
-
-        let matcher = match (regex_pattern, special) {
-            (Some(regex_pattern), None) => {
-                MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
-            }
-            (None, Some(_)) => MatcherType::Special(SpecialMatchers::Ruler),
-            (Some(_), Some(_)) => {
-                return Err(ValidationError::InvalidMatcherFormat(format!(
-                    "Matcher cannot be both regex and special type: {}",
-                    pattern
-                )))
-            }
-            (None, None) => {
-                return Err(ValidationError::InvalidMatcherFormat(format!(
-                    "Matcher must be either regex or special type: {}",
-                    pattern
-                )))
-            }
-        };
-        Ok((id, matcher))
     }
 
     /// Get an actual match string for a given text, if it matches.
@@ -226,6 +216,41 @@ impl Matcher {
     pub fn extras(&self) -> &MatcherExtras {
         &self.extras
     }
+
+    /// Get a reference to the pattern
+    pub fn pattern(&self) -> &MatcherType {
+        &self.pattern
+    }
+}
+
+/// Extract the ID and pattern from the regex captures.
+fn extract_id_and_pattern(
+    captures: &regex::Captures,
+    pattern: &str,
+) -> Result<(Option<String>, MatcherType), Error> {
+    let id = captures.name("id").map(|m| m.as_str().to_string());
+    let regex_pattern = captures.name("regex").map(|m| m.as_str().to_string());
+    let special = captures.name("special").map(|m| m.as_str().to_string());
+
+    let matcher = match (regex_pattern, special) {
+        (Some(regex_pattern), None) => {
+            MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
+        }
+        (None, Some(_)) => MatcherType::Special(SpecialMatchers::Ruler),
+        (Some(_), Some(_)) => {
+            return Err(Error::MatcherRegexInvalid(format!(
+                "Matcher cannot be both regex and special type: {}",
+                pattern
+            )))
+        }
+        (None, None) => {
+            return Err(Error::MatcherRegexInvalid(format!(
+                "Matcher must be either regex or special type: {}",
+                pattern
+            )))
+        }
+    };
+    Ok((id, matcher))
 }
 
 impl fmt::Display for Matcher {

@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use serde_json::{Map, Value};
 
 use crate::mdschema::validator::errors::Error;
@@ -16,7 +14,7 @@ pub struct ValidatorState {
     /// Map of matches found so far.
     matches_so_far: Value,
     /// Any errors encountered during validation.
-    errors_so_far: HashSet<Error>,
+    errors_so_far: Vec<Error>,
 }
 
 impl ValidatorState {
@@ -26,7 +24,7 @@ impl ValidatorState {
             schema_str,
             got_eof: got_eof,
             matches_so_far: Value::Object(Map::new()),
-            errors_so_far: HashSet::new(),
+            errors_so_far: Vec::new(),
         }
     }
 
@@ -54,6 +52,7 @@ impl ValidatorState {
         &self.matches_so_far
     }
 
+    #[allow(dead_code)]
     pub fn add_new_match(&mut self, key: String, value: Value) {
         // Insert new match into matches_so_far
         if let Value::Object(ref mut existing_map) = self.matches_so_far {
@@ -80,9 +79,10 @@ impl ValidatorState {
     }
 
     pub fn add_new_error(&mut self, new_error: Error) {
-        self.errors_so_far.insert(new_error);
+        self.errors_so_far.push(new_error);
     }
 
+    #[allow(dead_code)]
     pub fn add_new_errors(&mut self, new_errors: impl IntoIterator<Item = Error>) {
         self.errors_so_far.extend(new_errors);
     }
