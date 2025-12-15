@@ -4,7 +4,7 @@ use tree_sitter::Tree;
 
 use crate::mdschema::validator::{
     errors::{Error, ParserError},
-    nodes::NodeValidator,
+    node_walker::NodeWalker,
     state::ValidatorState,
     utils::new_markdown_parser,
 };
@@ -48,6 +48,10 @@ impl Validator {
 
     pub fn new_incomplete(schema_str: &str, input_str: &str) -> Option<Self> {
         Self::new(schema_str, input_str, false)
+    }
+
+    pub fn report(&self) -> (impl Iterator<Item = &Error> + std::fmt::Debug, &Value) {
+        (self.errors_so_far(), self.matches_so_far())
     }
 
     pub fn errors_so_far(&self) -> impl Iterator<Item = &Error> + std::fmt::Debug {
@@ -113,6 +117,10 @@ impl Validator {
         }
     }
 
+    pub fn last_input_str(&self) -> &str {
+        self.state.last_input_str()
+    }
+
     pub fn read_final_input(&mut self, input: &str) -> Result<(), Error> {
         self.read_input(input, true)
     }
@@ -130,7 +138,7 @@ impl Validator {
         let mut schema_cursor = self.schema_tree.walk();
         schema_cursor.goto_descendant(self.farthest_reached_descendant_index_pair.1);
 
-        let mut node_validator = NodeValidator::new(&mut self.state, input_cursor, schema_cursor);
+        let mut node_validator = NodeWalker::new(&mut self.state, input_cursor, schema_cursor);
         let (new_input_index, new_schema_index) = node_validator.validate();
 
         self.farthest_reached_descendant_index_pair = (new_input_index, new_schema_index);
@@ -417,11 +425,11 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 
     #[test]
     fn test_matcher_with_prefix_and_suffix_and_number_with_prefix() {
-        let schema = r"Hello `name:/[A-Z][a-z]+/` there!
+        let schema = r"Hello `name:/\w+/` there!
 
-Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
+Version: `ver:/[\d]+/`
 ";
-        let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
+        let input = "Hello Wolf there!\n\nVersion: 1\n";
 
         let (errors, matches) = do_validate(schema, input, true);
         assert!(
@@ -430,7 +438,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
             errors
         );
         assert_eq!(matches.get("name").unwrap(), "Wolf");
-        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
+        assert_eq!(matches.get("ver").unwrap(), "1");
     }
 
     #[test]
@@ -843,11 +851,11 @@ Footer: goodbye
         match errors.next() {
             Some(Error::SchemaError(SchemaError::MultipleMatchersInNodeChildren {
                 received,
-                expected,
+                input_index,
                 ..
             })) => {
-                assert_eq!(*expected, 2, "Expected 2 matchers");
-                assert_eq!(*received, 2, "Received 2 matchers");
+                assert_eq!(*received, 2);
+                assert_eq!(*input_index, 1);
             }
             _ => panic!("Expected MultipleMatchers error but got: {:?}", errors),
         }

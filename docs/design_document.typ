@@ -134,14 +134,14 @@ for an example).
 #figure(
   raw_block(
     raw: `````
-                                      Schema AST                     Input AST
-                                      -----------                    -----------
-                                      Root                           Root
-                                       |-- Paragraph                 |-- Paragraph
-                                       |    |-- Code <--             |    |-- Text() <-- (the schema
-                                       |         |-- Text()          |                   does not contain
-                                                                                         the codeblock)
-                                    `````,
+                                          Schema AST                     Input AST
+                                          -----------                    -----------
+                                          Root                           Root
+                                           |-- Paragraph                 |-- Paragraph
+                                           |    |-- Code <--             |    |-- Text() <-- (the schema
+                                           |         |-- Text()          |                   does not contain
+                                                                                             the codeblock)
+                                        `````,
   ), caption: [matcher code blocks (left) contain inner content we care about (right)],
 ) <fig:might-not-be-same-spot>
 

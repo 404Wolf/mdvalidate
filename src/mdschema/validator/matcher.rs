@@ -1,6 +1,9 @@
 use core::fmt;
 use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
+use tree_sitter::TreeCursor;
+
+use crate::mdschema::validator::utils::get_node_and_next_node;
 
 static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
@@ -11,14 +14,14 @@ static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\
 pub static SPECIAL_CHARS_START: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[+\{\},0-9]*").unwrap());
 
-pub fn get_everything_after_special_chars(text: &str) -> &str {
+pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
     let captures = SPECIAL_CHARS_START.captures(text);
     match captures {
         Some(caps) => {
-            let mat = caps.get(0).unwrap();
-            &text[mat.end()..]
+            let mat = caps.get(0)?;
+            Some(&text[mat.end()..])
         }
-        None => text,
+        None => Some(text),
     }
 }
 
@@ -113,6 +116,8 @@ pub struct Matcher {
     flags: HashSet<MatcherFlags>,
     /// Extra configuration options
     extras: MatcherExtras,
+    /// The length of the matcher and its original extras
+    original_str_len: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -177,6 +182,7 @@ impl Matcher {
             flags: HashSet::new(),
             pattern: matcher,
             extras: MatcherExtras::new(extras),
+            original_str_len: pattern.len() + extras.map_or(0, |s| s.len()),
         })
     }
 
@@ -208,8 +214,8 @@ impl Matcher {
     }
 
     /// The ID of the matcher. This is the key in the final JSON.
-    pub fn id(&self) -> Option<&String> {
-        self.id.as_ref()
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_ref().map(|s| s.as_str())
     }
 
     /// Get a reference to the extras
@@ -220,6 +226,16 @@ impl Matcher {
     /// Get a reference to the pattern
     pub fn pattern(&self) -> &MatcherType {
         &self.pattern
+    }
+
+    pub fn original_str_len(&self) -> usize {
+        self.original_str_len
+    }
+}
+
+impl PartialEq for Matcher {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && format!("{}", self.pattern) == format!("{}", other.pattern)
     }
 }
 
@@ -275,9 +291,51 @@ impl fmt::Display for Matcher {
     }
 }
 
+#[derive(Debug)]
+pub enum ExtractorError {
+    MatcherError(Error),
+    UTF8Error(std::str::Utf8Error),
+    InvariantError,
+}
+
+/// For a cursor pointed at a code node, extract the matcher with potential extras.
+///
+/// For the following schema:
+/// ```md
+/// `name:/\w+/`? is here <-- cursor is here
+/// ```
+///
+/// The matcher would be `/\w+/`?
+///
+/// We require that the cursor is pointed at a code node, potentially followed by text.
+pub fn extract_text_matcher(cursor: &mut TreeCursor, str: &str) -> Result<Matcher, ExtractorError> {
+    // The first node must be a code node
+    debug_assert!(cursor.node().kind() == "code_span");
+    // We don't need to know anything about the next node
+
+    let node_and_next_node = get_node_and_next_node(cursor);
+    match node_and_next_node {
+        Some((node, Some(next_node))) if node.kind() == "code_span" => {
+            let node_text = node
+                .utf8_text(str.as_bytes())
+                .map_err(ExtractorError::UTF8Error)?;
+            let next_node_text = next_node.utf8_text(str.as_bytes()).ok();
+            Matcher::new(node_text, next_node_text).map_err(ExtractorError::MatcherError)
+        }
+        Some((node, None)) if node.kind() == "code_span" => {
+            let node_text = node
+                .utf8_text(str.as_bytes())
+                .map_err(ExtractorError::UTF8Error)?;
+            Matcher::new(node_text, None).map_err(ExtractorError::MatcherError)
+        }
+        _ => Err(ExtractorError::InvariantError),
+    }
+}
+
 mod tests {
     #[cfg(test)]
     use crate::mdschema::validator::matcher::Matcher;
+    use crate::mdschema::validator::{matcher::extract_text_matcher, utils::new_markdown_parser};
 
     #[test]
     fn test_matcher_creation_and_matching() {
@@ -401,5 +459,45 @@ mod tests {
         assert!(matcher.extras().had_min_max());
         assert_eq!(matcher.extras().min_items(), None);
         assert_eq!(matcher.extras().max_items(), None);
+    }
+
+    #[test]
+    fn test_extract_text_matcher() {
+        let schema_str = "`name:/\\w+/` is here";
+
+        let mut parser = new_markdown_parser();
+        let schema_tree = parser.parse(schema_str, None).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        assert_eq!(schema_cursor.node().kind(), "document");
+        schema_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "paragraph");
+        schema_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "code_span");
+
+        let matcher = extract_text_matcher(&mut schema_cursor, schema_str).unwrap();
+
+        assert_eq!(matcher.id(), Some("name"));
+        assert!(!matcher.is_repeated());
+    }
+
+    #[test]
+    fn test_extract_text_matcher_with_repeater() {
+        let schema_str = "`name:/\\w+/`{1,3} is here";
+
+        let mut parser = new_markdown_parser();
+        let schema_tree = parser.parse(schema_str, None).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        assert_eq!(schema_cursor.node().kind(), "document");
+        schema_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "paragraph");
+        schema_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "code_span");
+
+        let matcher = extract_text_matcher(&mut schema_cursor, schema_str).unwrap();
+
+        assert_eq!(matcher.id(), Some("name"));
+        assert!(matcher.is_repeated());
     }
 }

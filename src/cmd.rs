@@ -1,11 +1,10 @@
 use crate::mdschema::validator::{
     errors::{pretty_print_error, Error},
-    nodes::NodeValidationResult,
     validator::Validator,
 };
 use colored::Colorize;
+use serde_json::Value;
 use std::io::{Read, Write};
-use tree_sitter::Tree;
 
 static DEFAULT_BUFFER_SIZE: usize = 2048;
 
@@ -13,7 +12,7 @@ pub fn process<R: Read>(
     schema_str: &String,
     input: &mut R,
     fast_fail: bool,
-) -> Result<(NodeValidationResult, Tree, String), Error> {
+) -> Result<((Vec<Error>, Value), Validator, String), Error> {
     let buffer_size = get_buffer_size();
 
     let mut input_str = String::new();
@@ -51,9 +50,8 @@ pub fn process<R: Read>(
 
     let errors: Vec<_> = validator.errors_so_far().cloned().collect();
     let matches = validator.matches_so_far().clone();
-    let input_tree = validator.input_tree;
 
-    Ok(((errors, matches), input_tree, input_str))
+    Ok(((errors, matches), validator, input_str))
 }
 
 pub fn process_stdio<R: Read, W: Write>(
@@ -63,8 +61,8 @@ pub fn process_stdio<R: Read, W: Write>(
     filename: &str,
     fast_fail: bool,
     quiet: bool,
-) -> Result<(NodeValidationResult, bool), Error> {
-    let ((errors, matches), input_tree, input_str) = process(schema_str, input, fast_fail)?;
+) -> Result<((Vec<Error>, Value), bool), Error> {
+    let ((errors, matches), validator, _input_str) = process(schema_str, input, fast_fail)?;
 
     let mut errored = false;
     if errors.is_empty() {
@@ -82,7 +80,7 @@ pub fn process_stdio<R: Read, W: Write>(
         }
     } else {
         for error in &errors {
-            let pretty = pretty_print_error(&input_tree, error, &input_str, filename)
+            let pretty = pretty_print_error(error, &validator, filename)
                 .map_err(Error::PrettyPrintFailed)?;
             eprintln!("{}", pretty);
             errored = true;
@@ -104,8 +102,8 @@ mod tests {
     use super::*;
     use std::io::{self, Cursor, Read};
 
-    fn get_validator<R: Read>(schema: &String, mut input: R, fast_fail: bool) -> NodeValidationResult {
-        let ((errors, matches), _, _) =
+    fn get_validator<R: Read>(schema: &String, mut input: R, fast_fail: bool) -> (Vec<Error>, Value) {
+        let ((errors, matches), _validator, _) =
             process(schema, &mut input, fast_fail).expect("Validation should complete without errors");
         (errors, matches)
     }

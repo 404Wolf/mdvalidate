@@ -1,7 +1,7 @@
+use crate::mdschema::validator::validator::Validator;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use std::fmt;
 use std::io;
-use tree_sitter::Tree;
 
 use crate::mdschema::validator::matcher::Error as MatcherError;
 use crate::mdschema::validator::utils::find_node_by_index;
@@ -72,8 +72,6 @@ pub enum SchemaError {
         input_index: usize,
         /// Number of matchers received
         received: usize,
-        /// Number of matchers expected
-        expected: usize,
     },
     /// When you attempt to validate a list node, but the schema has a non
     /// repeated matcher.
@@ -98,6 +96,30 @@ pub enum SchemaError {
         schema_index: usize,
         input_index: usize,
     },
+    /// When the corresponding part of the schema text is not valid UTF-8.
+    UTF8Error {
+        schema_index: usize,
+        input_index: usize,
+    },
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum NodeContentMismatchKind {
+    Suffix,
+    Matcher,
+    Prefix,
+    Literal,
+}
+
+impl fmt::Display for NodeContentMismatchKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            NodeContentMismatchKind::Suffix => write!(f, "suffix"),
+            NodeContentMismatchKind::Matcher => write!(f, "matcher"),
+            NodeContentMismatchKind::Prefix => write!(f, "prefix"),
+            NodeContentMismatchKind::Literal => write!(f, "literal"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -117,6 +139,10 @@ pub enum SchemaViolationError {
         input_index: usize,
         /// The expected text that doesn't validate
         expected: String,
+        /// Actual content is obtainable from the input tree
+        actual: String,
+        /// The type of node content mismatch
+        kind: NodeContentMismatchKind,
     },
     /// When it looks like you meant to have a repeating list node, but there is
     /// no {} to indicate repeating.
@@ -171,11 +197,13 @@ pub enum NodeContentMismatchError {
 
 /// Pretty prints an Error using [ariadne](https://github.com/zesterer/ariadne).
 pub fn pretty_print_error(
-    tree: &Tree,
     error: &Error,
-    source_content: &str,
+    validator: &Validator,
     filename: &str,
 ) -> Result<String, String> {
+    let source_content = validator.last_input_str();
+    let tree = &validator.input_tree;
+
     let mut buffer = Vec::new();
 
     match error {
@@ -277,8 +305,6 @@ pub fn pretty_print_error(
             } => {
                 let expected = find_node_by_index(tree.root_node(), *schema_index);
                 let actual = find_node_by_index(tree.root_node(), *input_index);
-                let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
                 let actual_range = actual.start_byte()..actual.end_byte();
 
                 Report::build(ReportKind::Error, (filename, actual_range.clone()))
@@ -286,10 +312,9 @@ pub fn pretty_print_error(
                     .with_label(
                         Label::new((filename, actual_range))
                             .with_message(format!(
-                                "Expected '{}' but found '{}'. Schema: '{}'",
+                                "Expected '{}' but found '{}'",
                                 expected.kind(),
                                 actual.kind(),
-                                schema_content
                             ))
                             .with_color(Color::Red),
                     )
@@ -298,24 +323,22 @@ pub fn pretty_print_error(
                     .map_err(|e| e.to_string())?;
             }
             SchemaViolationError::NodeContentMismatch {
-                schema_index,
+                schema_index: _,
                 input_index,
                 expected,
+                actual,
+                kind,
             } => {
                 let node = find_node_by_index(tree.root_node(), *input_index);
-                let actual =
-                    node_content_by_index_or(tree.root_node(), *input_index, source_content);
-                let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
                 let node_range = node.start_byte()..node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, node_range.clone()))
-                    .with_message("Node content mismatch")
+                    .with_message(format!("Node {} mismatch", kind))
                     .with_label(
                         Label::new((filename, node_range))
                             .with_message(format!(
-                                "Expected '{}' but found '{}'. Schema: '{}'",
-                                expected, actual, schema_content
+                                "Expected {} '{}' but found '{}'",
+                                kind, expected, actual
                             ))
                             .with_color(Color::Red),
                     )
@@ -482,13 +505,10 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
         }
         Error::SchemaError(schema_err) => match schema_err {
             SchemaError::MultipleMatchersInNodeChildren {
-                schema_index,
+                schema_index: _,
                 input_index,
                 received: received_count,
-                expected: expected_count,
             } => {
-                let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
                 let input_node = find_node_by_index(tree.root_node(), *input_index);
                 let input_range = input_node.start_byte()..input_node.end_byte();
 
@@ -497,11 +517,12 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     .with_label(
                         Label::new((filename, input_range))
                             .with_message(format!(
-                                "Multiple matchers (received {}, expected {}) found in node children. Schema: '{}'",
-                                received_count, expected_count, schema_content
+                                "{} matchers found in node children",
+                                received_count
                             ))
                             .with_color(Color::Red),
                     )
+                    .with_help("Only one matcher is allowed per node's children.")
                     .finish()
                     .write((filename, Source::from(source_content)), &mut buffer)
                     .map_err(|e| e.to_string())?;
@@ -591,6 +612,29 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                             .with_message(format!(
                                 "Matcher error: {:?}. Schema: '{}'",
                                 error, schema_content
+                            ))
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+                    .write((filename, Source::from(source_content)), &mut buffer)
+                    .map_err(|e| e.to_string())?;
+            }
+            SchemaError::UTF8Error {
+                schema_index,
+                input_index,
+            } => {
+                let schema_content =
+                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                let input_node = find_node_by_index(tree.root_node(), *input_index);
+                let input_range = input_node.start_byte()..input_node.end_byte();
+
+                Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    .with_message("UTF-8 error in schema")
+                    .with_label(
+                        Label::new((filename, input_range))
+                            .with_message(format!(
+                                "Schema text at this position is not valid UTF-8. Schema: '{}'",
+                                schema_content
                             ))
                             .with_color(Color::Red),
                     )
