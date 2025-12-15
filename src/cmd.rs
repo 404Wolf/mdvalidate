@@ -1,11 +1,10 @@
 use crate::mdschema::validator::{
-    errors::{pretty_print_error, ValidationError},
-    nodes::NodeValidationResult,
+    errors::{pretty_print_error, Error},
     validator::Validator,
 };
 use colored::Colorize;
+use serde_json::Value;
 use std::io::{Read, Write};
-use tree_sitter::Tree;
 
 static DEFAULT_BUFFER_SIZE: usize = 2048;
 
@@ -13,22 +12,22 @@ pub fn process<R: Read>(
     schema_str: &String,
     input: &mut R,
     fast_fail: bool,
-) -> Result<(NodeValidationResult, Tree, String), ValidationError> {
+) -> Result<((Vec<Error>, Value), Validator, String), Error> {
     let buffer_size = get_buffer_size();
 
     let mut input_str = String::new();
     let mut buffer = vec![0; buffer_size];
 
-    let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
-        .ok_or(ValidationError::ValidatorCreationFailed)?;
+    let mut validator = Validator::new_incomplete(schema_str.as_str(), input_str.as_str())
+        .ok_or(Error::ValidatorCreationFailed)?;
 
     loop {
         let bytes_read = input.read(&mut buffer)?;
 
         // If we're done reading, mark EOF
         if bytes_read == 0 {
-            if let Err(e) = validator.read_input(&input_str, true) {
-                return Err(ValidationError::ReadInputFailed(e));
+            if let Err(e) = validator.read_final_input(&input_str) {
+                return Err(Error::ReadInputFailed(e.to_string()));
             }
             validator.validate();
 
@@ -38,8 +37,8 @@ pub fn process<R: Read>(
         let new_text = std::str::from_utf8(&buffer[..bytes_read])?;
         input_str.push_str(new_text);
 
-        if let Err(e) = validator.read_input(&input_str, false) {
-            return Err(ValidationError::ReadInputFailed(e));
+        if let Err(e) = validator.read_more_input(&input_str) {
+            return Err(Error::ReadInputFailed(e.to_string()));
         }
         validator.validate();
 
@@ -51,9 +50,8 @@ pub fn process<R: Read>(
 
     let errors: Vec<_> = validator.errors_so_far().cloned().collect();
     let matches = validator.matches_so_far().clone();
-    let input_tree = validator.input_tree;
 
-    Ok(((errors, matches), input_tree, input_str))
+    Ok(((errors, matches), validator, input_str))
 }
 
 pub fn process_stdio<R: Read, W: Write>(
@@ -63,8 +61,8 @@ pub fn process_stdio<R: Read, W: Write>(
     filename: &str,
     fast_fail: bool,
     quiet: bool,
-) -> Result<(NodeValidationResult, bool), ValidationError> {
-    let ((errors, matches), input_tree, input_str) = process(schema_str, input, fast_fail)?;
+) -> Result<((Vec<Error>, Value), bool), Error> {
+    let ((errors, matches), validator, _input_str) = process(schema_str, input, fast_fail)?;
 
     let mut errored = false;
     if errors.is_empty() {
@@ -82,8 +80,8 @@ pub fn process_stdio<R: Read, W: Write>(
         }
     } else {
         for error in &errors {
-            let pretty = pretty_print_error(&input_tree, error, &input_str, filename)
-                .map_err(ValidationError::PrettyPrintFailed)?;
+            let pretty = pretty_print_error(error, &validator, filename)
+                .map_err(Error::PrettyPrintFailed)?;
             eprintln!("{}", pretty);
             errored = true;
         }
@@ -104,9 +102,9 @@ mod tests {
     use super::*;
     use std::io::{self, Cursor, Read};
 
-    fn get_validator<R: Read>(schema: &String, mut input: R, eof: bool) -> NodeValidationResult {
-        let ((errors, matches), _, _) =
-            process(schema, &mut input, eof).expect("Validation should complete without errors");
+    fn get_validator<R: Read>(schema: &String, mut input: R, fast_fail: bool) -> (Vec<Error>, Value) {
+        let ((errors, matches), _validator, _) =
+            process(schema, &mut input, fast_fail).expect("Validation should complete without errors");
         (errors, matches)
     }
 

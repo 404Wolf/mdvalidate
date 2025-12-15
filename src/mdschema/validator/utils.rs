@@ -1,43 +1,20 @@
-use tree_sitter::Parser;
+use tree_sitter::{Node, Parser, TreeCursor};
 
-#[allow(dead_code)]
-pub fn node_to_str(node: &tree_sitter::Node, input_str: &str) -> String {
-    let mut cursor = node.walk();
-    node_to_str_rec(&mut cursor, input_str, 0)
+/// Get the current treesitter node for a cursor, and the subsequent sibling.
+pub fn get_node_and_next_node<'a>(cursor: &TreeCursor<'a>) -> Option<(Node<'a>, Option<Node<'a>>)> {
+    let mut input_cursor = cursor.clone();
+
+    let first_node = input_cursor.node();
+
+    let next_node = if input_cursor.goto_next_sibling() {
+        Some(input_cursor.node())
+    } else {
+        None
+    };
+
+    Some((first_node, next_node))
 }
 
-#[allow(dead_code)]
-fn node_to_str_rec(cursor: &mut tree_sitter::TreeCursor, input_str: &str, depth: usize) -> String {
-    let node = cursor.node();
-    let indent = "  ".repeat(depth);
-    let mut result = format!(
-        "{}{}[{}..{}]({})",
-        indent,
-        node.kind(),
-        node.byte_range().start,
-        node.byte_range().end,
-        cursor.descendant_index()
-    );
-
-    if node.child_count() == 0 {
-        let text = &input_str[node.byte_range()];
-        result.push_str(&format!(": {:?}", text));
-    }
-
-    result.push('\n');
-
-    if cursor.goto_first_child() {
-        loop {
-            result.push_str(&node_to_str_rec(cursor, input_str, depth + 1));
-            if !cursor.goto_next_sibling() {
-                break;
-            }
-        }
-        cursor.goto_parent();
-    }
-
-    result
-}
 
 /// Create a new Tree-sitter parser for Markdown.
 pub fn new_markdown_parser() -> Parser {
@@ -60,27 +37,95 @@ pub fn find_node_by_index(root: tree_sitter::Node, target_index: usize) -> tree_
     cursor.node()
 }
 
+/// Check if a node is a list.
+pub fn is_list_node(node: &Node) -> bool {
+    match node.kind() {
+        "tight_list" | "loose_list" => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_node_to_str() {
-        let source = "# Heading\n\nThis is a paragraph.";
+    fn test_is_last_node() {
+        let input = "Hello, world!";
         let mut parser = new_markdown_parser();
-        let tree = parser.parse(source, None).unwrap();
+
+        let tree = parser.parse(input, None).unwrap();
         let root_node = tree.root_node();
-        let result = node_to_str(&root_node, source);
-        println!("{}", result);
+        let last_child = root_node.child(root_node.named_child_count() - 1).unwrap();
+
+        assert!(is_last_node(input, &last_child));
     }
 
     #[test]
     fn test_find_node_by_index() {
-        let source = "# Heading\n\nThis is a paragraph.";
+        let input = "# Heading\n\nThis is a paragraph.";
         let mut parser = new_markdown_parser();
-        let tree = parser.parse(source, None).unwrap();
+        let tree = parser.parse(input, None).unwrap();
         let root_node = tree.root_node();
+
+        let node = find_node_by_index(root_node, 0);
+        assert_eq!(node.kind(), "document");
+
+        let node = find_node_by_index(root_node, 1);
+        assert_eq!(node.kind(), "atx_heading");
+
         let node = find_node_by_index(root_node, 2);
         assert_eq!(node.kind(), "atx_h1_marker");
+
+        let node = find_node_by_index(root_node, 3);
+        assert_eq!(node.kind(), "heading_content");
+
+        let node = find_node_by_index(root_node, 4);
+        assert_eq!(node.kind(), "text");
+
+        let node = find_node_by_index(root_node, 5);
+        assert_eq!(node.kind(), "paragraph");
+
+        let node = find_node_by_index(root_node, 6);
+        assert_eq!(node.kind(), "text");
+    }
+
+    #[test]
+    fn test_get_node_and_next_node_with_both() {
+        let input = "# Heading\n\nThis is a paragraph.";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+        let mut cursor = root_node.walk();
+        cursor.goto_first_child(); // Move to the first child (the heading)
+
+        let (node, next_node) = get_node_and_next_node(&cursor).unwrap();
+        assert_eq!(node.kind(), "atx_heading");
+        assert!(next_node.is_some());
+        assert_eq!(next_node.unwrap().kind(), "paragraph");
+    }
+
+    #[test]
+    fn test_get_node_and_next_node_without_next() {
+        let input = "# Heading";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+        let mut cursor = root_node.walk();
+        cursor.goto_first_child(); // Move to the first child (the heading)
+        cursor.goto_next_sibling(); // Move to the next sibling (which doesn't exist)
+        let (node, next_node) = get_node_and_next_node(&cursor).unwrap();
+        assert_eq!(node.kind(), "atx_heading");
+        assert!(next_node.is_none());
+    }
+
+    #[test]
+    fn test_is_list_node() {
+        let input = "- Item 1\n- Item 2";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+        let list_node = root_node.child(0).unwrap();
+        assert!(is_list_node(&list_node));
     }
 }

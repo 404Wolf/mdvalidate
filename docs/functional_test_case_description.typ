@@ -156,54 +156,54 @@ For all the following test cases the steps are:
 
 #table(
   columns: (1fr, 1fr, 1.5fr), align: (left, left, left), table.header([*Test Case*], [*Test Data*], [*Result*]), [Two identical text nodes], [#schema(```markdown
-                    Hello, world!
-                    ```)
+                        Hello, world!
+                        ```)
   #good-example(```markdown
-                    Hello, world!
-                    ```)], [Validation passes with no errors, indices match], [Two different text nodes], [#schema(```markdown
-                    Hello, everyone!
-                    ```)
+                        Hello, world!
+                        ```)], [Validation passes with no errors, indices match], [Two different text nodes], [#schema(```markdown
+                        Hello, everyone!
+                        ```)
   #bad-example(```markdown
-                    Hello, world!
-                    ```)], [Validation fails with "Literal mismatch: expected \"Hello, everyone!\", found
+                        Hello, world!
+                        ```)], [Validation fails with "Literal mismatch: expected \"Hello, everyone!\", found
     \"Hello, world!\""], [Two paragraph nodes with same text], [#schema(```markdown
-                    This is a paragraph.
-                    ```)
+                        This is a paragraph.
+                        ```)
   #good-example(```markdown
-                    This is a paragraph.
-                    ```)], [Validation passes with no errors, indices match], [H1 heading with paragraph (same text)], [#schema(```markdown
-                    # Heading
+                        This is a paragraph.
+                        ```)], [Validation passes with no errors, indices match], [H1 heading with paragraph (same text)], [#schema(```markdown
+                        # Heading
 
-                    This is a paragraph.
-                    ```)
+                        This is a paragraph.
+                        ```)
   #good-example(```markdown
-                    # Heading
+                        # Heading
 
-                    This is a paragraph.
-                    ```)], [Validation passes with no errors, indices match], [Different heading levels (H1 vs H2)], [#schema(```markdown
-                    ## Heading
-                    ```)
+                        This is a paragraph.
+                        ```)], [Validation passes with no errors, indices match], [Different heading levels (H1 vs H2)], [#schema(```markdown
+                        ## Heading
+                        ```)
   #bad-example(```markdown
-                    # Heading
-                    ```)], [Validation fails with "Node mismatch" error], [Not at EOF - final characters mismatch], [#schema(```markdown
-                    # Test
-                    Hello, world
-                    ```)
+                        # Heading
+                        ```)], [Validation fails with "Node mismatch" error], [Not at EOF - final characters mismatch], [#schema(```markdown
+                        # Test
+                        Hello, world
+                        ```)
   #bad-example(```markdown
-                    # Test
-                    Hello, wor
-                    ```)], [With eof: false passes, with eof: true fails due to incomplete content], [Mismatched content structure], [#schema(```markdown
-                    # Test
+                        # Test
+                        Hello, wor
+                        ```)], [With eof: false passes, with eof: true fails due to incomplete content], [Mismatched content structure], [#schema(```markdown
+                        # Test
 
-                    fooobar
+                        fooobar
 
-                    test
-                    ```)
+                        test
+                        ```)
   #bad-example(```markdown
-                    fooobar
+                        fooobar
 
-                    testt
-                    ```)], [Validation fails with mismatch error (missing heading, different text)],
+                        testt
+                        ```)], [Validation fails with mismatch error (missing heading, different text)],
 )
 
 === Schema Definition Language
@@ -212,54 +212,54 @@ For all the following test cases the steps are:
 
 #table(
   columns: (1fr, 1fr, 1.5fr), align: (left, left, left), table.header([*Test Case*], [*Test Data*], [*Result*]), [Valid regex matcher in inline code], [ #schema(```markdown
-                    `id:/test/`
-                    ```)
+                        `id:/test/`
+                        ```)
   #good-example(```markdown
-                    test
-                    ```) ], [Validation passes with no errors], [Invalid regex matcher - pattern mismatch], [#schema(```markdown
-                    `id:/test/`
-                    ```)
+                        test
+                        ```) ], [Validation passes with no errors], [Invalid regex matcher - pattern mismatch], [#schema(```markdown
+                        `id:/test/`
+                        ```)
   #bad-example(```markdown
-                    testttt
-                    ```)], [Validation fails with "Matcher mismatch: input 'testttt' does not" error], [Multiple matchers in single node], [#schema(```markdown
-                    `id:/test/` `id:/example/`
-                    ```)
+                        testttt
+                        ```)], [Validation fails with "Matcher mismatch: input 'testttt' does not" error], [Multiple matchers in single node], [#schema(```markdown
+                        `id:/test/` `id:/example/`
+                        ```)
   #bad-example(```markdown
-                    test example
-                    ```)], [Validation fails with "Multiple matchers in a single node are not supported"
+                        test example
+                        ```)], [Validation fails with "Multiple matchers in a single node are not supported"
     error], [List item with regex matcher], [#schema(```markdown
-                    - `id:/item\d/`
-                    - `id:/item2/`
-                    ```)
+                        - `id:/item\d/`
+                        - `id:/item2/`
+                        ```)
   #good-example(```markdown
-                    - item1
-                    - item2
-                    ```)], [Validation passes for matching list items], [Mismatched node types (list vs paragraph)], [#schema(```markdown
-                    `id:/item1/`
-                    - `id:/item3/`
-                    ```)
+                        - item1
+                        - item2
+                        ```)], [Validation passes for matching list items], [Mismatched node types (list vs paragraph)], [#schema(```markdown
+                        `id:/item1/`
+                        - `id:/item3/`
+                        ```)
   #bad-example(```markdown
-                    - item1
-                    - item2
-                    ```)], [Validation fails with "Node mismatch" error], [Mismatched list item content], [#schema(```markdown
-                    - `id:/item1/`
-                    - `id:/item3/`
-                    ```)
+                        - item1
+                        - item2
+                        ```)], [Validation fails with "Node mismatch" error], [Mismatched list item content], [#schema(```markdown
+                        - `id:/item1/`
+                        - `id:/item3/`
+                        ```)
   #bad-example(```markdown
-                    - item1
-                    - item2
-                    ```)], [Validation fails with "Matcher mismatch: input 'item2' does not" error], [Different list types (ordered vs unordered)], [#schema(```markdown
-                    1. `id:/item1/`
-                    2. `id:/item2/`
-                    ```)
+                        - item1
+                        - item2
+                        ```)], [Validation fails with "Matcher mismatch: input 'item2' does not" error], [Different list types (ordered vs unordered)], [#schema(```markdown
+                        1. `id:/item1/`
+                        2. `id:/item2/`
+                        ```)
   #bad-example(```markdown
-                    - item1
-                    - item2
-                    ```)], [Validation fails with "Node mismatch" error], [Bad schema file], [#schema(```markdown
-                  # `
-                  ```)], [The validation does not even begin because the schema is invalid], [Bad input file], [#schema(```markdown
-                  # `
-                  ```)], [The validation does not even begin because the input is invalid],
+                        - item1
+                        - item2
+                        ```)], [Validation fails with "Node mismatch" error], [Bad schema file], [#schema(```markdown
+                      # `
+                      ```)], [The validation does not even begin because the schema is invalid], [Bad input file], [#schema(```markdown
+                      # `
+                      ```)], [The validation does not even begin because the input is invalid],
 )
 
 We will also have a small test to make sure that we can generate JSON output
@@ -392,80 +392,80 @@ input that is "partial" --- that does not include an EOF.
 
 #table(
   columns: (1fr, 1fr, 1.5fr), align: (left, left, left), table.header([*Test Case*], [*Test Data*], [*Result*]), [Initial validate with EOF works], [#schema(```markdown
-                    Hello World
-                    ```)
+                        Hello World
+                        ```)
   #good-example(```markdown
-                    Hello World
-                    ```)], [Validation passes with no errors when EOF is true], [Initial validate without EOF - incomplete text], [#schema(```markdown
-                    Hello World
-                    ```)
+                        Hello World
+                        ```)], [Validation passes with no errors when EOF is true], [Initial validate without EOF - incomplete text], [#schema(```markdown
+                        Hello World
+                        ```)
   #good-example(```markdown
-                    Hello Wo
-                    ```)], [Validation passes with no errors when EOF is false (incomplete input allowed)], [Initially empty then read input], [#schema(```markdown
-                    Hello
+                        Hello Wo
+                        ```)], [Validation passes with no errors when EOF is false (incomplete input allowed)], [Initially empty then read input], [#schema(```markdown
+                        Hello
 
-                    World
-                    ```)
+                        World
+                        ```)
   Initial: ```markdown
 
-                    ```
+                        ```
   Updated: ```markdown
-                    Hello
+                        Hello
 
-                    TEST World
-                    ```], [Empty input passes, then after reading "Hello\n\nTEST World" validation fails], [Validate, read input, validate again], [#schema(```markdown
-                    Hello World
-                    ```)
+                        TEST World
+                        ```], [Empty input passes, then after reading "Hello\n\nTEST World" validation fails], [Validate, read input, validate again], [#schema(```markdown
+                        Hello World
+                        ```)
   Initial (EOF: false): ```markdown
-                    Hello Wo
-                    ```
+                        Hello Wo
+                        ```
   Updated (EOF: true): ```markdown
-                    Hello World
-                    ```], [First validation passes with incomplete input, second validation passes with
+                        Hello World
+                        ```], [First validation passes with incomplete input, second validation passes with
     complete input], [Validation fails with mismatched content], [#schema(```markdown
-                    # Test
+                        # Test
 
-                    fooobar
+                        fooobar
 
-                    test
-                    ```)
+                        test
+                        ```)
   #bad-example(```markdown
-                    # Test
+                        # Test
 
-                    fooobar
+                        fooobar
 
-                    testt
-                    ```)], [Validation fails due to text mismatch ("test" vs "testt")], [Validation passes with different whitespace], [#schema(```markdown
-                    # Test
+                        testt
+                        ```)], [Validation fails due to text mismatch ("test" vs "testt")], [Validation passes with different whitespace], [#schema(```markdown
+                        # Test
 
-                    fooobar
+                        fooobar
 
-                    test
-                    ```)
+                        test
+                        ```)
   #good-example(```markdown
-                    # Test
+                        # Test
 
 
-                    fooobar
+                        fooobar
 
 
 
-                    test
+                        test
 
-                    ```)], [Validation passes - extra whitespace is ignored], [Validation fails with escaped newlines], [#schema(```markdown
-                    # Test
+                        ```)], [Validation passes - extra whitespace is ignored], [Validation fails with escaped newlines], [#schema(```markdown
+                        # Test
 
-                    fooobar
+                        fooobar
 
-                    test
-                    ```)
+                        test
+                        ```)
   #bad-example(```markdown
-                    # Test
+                        # Test
 
-                    fooobar
+                        fooobar
 
-                    testt
-                    ```)], [Validation fails due to text mismatch with escaped newlines],
+                        testt
+                        ```)], [Validation fails due to text mismatch with escaped newlines],
 )
 
 == Command Line Streaming
@@ -473,26 +473,26 @@ input that is "partial" --- that does not include an EOF.
 // Table 1: Reader/IO Tests
 #table(
   columns: (1fr, 1fr, 1.5fr), align: (left, left, left), table.header([*Test Case*], [*Test Data*], [*Result*]), [Limited reader actually limits bytes], [Input: ```markdown
-                    Hello, world! This is a longer string.
-                    ```
+                        Hello, world! This is a longer string.
+                        ```
   Max bytes per read: 3], [First read returns 3 bytes ("Hel"), subsequent reads return 3 bytes each until
     EOF], [Validate with cursor (basic)], [#schema(```markdown
-                    # Hi there!
-                    ```)
+                        # Hi there!
+                        ```)
   #good-example(```markdown
-                    # Hi there!
-                    ```)], [Validation passes with cursor reader], [Validate with two-byte reads], [#schema(```markdown
-                    # Hi there!
-                    ```)
+                        # Hi there!
+                        ```)], [Validation passes with cursor reader], [Validate with two-byte reads], [#schema(```markdown
+                        # Hi there!
+                        ```)
   #good-example(```markdown
-                    # Hi there!
-                    ```)
+                        # Hi there!
+                        ```)
   Max bytes per read: 2], [Validation completes successfully with limited reader (2 bytes at a time)], [Validate with thousand-byte reads], [#schema(```markdown
-                    # Hi there!
-                    ```)
+                        # Hi there!
+                        ```)
   #good-example(```markdown
-                    # Hi there!
-                    ```)
+                        # Hi there!
+                        ```)
   Max bytes per read: 1000], [Validation completes successfully with large buffer reader (1000 bytes at a
     time)],
 )

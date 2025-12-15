@@ -4,7 +4,7 @@ use tree_sitter::Tree;
 
 use crate::mdschema::validator::{
     errors::{Error, ParserError},
-    nodes::NodeValidator,
+    node_walker::NodeWalker,
     state::ValidatorState,
     utils::new_markdown_parser,
 };
@@ -22,8 +22,8 @@ pub struct Validator {
 }
 
 impl Validator {
-    /// Create a new ValidationZipperTree with the given schema and input strings.
-    pub fn new(schema_str: &str, input_str: &str, eof: bool) -> Option<Self> {
+    /// Create a new Validator with the given schema and input strings.
+    fn new(schema_str: &str, input_str: &str, got_eof: bool) -> Option<Self> {
         let mut schema_parser = new_markdown_parser();
         let schema_tree = schema_parser.parse(schema_str, None)?;
 
@@ -31,8 +31,8 @@ impl Validator {
         let input_tree = input_parser.parse(input_str, None)?;
 
         let mut initial_state =
-            ValidatorState::new(schema_str.to_string(), input_str.to_string(), eof);
-        initial_state.set_got_eof(eof);
+            ValidatorState::new(schema_str.to_string(), input_str.to_string(), got_eof);
+        initial_state.set_got_eof(got_eof);
 
         Some(Validator {
             input_tree,
@@ -40,6 +40,18 @@ impl Validator {
             state: initial_state,
             farthest_reached_descendant_index_pair: (0, 0),
         })
+    }
+
+    pub fn new_complete(schema_str: &str, input_str: &str) -> Option<Self> {
+        Self::new(schema_str, input_str, true)
+    }
+
+    pub fn new_incomplete(schema_str: &str, input_str: &str) -> Option<Self> {
+        Self::new(schema_str, input_str, false)
+    }
+
+    pub fn report(&self) -> (impl Iterator<Item = &Error> + std::fmt::Debug, &Value) {
+        (self.errors_so_far(), self.matches_so_far())
     }
 
     pub fn errors_so_far(&self) -> impl Iterator<Item = &Error> + std::fmt::Debug {
@@ -55,7 +67,7 @@ impl Validator {
     /// Does not update the schema tree or change the descendant indices. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
-    pub fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), Error> {
+    fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), Error> {
         // Update internal state of the last input string
         self.state.set_last_input_str(input.to_string());
 
@@ -105,6 +117,18 @@ impl Validator {
         }
     }
 
+    pub fn last_input_str(&self) -> &str {
+        self.state.last_input_str()
+    }
+
+    pub fn read_final_input(&mut self, input: &str) -> Result<(), Error> {
+        self.read_input(input, true)
+    }
+
+    pub fn read_more_input(&mut self, input: &str) -> Result<(), Error> {
+        self.read_input(input, false)
+    }
+
     /// Validates the input markdown against the schema by traversing both trees
     /// in parallel to the ends, starting from where we last left off.
     pub fn validate(&mut self) {
@@ -114,7 +138,7 @@ impl Validator {
         let mut schema_cursor = self.schema_tree.walk();
         schema_cursor.goto_descendant(self.farthest_reached_descendant_index_pair.1);
 
-        let mut node_validator = NodeValidator::new(&mut self.state, input_cursor, schema_cursor);
+        let mut node_validator = NodeWalker::new(&mut self.state, input_cursor, schema_cursor);
         let (new_input_index, new_schema_index) = node_validator.validate();
 
         self.farthest_reached_descendant_index_pair = (new_input_index, new_schema_index);
@@ -200,7 +224,7 @@ mod tests {
         // First validate with empty input
         validator.validate();
         let errors = validator.errors_so_far();
-        assert_eq!(errors.count(), 0,);
+        assert_eq!(errors.count(), 0);
 
         // Now read more input to complete it
         validator
@@ -211,7 +235,7 @@ mod tests {
         validator.validate();
 
         let errors = validator.errors_so_far();
-        assert_eq!(errors.count(), 0,);
+        assert_eq!(errors.count(), 0);
     }
 
     #[test]
@@ -245,7 +269,7 @@ mod tests {
 
         let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch { .. }) => {}
             _ => panic!("Expected TextMismatch error, got {:?}", errors[0]),
         }
     }
@@ -282,14 +306,15 @@ mod tests {
 
         let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(
+            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
+                schema_index,
+                input_index: _,
                 expected,
                 actual,
-                parent_index,
-            )) => {
+            }) => {
                 assert_eq!(*expected, 2);
                 assert_eq!(*actual, 3);
-                assert_eq!(*parent_index, 9); // TODO: is this right?
+                assert_eq!(*schema_index, 9); // TODO: is this right?
             }
             _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),
         }
@@ -302,15 +327,19 @@ mod tests {
 
         let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(_, _)) => {}
+            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch { .. }) => {}
             _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
         }
     }
 
     #[test]
     fn test_repeated_list_matcher() {
-        let schema = "- `item:/\\d+/`+\n";
-        let input = "- 1\n- 2\n- 3\n";
+        let schema = r"- `item:/\d+/`{,}";
+        let input = r"
+- 1
+- 2
+- 3
+";
 
         let (errors, matches) = do_validate(schema, input, true);
         assert!(
@@ -396,11 +425,11 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 
     #[test]
     fn test_matcher_with_prefix_and_suffix_and_number_with_prefix() {
-        let schema = r"Hello `name:/[A-Z][a-z]+/` there!
+        let schema = r"Hello `name:/\w+/` there!
 
-Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
+Version: `ver:/[\d]+/`
 ";
-        let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
+        let input = "Hello Wolf there!\n\nVersion: 1\n";
 
         let (errors, matches) = do_validate(schema, input, true);
         assert!(
@@ -409,7 +438,7 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
             errors
         );
         assert_eq!(matches.get("name").unwrap(), "Wolf");
-        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
+        assert_eq!(matches.get("ver").unwrap(), "1");
     }
 
     #[test]
@@ -439,8 +468,14 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 
     #[test]
     fn test_nested_lists_validate() {
-        let schema = "- Item 1\n  - Nested item\n- Item 2\n";
-        let input = "- Item 1\n  - Nested item\n- Item 2\n";
+        let schema = r"- Item 1
+  - Nested item
+- Item 2
+";
+        let input = r"- Item 1
+  - Nested item
+- Item 2
+";
 
         let (errors, _) = do_validate(schema, input, true);
         assert!(
@@ -452,8 +487,16 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 
     #[test]
     fn test_nested_lists_with_mismatch() {
-        let schema = "- Item 1\n  - Nested item\n- Item 2\n";
-        let input = "- Item 1\n  - Wrong item\n- Item 2\n"; // "Wrong" instead of "Nested"
+        let schema = r"
+- Item 1
+  - Nested item
+- Item 2
+";
+        let input = r"
+- Item 1
+  - Wrong item
+- Item 2
+"; // "Wrong" instead of "Nested"
 
         let (errors, _) = do_validate(schema, input, true);
         assert!(
@@ -765,11 +808,11 @@ Footer: goodbye
 
         let errors: Vec<_> = validator.errors_so_far().collect();
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch(
+            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
                 actual,
                 expected,
-                _,
-            )) => {
+                ..
+            }) => {
                 assert_eq!(*expected, 4);
                 assert_eq!(*actual, 5);
             }
@@ -806,8 +849,13 @@ Footer: goodbye
 
         let mut errors = validator.errors_so_far();
         match errors.next() {
-            Some(Error::SchemaError(SchemaError::MultipleMatchersInNodeChildren(_, count))) => {
-                assert_eq!(*count, 2, "Expected 2 matchers");
+            Some(Error::SchemaError(SchemaError::MultipleMatchersInNodeChildren {
+                received,
+                input_index,
+                ..
+            })) => {
+                assert_eq!(*received, 2);
+                assert_eq!(*input_index, 1);
             }
             _ => panic!("Expected MultipleMatchers error but got: {:?}", errors),
         }
@@ -840,10 +888,10 @@ Footer: goodbye
         let mut errors = validator.errors_so_far();
 
         match errors.next() {
-            Some(Error::SchemaViolation(SchemaViolationError::NodeContentMismatch(
-                _,
+            Some(Error::SchemaViolation(SchemaViolationError::NodeContentMismatch {
                 expected,
-            ))) => {
+                ..
+            })) => {
                 // The matcher pattern should be in the expected string
                 assert!(
                     expected.contains("item3"),

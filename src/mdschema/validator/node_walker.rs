@@ -1,26 +1,25 @@
 use core::panic;
 
+use log::trace;
 use serde_json::{json, Value};
 use tracing::{debug, instrument};
 use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
-    errors::{Error, SchemaError, SchemaViolationError},
-    matcher::{get_everything_after_special_chars, Matcher},
+    errors::{Error, NodeContentMismatchKind, SchemaError, SchemaViolationError},
+    matcher::{extract_text_matcher, get_everything_after_special_chars, ExtractorError, Matcher},
     state::ValidatorState,
-    utils::is_last_node,
+    utils::{is_last_node, is_list_node},
 };
 
-pub type NodeValidationResult = (Vec<Error>, Value);
-
 /// A node validator that validates input nodes against schema nodes.
-pub struct NodeValidator<'a> {
+pub struct NodeWalker<'a> {
     state: &'a mut ValidatorState,
     input_cursor: TreeCursor<'a>,
     schema_cursor: TreeCursor<'a>,
 }
 
-impl<'a> NodeValidator<'a> {
+impl<'a> NodeWalker<'a> {
     pub fn new(
         state: &'a mut ValidatorState,
         input_cursor: TreeCursor<'a>,
@@ -39,13 +38,9 @@ impl<'a> NodeValidator<'a> {
             &mut self.schema_cursor.clone(),
         );
 
-        // if !self.state.got_eof() {
-        //     self.input_cursor.goto_parent();
-        //     self.schema_cursor.goto_parent();
-        // }
-
         self.state.join_new_matches(new_matches);
 
+        // TODO: this is wrong, we never get the newest indexes
         (
             self.input_cursor.descendant_index(),
             self.schema_cursor.descendant_index(),
@@ -68,15 +63,19 @@ impl<'a> NodeValidator<'a> {
         debug!("Input sexpr: {}", input_cursor.node().to_sexp());
         debug!("Schema sexpr: {}", schema_cursor.node().to_sexp());
 
+        // TODO: do we need this?
         let input_cursor = &mut input_cursor.clone();
         let schema_cursor = &mut schema_cursor.clone();
 
+        let schema_node = schema_cursor.node();
+        let input_node = input_cursor.node();
+
         let mut matches = json!({});
 
-        let is_schema_specified_list_node_result =
-            is_schema_specified_list_node(input_cursor, schema_cursor);
-
         let input_is_text_node = input_cursor.node().kind() == "text";
+
+        // It's a paragraph and it has a single text child
+        // TODO: support all types, including bold etc
         let input_has_single_text_child = input_cursor.node().child_count() == 1
             && input_cursor
                 .node()
@@ -93,10 +92,11 @@ impl<'a> NodeValidator<'a> {
 
         if schema_direct_children_code_node_count > 1 {
             self.state.add_new_error(Error::SchemaError(
-                SchemaError::MultipleMatchersInNodeChildren(
-                    schema_cursor.descendant_index(),
-                    schema_direct_children_code_node_count,
-                ),
+                SchemaError::MultipleMatchersInNodeChildren {
+                    schema_index: schema_cursor.descendant_index(),
+                    input_index: input_cursor.descendant_index(),
+                    received: schema_direct_children_code_node_count,
+                },
             ));
             return json!({});
         }
@@ -115,7 +115,7 @@ impl<'a> NodeValidator<'a> {
             }
 
             return new_matches;
-        } else if is_schema_specified_list_node_result {
+        } else if is_list_node(&schema_node) && is_list_node(&input_node) {
             let new_matches = self.validate_matcher_vs_list(input_cursor, schema_cursor);
 
             // Add the validation matches to our top-level matches
@@ -134,17 +134,17 @@ impl<'a> NodeValidator<'a> {
         }
 
         if input_cursor.node().child_count() != schema_cursor.node().child_count() {
-            if is_schema_specified_list_node(input_cursor, schema_cursor) {
-                // In the repeating list node case that we already took care of this situation is fine
-                // TODO: have we made sure that the repeating list had a +?
+            if is_list_node(&schema_cursor.node()) && is_list_node(&input_cursor.node()) {
+                // If both nodes are list nodes, don't handle them here
             } else if self.state.got_eof() {
                 // TODO: this feels wrong, we should check to make sure that when eof is false we detect nested incomplete nodes too
                 self.state.add_new_error(Error::SchemaViolation(
-                    SchemaViolationError::ChildrenLengthMismatch(
-                        input_cursor.node().child_count(),
-                        schema_cursor.node().child_count(),
-                        schema_cursor.node().descendant_count(),
-                    ),
+                    SchemaViolationError::ChildrenLengthMismatch {
+                        schema_index: schema_cursor.descendant_index(),
+                        input_index: input_cursor.descendant_index(),
+                        expected: schema_cursor.node().child_count(),
+                        actual: input_cursor.node().child_count(),
+                    },
                 ));
             }
         }
@@ -205,10 +205,13 @@ impl<'a> NodeValidator<'a> {
 
         if schema_text != input_text && self.state.got_eof() {
             self.state.add_new_error(Error::SchemaViolation(
-                SchemaViolationError::NodeContentMismatch(
-                    input_cursor.descendant_index(),
-                    schema_text.into(),
-                ),
+                SchemaViolationError::NodeContentMismatch {
+                    schema_index: schema_cursor.descendant_index(),
+                    input_index: input_cursor.descendant_index(),
+                    expected: schema_text.into(),
+                    actual: input_text.into(),
+                    kind: NodeContentMismatchKind::Literal,
+                },
             ));
         }
     }
@@ -228,12 +231,12 @@ impl<'a> NodeValidator<'a> {
         // input list node where the schema has only one child (the list item to
         // match against all input list items) and the input has (>=1) children.
 
-        assert!(
+        debug_assert!(
             is_list_node(&input_cursor.node()),
             "Input node is not a list, got {}",
             input_cursor.node().kind()
         );
-        assert!(
+        debug_assert!(
             is_list_node(&schema_cursor.node()),
             "Schema node is not a list, got {}",
             schema_cursor.node().kind()
@@ -241,7 +244,6 @@ impl<'a> NodeValidator<'a> {
 
         let input_list_node = input_cursor.node();
 
-        // TODO: don't clone
         let input_list_children_count = input_list_node.children(&mut input_cursor.clone()).count();
 
         schema_cursor.goto_first_child(); // we're at a list_item
@@ -266,9 +268,10 @@ impl<'a> NodeValidator<'a> {
         // repeating matcher
         if !main_matcher.is_repeated() && input_list_children_count > 1 {
             self.state.add_new_error(Error::SchemaViolation(
-                SchemaViolationError::NonRepeatingMatcherInListContext(
-                    schema_cursor.descendant_index(),
-                ),
+                SchemaViolationError::NonRepeatingMatcherInListContext {
+                    schema_index: schema_cursor.descendant_index(),
+                    input_index: input_cursor.descendant_index(),
+                },
             ));
         }
 
@@ -343,62 +346,19 @@ impl<'a> NodeValidator<'a> {
         return matches;
     }
 
-    // #[instrument(skip(self, input_cursor, schema_cursor), level = "debug", fields(
-    //      input = %input_cursor.node().kind(),
-    //      schema = %schema_cursor.node().kind()
-    //  ), ret)]
-    // fn validate_matcher_vs_list(
-    //     &mut self,
-    //     input_cursor: &mut TreeCursor,
-    //     schema_cursor: &mut TreeCursor,
-    // ) -> Value {
-    //     let mut matches = json!({});
-
-    //     // Called when we have our cursors pointed at a schema list node and an
-    //     // input list node where the schema has only one child (the list item to
-    //     // match against all input list items) and the input has (>=1) children.
-
-    //     assert!(
-    //         is_list_node(&input_cursor.node()),
-    //         "Input node is not a list, got {}",
-    //         input_cursor.node().kind()
-    //     );
-    //     assert!(
-    //         is_list_node(&schema_cursor.node()),
-    //         "Schema node is not a list, got {}",
-    //         schema_cursor.node().kind()
-    //     );
-
-    //     let input_list_node = input_cursor.node();
-    //     let schema_list_node = schema_cursor.node();
-
-    //     // Input example: | Schema example:
-    //     // - Item1       | - `/l1:/\w+/`{,}
-    //     // - Item2       |   - `/l1:/\w+/`{2,2}
-    //     //   - Item3     |
-    //     //   - Item4     |
-
-    //     // Input example: | Schema example:
-    //     // - Item1       | - `/l1:/\w+/`{,}
-    //     //   - Item3     |   - `/l1:/\w+/`{,}
-    //     // - 222         | - `/l1:/\d+/`{,}
-
-    //     // 1) For each schema node in the schema list node:
-    //     //    a) Iterate over children of the input list node and take while all the
-    //     //       list items have paragraphs.
-    //     //    b) Then tick the schema node forward (downward/rightward)
-    //     // 2) Then tick the schema node forward.
-
-    //     todo!()
-    // }
-
+    /// Validate a matcher node against a text node.
+    ///
+    /// The schema cursor should point at:
+    /// - A text node, followed by a code node, maybe followed by a text node
+    /// - A code node, maybe followed by a text node
+    /// - A code node only
     #[instrument(skip(self, input_cursor, schema_cursor), level = "debug", fields(
         input = %input_cursor.node().kind(),
         schema = %schema_cursor.node().kind()
     ), ret)]
     fn validate_matcher_vs_text(
         &mut self,
-        input_cursor: &mut TreeCursor,
+        input_cursor: &mut TreeCursor, // we know it's text
         schema_cursor: &mut TreeCursor,
     ) -> Value {
         let input_cursor = &mut input_cursor.clone();
@@ -406,113 +366,148 @@ impl<'a> NodeValidator<'a> {
 
         let mut matches = json!({});
 
-        if is_list_node(&input_cursor.node()) && is_list_node(&schema_cursor.node()) {
-            // If the input node is a list, delegate to validate_matcher_node_list
-            return self.validate_matcher_vs_list(input_cursor, schema_cursor);
-        }
-
         let schema_nodes = schema_cursor
             .node()
-            .named_children(&mut schema_cursor.clone())
+            .children(&mut schema_cursor.clone())
             .collect::<Vec<Node>>();
 
         let input_node_descendant_index = input_cursor.descendant_index();
 
-        let (code_node, next_node) =
-            match Self::find_matcher_node(&schema_nodes, input_node_descendant_index) {
-                Ok((code, next)) => (code, next),
-                Err(e) => {
-                    self.state.add_new_error(e.clone());
+        let mut has_prefix = true;
+        let matcher_node_index = if schema_nodes[0].kind() == "code_span" {
+            has_prefix = false;
+            0
+        } else if schema_nodes.len() > 1
+            && schema_nodes[0].kind() == "text"
+            && schema_nodes[1].kind() == "code_span"
+        {
+            1
+        } else {
+            // TODO: we probably want to return an error here
+            return matches;
+        };
+        let has_suffix = {
+            let after_matcher_index = matcher_node_index + 1;
+            after_matcher_index < schema_nodes.len()
+                && schema_nodes[after_matcher_index].kind() == "text"
+        };
+
+        let matcher_node = schema_nodes[matcher_node_index].clone();
+
+        // schema_start              schema_end
+        //      |                         |
+        //      v                         v
+        //      Hello [`name:/\w+/`] World
+        //            ^            ^
+        //            |            |
+        //            |            matcher_end
+        //            matcher_start
+        //
+        // Note that these are all absolute byte offsets
+        let schema_start = schema_cursor.node().byte_range().start;
+        let matcher_start = matcher_node.byte_range().start;
+        let input_start = input_cursor.node().byte_range().start;
+
+        // Only do prefix verification if there is a prefix
+        if has_prefix {
+            trace!("Validating prefix before matcher");
+
+            let prefix_schema = &self.state.schema_str()[schema_start..matcher_start];
+            let prefix_length = matcher_start - schema_start;
+
+            // Check that the input extends enough that we can cover the full
+            // prefix.
+            if input_cursor.node().byte_range().end >= input_start + prefix_length {
+                let prefix_input = &self.state.last_input_str()[input_start..input_start + prefix_length];
+
+                // Do the actual prefix comparison
+                if prefix_schema != prefix_input {
+                    self.state.add_new_error(Error::SchemaViolation(
+                        SchemaViolationError::NodeContentMismatch {
+                            schema_index: schema_cursor.descendant_index(),
+                            input_index: input_node_descendant_index,
+                            expected: prefix_schema.into(),
+                            actual: prefix_input.into(),
+                            kind: NodeContentMismatchKind::Prefix,
+                        },
+                    ));
+
                     return matches;
                 }
-            };
+            } else if !self.is_incomplete(input_cursor) {
+                trace!("Input too short to contain prefix, reporting error");
+                let best_prefix_input_we_can_do = &self.state.last_input_str()[input_start..];
 
-        let matcher_node = match code_node {
-            None => {
-                self.state.add_new_error(Error::SchemaError(
-                    SchemaError::NoMatcherInListNodeChildren(input_node_descendant_index),
-                ));
-                return matches;
-            }
-            Some(node) => node,
-        };
-
-        let matcher_text = &self.state.schema_str()[matcher_node.byte_range()];
-
-        let matcher = match Matcher::new(
-            matcher_text,
-            next_node
-                .map(|n| &self.state.schema_str()[n.byte_range()])
-                .as_deref(),
-        ) {
-            Ok(m) => m,
-            Err(_) => {
+                // Input is too short to contain the required prefix, and we've reached EOF
+                // so this is a genuine error (not just incomplete input)
                 self.state.add_new_error(Error::SchemaViolation(
-                    SchemaViolationError::NodeContentMismatch(
-                        input_node_descendant_index,
-                        matcher_text.into(),
-                    ),
+                    SchemaViolationError::NodeContentMismatch {
+                        schema_index: schema_cursor.descendant_index(),
+                        input_index: input_node_descendant_index,
+                        expected: prefix_schema.into(),
+                        actual: best_prefix_input_we_can_do.into(),
+                        kind: NodeContentMismatchKind::Prefix,
+                    },
                 ));
-
                 return matches;
             }
-        };
-
-        let schema_start = schema_nodes[0].byte_range().start;
-        let matcher_start = matcher_node.byte_range().start - schema_start;
-        let matcher_end = matcher_node.byte_range().end - schema_start;
-
-        // Always validate prefix, even for incomplete nodes
-        let prefix_schema = &self.state.schema_str()[schema_start..schema_start + matcher_start];
-
-        // Check if we have enough input to validate the prefix (the end of the
-        // prefix is the start of the matcher)
-        let input_has_full_prefix = input_cursor.node().byte_range().len() >= matcher_start;
-
-        if input_has_full_prefix {
-            let prefix_input = &self.state.last_input_str()[input_cursor.node().byte_range().start
-                ..input_cursor.node().byte_range().start + matcher_start];
-
-            // Do the actual prefix comparison
-            if prefix_schema != prefix_input {
-                self.state.add_new_error(Error::SchemaViolation(
-                    SchemaViolationError::NodeContentMismatch(
-                        input_node_descendant_index,
-                        prefix_schema.into(),
-                    ),
-                ));
-
-                return matches;
-            }
-        } else if matcher_start > 0 && !self.is_incomplete(input_cursor) {
-            // Input is too short to contain the required prefix, and we've reached EOF
-            // so this is a genuine error (not just incomplete input)
-            self.state.add_new_error(Error::SchemaViolation(
-                SchemaViolationError::NodeContentMismatch(
-                    input_node_descendant_index,
-                    prefix_schema.into(),
-                ),
-            ));
-            return matches;
         }
 
         // Skip matcher and suffix validation if node is incomplete
         if self.is_incomplete(input_cursor) {
+            trace!("Input is incomplete, skipping matcher and suffix validation");
+
             return matches;
         }
 
-        let input_start = input_cursor.node().byte_range().start + matcher_start;
-        let input_to_match = self.state.last_input_str()[input_start..].to_string();
+        // input_start         end_of_match (defined later, after match)
+        //      |                  |
+        //      v                  v
+        //      Hello [.............
+        //            ^            ^
+        //            |            |
+        //            |            |
+        //            input_to_match
+        //
+        // We don't explicitly name input_end as a variable though
+        let matcher_offset = matcher_start - schema_start;
+        let input_to_match = self.state.last_input_str()[input_start + matcher_offset..].to_string();
+
+        // Walk the schema cursor forward one if we had a prefix, since
+        // extract_text_matcher requires the cursor to be located at a code node
+        if has_prefix {
+            schema_cursor.goto_first_child(); // paragraph -> text
+            schema_cursor.goto_next_sibling(); // code_span
+        } else {
+            schema_cursor.goto_first_child(); // paragraph -> code_span
+        }
+        debug_assert_eq!(schema_cursor.node().kind(), "code_span");
+
+        let matcher = match extract_text_matcher_into_schema_err(
+            schema_cursor,
+            input_cursor,
+            self.state.schema_str(),
+        ) {
+            Ok(m) => m,
+            Err(e) => {
+                trace!("Error extracting matcher: {:?}", e);
+                self.state.add_new_error(e);
+                return matches;
+            }
+        };
 
         // If the matcher is for a ruler, we should expect the entire input node to be a ruler
         if matcher.is_ruler() {
+            trace!("Matcher is for a ruler, validating node type");
+
             if input_cursor.node().kind() != "thematic_break" {
+                trace!("Input node is not a ruler, reporting type mismatch error");
+
                 self.state.add_new_error(Error::SchemaViolation(
-                    SchemaViolationError::NodeTypeMismatch(
-                        input_node_descendant_index,
-                        input_node_descendant_index, // should be the same as the schema's.
-                                                     // TODO: is this really true though?
-                    ),
+                    SchemaViolationError::NodeTypeMismatch {
+                        schema_index: schema_cursor.descendant_index(),
+                        input_index: input_node_descendant_index,
+                    },
                 ));
                 return matches;
             } else {
@@ -523,105 +518,103 @@ impl<'a> NodeValidator<'a> {
 
         match matcher.match_str(&input_to_match) {
             Some(matched_str) => {
-                // Validate suffix
-                let schema_end = schema_nodes.last().unwrap().byte_range().end;
+                trace!("Matcher matched input string: {}", matched_str);
 
-                let suffix_schema = get_everything_after_special_chars(
-                    &self.state.schema_str()[schema_start + matcher_end..schema_end],
-                );
+                // Validate suffix if there is one
+                if has_suffix {
+                    schema_cursor.goto_next_sibling(); // code_span -> text
+                    debug_assert_eq!(schema_cursor.node().kind(), "text");
 
-                let suffix_start = input_start + matched_str.len();
-                let input_end = input_cursor.node().byte_range().end;
+                    // Everything that comes after the matcher
+                    let schema_suffix = {
+                        let text_node_after_code_node_str_contents =
+                            &self.state.schema_str()[schema_cursor.node().byte_range()];
+                        // All text after the matcher node and maybe the text node right after it ("extras")
+                        get_everything_after_special_chars(text_node_after_code_node_str_contents)
+                            .unwrap()
+                    };
 
-                // Ensure suffix_start doesn't exceed input_end
-                if suffix_start > input_end {
-                    // Out of bounds
-                    self.state.add_new_error(Error::SchemaViolation(
-                        SchemaViolationError::NodeContentMismatch(
-                            input_node_descendant_index,
-                            suffix_schema.into(),
-                        ),
-                    ));
-                } else {
-                    let suffix_input = &self.state.last_input_str()[suffix_start..input_end];
+                    let input_suffix = {
+                        let end_of_match_relative = matcher_offset + matched_str.len();
+                        let input_end = input_cursor.node().byte_range().end;
 
-                    if suffix_schema != suffix_input {
+                        // end_of_match should never be beyond the input_end
+                        debug_assert!(
+                            input_start + end_of_match_relative <= input_end,
+                            "end_of_match should never exceed input_end"
+                        );
+
+                        &self.state.last_input_str()[input_start + end_of_match_relative..input_end]
+                    };
+                    dbg!(&schema_suffix, &input_suffix);
+
+                    if schema_suffix != input_suffix {
+                        trace!(
+                            "Suffix mismatch: expected '{}', got '{}'",
+                            schema_suffix,
+                            input_suffix
+                        );
+
                         self.state.add_new_error(Error::SchemaViolation(
-                            SchemaViolationError::NodeContentMismatch(
-                                input_node_descendant_index,
-                                suffix_schema.into(),
-                            ),
+                            SchemaViolationError::NodeContentMismatch {
+                                schema_index: schema_cursor.descendant_index(),
+                                input_index: input_node_descendant_index,
+                                expected: schema_suffix.into(),
+                                actual: input_suffix.into(),
+                                kind: NodeContentMismatchKind::Suffix,
+                            },
                         ));
                     }
                 }
+
                 // Good match! Add the matched node to the matches (if it has an id)
                 if let Some(id) = matcher.id() {
                     matches[id] = json!(matched_str);
                 }
             }
             None => {
+                trace!("Matcher did not match input string, reporting mismatch error");
+
                 self.state.add_new_error(Error::SchemaViolation(
-                    SchemaViolationError::NodeContentMismatch(
-                        input_node_descendant_index,
-                        matcher_text.into(),
-                    ),
+                    SchemaViolationError::NodeContentMismatch {
+                        schema_index: schema_cursor.descendant_index(),
+                        input_index: input_node_descendant_index,
+                        expected: matcher.pattern().to_string(),
+                        actual: input_to_match.into(),
+                        kind: NodeContentMismatchKind::Matcher,
+                    },
                 ));
             }
         };
 
-        // Otherwise, check if the nodes are both list nodes
-        if is_list_node(&input_cursor.node()) && is_list_node(&schema_cursor.node()) {
-            // If the input node is a list, delegate to validate_matcher_node_list
-            self.validate_matcher_vs_list(input_cursor, schema_cursor);
-        }
-
         matches
     }
+}
 
-    /// Find the matcher code_span node in a list of schema nodes.
-    ///
-    /// Returns the matcher node and the next node after it, if any.
-    /// Returns an error if multiple matchers are found.
-    fn find_matcher_node<'b>(
-        schema_nodes: &'b [Node<'b>],
-        input_node_descendant_index: usize,
-    ) -> Result<(Option<&'b Node<'b>>, Option<&'b Node<'b>>), Error> {
-        let mut code_node = None;
-        let mut next_node = None;
-
-        for (i, node) in schema_nodes.iter().enumerate() {
-            if node.kind() == "code_span" {
-                if code_node.is_some() {
-                    return Err(Error::SchemaViolation(
-                        SchemaViolationError::NodeContentMismatch(
-                            input_node_descendant_index,
-                            "Multiple matchers in single node".into(),
-                        ),
-                    ));
-                }
-                code_node = Some(node);
-                next_node = schema_nodes.get(i + 1);
-            }
+/// Extracts a text matcher from the schema cursor and converts any errors to schema errors.
+///
+/// Returns `Some(Matcher)` if extraction succeeds, or `None` if an error occurs.
+/// Errors are added to the validator state.
+fn extract_text_matcher_into_schema_err(
+    schema_cursor: &mut TreeCursor,
+    input_cursor: &TreeCursor,
+    schema_str: &str,
+) -> Result<Matcher, Error> {
+    match extract_text_matcher(schema_cursor, schema_str) {
+        Ok(m) => Ok(m),
+        Err(ExtractorError::MatcherError(e)) => {
+            Err(Error::SchemaError(SchemaError::MatcherError {
+                error: e,
+                schema_index: schema_cursor.descendant_index(),
+                input_index: input_cursor.descendant_index(),
+            }))
         }
-
-        Ok((code_node, next_node))
+        Err(ExtractorError::UTF8Error(_)) => Err(Error::SchemaError(SchemaError::UTF8Error {
+            schema_index: schema_cursor.descendant_index(),
+            input_index: input_cursor.descendant_index(),
+        })),
+        Err(ExtractorError::InvariantError) => unreachable!("we should know it's a code node"),
     }
-}
-
-/// Check if a node is a list (tight_list or loose_list).
-fn is_list_node(node: &Node) -> bool {
-    match node.kind() {
-        "tight_list" | "loose_list" => true,
-        _ => false,
-    }
-}
-
-/// Check if a node is a schema-specified list node.
-fn is_schema_specified_list_node(input_cursor: &TreeCursor, schema_cursor: &TreeCursor) -> bool {
-    is_list_node(&schema_cursor.node())
-        && is_list_node(&input_cursor.node())
-        && schema_cursor.node().child_count() == 1
-        && input_cursor.node().child_count() >= 1
 }
 
 #[cfg(test)]
@@ -639,7 +632,7 @@ mod tests {
 
         {
             let mut node_validator =
-                NodeValidator::new(&mut state, input_tree.walk(), schema_tree.walk());
+                NodeWalker::new(&mut state, input_tree.walk(), schema_tree.walk());
 
             node_validator.validate();
         }
@@ -652,6 +645,39 @@ mod tests {
         let matches = state.matches_so_far().clone();
 
         (matches, errors)
+    }
+
+    #[test]
+    fn test_validate_matcher_vs_text_with_no_prefix_or_suffix() {
+        let schema = "`name:/\\w+/`";
+        let input = "Wolf";
+
+        let (matches, errors) = validate_str(schema, input);
+
+        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(matches, json!({"name": "Wolf"}));
+    }
+
+    #[test]
+    fn test_validate_matcher_vs_text_with_prefix_no_suffix() {
+        let schema = "Hello `name:/\\w+/`";
+        let input = "Hello Wolf";
+
+        let (matches, errors) = validate_str(schema, input);
+
+        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(matches, json!({"name": "Wolf"}));
+    }
+
+    #[test]
+    fn test_validate_matcher_vs_text_with_prefix_and_suffix() {
+        let schema = "Hello `name:/\\w+/`!";
+        let input = "Hello Wolf!";
+
+        let (matches, errors) = validate_str(schema, input);
+
+        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(matches, json!({"name": "Wolf"}));
     }
 
     #[test]
@@ -702,5 +728,16 @@ mod tests {
                 "item1": ["apple", {"item2": ["banana", "cherry"]}]
             }),
         );
+    }
+
+    #[test]
+    fn test_single_list_item() {
+        let schema = "- `item:/\\w+/`";
+        let input = "- hello";
+
+        let (matches, errors) = validate_str(schema, input);
+
+        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(matches, json!({"item": "hello"}));
     }
 }

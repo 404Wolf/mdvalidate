@@ -1,29 +1,34 @@
 use core::fmt;
 use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
+use tree_sitter::TreeCursor;
 
-use super::errors::ValidationError;
+use crate::mdschema::validator::utils::get_node_and_next_node;
 
 static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
 });
 
-static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\{(\d*),(\d*)\}").unwrap()
-});
+static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
 
 pub static SPECIAL_CHARS_START: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[+\{\},0-9]*").unwrap());
 
-pub fn get_everything_after_special_chars(text: &str) -> &str {
+pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
     let captures = SPECIAL_CHARS_START.captures(text);
     match captures {
         Some(caps) => {
-            let mat = caps.get(0).unwrap();
-            &text[mat.end()..]
+            let mat = caps.get(0)?;
+            Some(&text[mat.end()..])
         }
-        None => text,
+        None => Some(text),
     }
+}
+
+/// Errors specific to the matcher.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum Error {
+    MatcherRegexInvalid(String),
 }
 
 /// Features of the given matcher, like max count if it is repeated
@@ -44,7 +49,8 @@ impl MatcherExtras {
     pub fn new(text: Option<&str>) -> Self {
         match text {
             Some(text) => {
-                let (min_items, max_items, had_range_syntax) = Self::extract_item_count_limits(text);
+                let (min_items, max_items, had_range_syntax) = extract_item_count_limits(text);
+
                 Self {
                     min_items,
                     max_items,
@@ -56,32 +62,6 @@ impl MatcherExtras {
                 max_items: None,
                 had_min_max: false,
             },
-        }
-    }
-
-    /// Extract item count limits from {min,max} syntax in the text following the matcher.
-    /// Returns (min_items, max_items, had_range_syntax) where the first two can be None.
-    /// had_range_syntax is true if the {min,max} pattern was found, even if both are empty.
-    fn extract_item_count_limits(text: &str) -> (Option<usize>, Option<usize>, bool) {
-        // Look for {min,max} pattern
-        if let Some(caps) = RANGE_PATTERN.captures(text) {
-            let min = caps.get(1).and_then(|m| {
-                if m.as_str().is_empty() {
-                    None
-                } else {
-                    m.as_str().parse::<usize>().ok()
-                }
-            });
-            let max = caps.get(2).and_then(|m| {
-                if m.as_str().is_empty() {
-                    None
-                } else {
-                    m.as_str().parse::<usize>().ok()
-                }
-            });
-            (min, max, true)
-        } else {
-            (None, None, false)
         }
     }
 
@@ -101,6 +81,32 @@ impl MatcherExtras {
     }
 }
 
+/// Extract item count limits from {min,max} syntax in the text following the matcher.
+/// Returns (min_items, max_items, had_range_syntax) where the first two can be None.
+/// had_range_syntax is true if the {min,max} pattern was found, even if both are empty.
+fn extract_item_count_limits(text: &str) -> (Option<usize>, Option<usize>, bool) {
+    // Look for {min,max} pattern
+    if let Some(caps) = RANGE_PATTERN.captures(text) {
+        let min = caps.get(1).and_then(|m| {
+            if m.as_str().is_empty() {
+                None
+            } else {
+                m.as_str().parse::<usize>().ok()
+            }
+        });
+        let max = caps.get(2).and_then(|m| {
+            if m.as_str().is_empty() {
+                None
+            } else {
+                m.as_str().parse::<usize>().ok()
+            }
+        });
+        (min, max, true)
+    } else {
+        (None, None, false)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Matcher {
     id: Option<String>,
@@ -110,17 +116,36 @@ pub struct Matcher {
     flags: HashSet<MatcherFlags>,
     /// Extra configuration options
     extras: MatcherExtras,
+    /// The length of the matcher and its original extras
+    original_str_len: usize,
 }
 
 #[derive(Debug, Clone)]
-enum MatcherType {
+pub enum MatcherType {
     Regex(Regex),
     Special(SpecialMatchers),
 }
 
+impl fmt::Display for MatcherType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MatcherType::Regex(regex) => write!(f, "{}", regex.as_str()),
+            MatcherType::Special(special) => write!(f, "{}", special),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-enum SpecialMatchers {
+pub enum SpecialMatchers {
     Ruler,
+}
+
+impl fmt::Display for SpecialMatchers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SpecialMatchers::Ruler => write!(f, "Ruler"),
+        }
+    }
 }
 
 /// Special matcher types that extend the meaning of a group.
@@ -138,14 +163,14 @@ enum MatcherFlags {
 impl Matcher {
     /// Create a new Matcher given the text in a matcher codeblock and the text node's contents
     /// immediately proceeding the matcher.
-    pub fn new(pattern: &str, extras: Option<&str>) -> Result<Matcher, ValidationError> {
+    pub fn new(pattern: &str, extras: Option<&str>) -> Result<Matcher, Error> {
         let pattern = pattern[1..pattern.len() - 1].trim(); // Remove surrounding backticks
         let captures = MATCHER_PATTERN.captures(pattern);
 
         let (id, matcher) = match captures {
-            Some(caps) => Self::extract_id_and_pattern(&caps, &pattern)?,
+            Some(caps) => extract_id_and_pattern(&caps, &pattern)?,
             None => {
-                return Err(ValidationError::InvalidMatcherFormat(format!(
+                return Err(Error::MatcherRegexInvalid(format!(
                     "Expected format: 'id:/regex/', got {}",
                     pattern
                 )));
@@ -157,37 +182,8 @@ impl Matcher {
             flags: HashSet::new(),
             pattern: matcher,
             extras: MatcherExtras::new(extras),
+            original_str_len: pattern.len() + extras.map_or(0, |s| s.len()),
         })
-    }
-
-    /// Extract the ID and pattern from the regex captures.
-    fn extract_id_and_pattern(
-        captures: &regex::Captures,
-        pattern: &str,
-    ) -> Result<(Option<String>, MatcherType), ValidationError> {
-        let id = captures.name("id").map(|m| m.as_str().to_string());
-        let regex_pattern = captures.name("regex").map(|m| m.as_str().to_string());
-        let special = captures.name("special").map(|m| m.as_str().to_string());
-
-        let matcher = match (regex_pattern, special) {
-            (Some(regex_pattern), None) => {
-                MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
-            }
-            (None, Some(_)) => MatcherType::Special(SpecialMatchers::Ruler),
-            (Some(_), Some(_)) => {
-                return Err(ValidationError::InvalidMatcherFormat(format!(
-                    "Matcher cannot be both regex and special type: {}",
-                    pattern
-                )))
-            }
-            (None, None) => {
-                return Err(ValidationError::InvalidMatcherFormat(format!(
-                    "Matcher must be either regex or special type: {}",
-                    pattern
-                )))
-            }
-        };
-        Ok((id, matcher))
     }
 
     /// Get an actual match string for a given text, if it matches.
@@ -218,14 +214,59 @@ impl Matcher {
     }
 
     /// The ID of the matcher. This is the key in the final JSON.
-    pub fn id(&self) -> Option<&String> {
-        self.id.as_ref()
+    pub fn id(&self) -> Option<&str> {
+        self.id.as_ref().map(|s| s.as_str())
     }
 
     /// Get a reference to the extras
     pub fn extras(&self) -> &MatcherExtras {
         &self.extras
     }
+
+    /// Get a reference to the pattern
+    pub fn pattern(&self) -> &MatcherType {
+        &self.pattern
+    }
+
+    pub fn original_str_len(&self) -> usize {
+        self.original_str_len
+    }
+}
+
+impl PartialEq for Matcher {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && format!("{}", self.pattern) == format!("{}", other.pattern)
+    }
+}
+
+/// Extract the ID and pattern from the regex captures.
+fn extract_id_and_pattern(
+    captures: &regex::Captures,
+    pattern: &str,
+) -> Result<(Option<String>, MatcherType), Error> {
+    let id = captures.name("id").map(|m| m.as_str().to_string());
+    let regex_pattern = captures.name("regex").map(|m| m.as_str().to_string());
+    let special = captures.name("special").map(|m| m.as_str().to_string());
+
+    let matcher = match (regex_pattern, special) {
+        (Some(regex_pattern), None) => {
+            MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
+        }
+        (None, Some(_)) => MatcherType::Special(SpecialMatchers::Ruler),
+        (Some(_), Some(_)) => {
+            return Err(Error::MatcherRegexInvalid(format!(
+                "Matcher cannot be both regex and special type: {}",
+                pattern
+            )))
+        }
+        (None, None) => {
+            return Err(Error::MatcherRegexInvalid(format!(
+                "Matcher must be either regex or special type: {}",
+                pattern
+            )))
+        }
+    };
+    Ok((id, matcher))
 }
 
 impl fmt::Display for Matcher {
@@ -250,9 +291,51 @@ impl fmt::Display for Matcher {
     }
 }
 
+#[derive(Debug)]
+pub enum ExtractorError {
+    MatcherError(Error),
+    UTF8Error(std::str::Utf8Error),
+    InvariantError,
+}
+
+/// For a cursor pointed at a code node, extract the matcher with potential extras.
+///
+/// For the following schema:
+/// ```md
+/// `name:/\w+/`? is here <-- cursor is here
+/// ```
+///
+/// The matcher would be `/\w+/`?
+///
+/// We require that the cursor is pointed at a code node, potentially followed by text.
+pub fn extract_text_matcher(cursor: &mut TreeCursor, str: &str) -> Result<Matcher, ExtractorError> {
+    // The first node must be a code node
+    debug_assert!(cursor.node().kind() == "code_span");
+    // We don't need to know anything about the next node
+
+    let node_and_next_node = get_node_and_next_node(cursor);
+    match node_and_next_node {
+        Some((node, Some(next_node))) if node.kind() == "code_span" => {
+            let node_text = node
+                .utf8_text(str.as_bytes())
+                .map_err(ExtractorError::UTF8Error)?;
+            let next_node_text = next_node.utf8_text(str.as_bytes()).ok();
+            Matcher::new(node_text, next_node_text).map_err(ExtractorError::MatcherError)
+        }
+        Some((node, None)) if node.kind() == "code_span" => {
+            let node_text = node
+                .utf8_text(str.as_bytes())
+                .map_err(ExtractorError::UTF8Error)?;
+            Matcher::new(node_text, None).map_err(ExtractorError::MatcherError)
+        }
+        _ => Err(ExtractorError::InvariantError),
+    }
+}
+
 mod tests {
     #[cfg(test)]
     use crate::mdschema::validator::matcher::Matcher;
+    use crate::mdschema::validator::{matcher::extract_text_matcher, utils::new_markdown_parser};
 
     #[test]
     fn test_matcher_creation_and_matching() {
@@ -376,5 +459,45 @@ mod tests {
         assert!(matcher.extras().had_min_max());
         assert_eq!(matcher.extras().min_items(), None);
         assert_eq!(matcher.extras().max_items(), None);
+    }
+
+    #[test]
+    fn test_extract_text_matcher() {
+        let schema_str = "`name:/\\w+/` is here";
+
+        let mut parser = new_markdown_parser();
+        let schema_tree = parser.parse(schema_str, None).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        assert_eq!(schema_cursor.node().kind(), "document");
+        schema_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "paragraph");
+        schema_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "code_span");
+
+        let matcher = extract_text_matcher(&mut schema_cursor, schema_str).unwrap();
+
+        assert_eq!(matcher.id(), Some("name"));
+        assert!(!matcher.is_repeated());
+    }
+
+    #[test]
+    fn test_extract_text_matcher_with_repeater() {
+        let schema_str = "`name:/\\w+/`{1,3} is here";
+
+        let mut parser = new_markdown_parser();
+        let schema_tree = parser.parse(schema_str, None).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        assert_eq!(schema_cursor.node().kind(), "document");
+        schema_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "paragraph");
+        schema_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "code_span");
+
+        let matcher = extract_text_matcher(&mut schema_cursor, schema_str).unwrap();
+
+        assert_eq!(matcher.id(), Some("name"));
+        assert!(matcher.is_repeated());
     }
 }
