@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use core::fmt;
 use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
@@ -308,7 +310,7 @@ pub enum ExtractorError {
 /// The matcher would be `/\w+/`?
 ///
 /// We require that the cursor is pointed at a code node, potentially followed by text.
-pub fn extract_text_matcher(cursor: &mut TreeCursor, str: &str) -> Result<Matcher, ExtractorError> {
+pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, ExtractorError> {
     // The first node must be a code node
     debug_assert!(cursor.node().kind() == "code_span");
     // We don't need to know anything about the next node
@@ -332,10 +334,10 @@ pub fn extract_text_matcher(cursor: &mut TreeCursor, str: &str) -> Result<Matche
     }
 }
 
+#[cfg(test)]
 mod tests {
-    #[cfg(test)]
-    use crate::mdschema::validator::matcher::Matcher;
-    use crate::mdschema::validator::{matcher::extract_text_matcher, utils::new_markdown_parser};
+    use crate::mdschema::validator::matcher::{extract_text_matcher, Matcher};
+    use crate::mdschema::validator::utils::new_markdown_parser;
 
     #[test]
     fn test_matcher_creation_and_matching() {

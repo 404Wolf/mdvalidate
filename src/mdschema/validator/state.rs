@@ -20,9 +20,9 @@ pub struct ValidatorState {
 impl ValidatorState {
     pub fn new(schema_str: String, last_input_str: String, got_eof: bool) -> Self {
         Self {
-            last_input_str: last_input_str,
+            last_input_str,
             schema_str,
-            got_eof: got_eof,
+            got_eof,
             matches_so_far: Value::Object(Map::new()),
             errors_so_far: Vec::new(),
         }

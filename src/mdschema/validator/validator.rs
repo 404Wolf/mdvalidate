@@ -1,6 +1,6 @@
 use line_col::LineColLookup;
 use serde_json::Value;
-use tree_sitter::Tree;
+use tree_sitter::{InputEdit, Point, Tree};
 
 use crate::mdschema::validator::{
     errors::{Error, ParserError},
@@ -88,7 +88,7 @@ impl Validator {
         }
 
         // Parse incrementally, providing the edit information
-        let edit = tree_sitter::InputEdit {
+        let edit = InputEdit {
             start_byte: old_len,
             old_end_byte: old_len,
             new_end_byte: new_len,
@@ -97,7 +97,7 @@ impl Validator {
             new_end_position: {
                 let lookup = LineColLookup::new(input);
                 let (row, col) = lookup.get(new_len);
-                tree_sitter::Point { row, column: col }
+                Point { row, column: col }
             },
         };
 

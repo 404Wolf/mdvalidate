@@ -66,6 +66,11 @@ pub enum ParserError {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SchemaError {
+    /// Missing a matcher in a matcher group
+    MissingMatcher {
+        schema_index: usize,
+        input_index: usize,
+    },
     /// When a node has multiple matchers in its children, which is not allowed.
     MultipleMatchersInNodeChildren {
         schema_index: usize,
@@ -126,16 +131,22 @@ impl fmt::Display for NodeContentMismatchKind {
 pub enum SchemaViolationError {
     /// Mismatch between schema definition and actual node.
     NodeTypeMismatch {
-        /// Index of the schema node
         schema_index: usize,
-        /// Index of the input node
         input_index: usize,
+        /// The expected node type that doesn't validate
+        ///
+        /// TODO: Make this a enum value rather than the raw treesitter node
+        /// type string.
+        expected: String,
+        /// Actual node type is obtainable from the input tree
+        ///
+        /// TODO: Make this a enum value rather than the raw treesitter node
+        /// type string.
+        actual: String,
     },
     /// Text content of node does not match expected value.
     NodeContentMismatch {
-        /// Index of the schema node
         schema_index: usize,
-        /// Index of the input node
         input_index: usize,
         /// The expected text that doesn't validate
         expected: String,
@@ -147,16 +158,12 @@ pub enum SchemaViolationError {
     /// When it looks like you meant to have a repeating list node, but there is
     /// no {} to indicate repeating.
     NonRepeatingMatcherInListContext {
-        /// Index of the schema node
         schema_index: usize,
-        /// Index of the input node
         input_index: usize,
     },
     /// Nodes have different numbers of children.
     ChildrenLengthMismatch {
-        /// Index of the schema node
         schema_index: usize,
-        /// Index of the input node
         input_index: usize,
         /// Expected number of children
         expected: usize,
@@ -165,18 +172,14 @@ pub enum SchemaViolationError {
     },
     /// Nested list exceeds the maximum allowed depth.
     NodeListTooDeep {
-        /// Index of the schema node
         schema_index: usize,
-        /// Index of the input node (deepest list)
         input_index: usize,
         /// Maximum depth allowed
         max_depth: usize,
     },
     /// List item count is outside the expected range.
     WrongListCount {
-        /// Index of the schema node
         schema_index: usize,
-        /// Index of the input node
         input_index: usize,
         /// Minimum number of items (None means no limit)
         min: Option<usize>,
@@ -300,21 +303,22 @@ pub fn pretty_print_error(
         }
         Error::SchemaViolation(schema_err) => match schema_err {
             SchemaViolationError::NodeTypeMismatch {
-                schema_index,
+                schema_index: _,
                 input_index,
+                expected,
+                actual,
             } => {
-                let expected = find_node_by_index(tree.root_node(), *schema_index);
-                let actual = find_node_by_index(tree.root_node(), *input_index);
-                let actual_range = actual.start_byte()..actual.end_byte();
+                let input_node = find_node_by_index(tree.root_node(), *input_index);
+                let input_range = input_node.start_byte()..input_node.end_byte();
 
-                Report::build(ReportKind::Error, (filename, actual_range.clone()))
+                Report::build(ReportKind::Error, (filename, input_range.clone()))
                     .with_message("Node type mismatch")
                     .with_label(
-                        Label::new((filename, actual_range))
+                        Label::new((filename, input_range))
                             .with_message(format!(
                                 "Expected '{}' but found '{}'",
-                                expected.kind(),
-                                actual.kind(),
+                                expected,
+                                actual,
                             ))
                             .with_color(Color::Red),
                     )
@@ -642,6 +646,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     .write((filename, Source::from(source_content)), &mut buffer)
                     .map_err(|e| e.to_string())?;
             }
+            SchemaError::MissingMatcher { schema_index, input_index } => todo!(),
         },
     }
 
