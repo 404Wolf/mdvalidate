@@ -1,7 +1,8 @@
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
-    node_walker::node_vs_node::validate_node_vs_node, state::ValidatorState,
+    node_walker::{node_vs_node::validate_node_vs_node, validation_result::ValidationResult},
+    validator_state::ValidatorState,
 };
 
 /// A node validator that validates input nodes against schema nodes.
@@ -24,25 +25,18 @@ impl<'a> NodeWalker<'a> {
         }
     }
 
-    pub fn validate(&mut self) -> (usize, usize) {
-        let (new_matches, new_errors) = validate_node_vs_node(
-            &self.input_cursor,
-            &self.schema_cursor,
+    pub fn validate(&mut self) -> ValidationResult {
+        let validation_result = validate_node_vs_node(
+            &mut self.input_cursor,
+            &mut self.schema_cursor,
             self.state.schema_str(),
             self.state.last_input_str(),
             self.state.got_eof(),
         );
 
-        self.state.join_new_matches(new_matches);
-        for error in new_errors {
-            self.state.add_new_error(error);
-        }
+        self.state.push_validation_result(validation_result.clone());
 
-        // TODO: this is wrong, we never get the newest indexes
-        (
-            self.input_cursor.descendant_index(),
-            self.schema_cursor.descendant_index(),
-        )
+        validation_result
     }
 }
 

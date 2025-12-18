@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 
-use crate::mdschema::validator::errors::Error;
+use crate::mdschema::validator::{errors::Error, node_walker::ValidationResult};
 
 pub struct ValidatorState {
     /// The full input string as last read. Not used internally but useful for
@@ -52,14 +52,6 @@ impl ValidatorState {
         &self.matches_so_far
     }
 
-    #[allow(dead_code)]
-    pub fn add_new_match(&mut self, key: String, value: Value) {
-        // Insert new match into matches_so_far
-        if let Value::Object(ref mut existing_map) = self.matches_so_far {
-            existing_map.insert(key, value);
-        }
-    }
-
     pub fn join_new_matches(&mut self, new_matches: Value) {
         match (&mut self.matches_so_far, new_matches) {
             (Value::Object(ref mut existing_map), Value::Object(new_map)) => {
@@ -78,13 +70,10 @@ impl ValidatorState {
         self.errors_so_far.iter().collect()
     }
 
-    pub fn add_new_error(&mut self, new_error: Error) {
-        self.errors_so_far.push(new_error);
-    }
-
-    #[allow(dead_code)]
-    pub fn add_new_errors(&mut self, new_errors: impl IntoIterator<Item = Error>) {
-        self.errors_so_far.extend(new_errors);
+    /// Unpacks a ValidationResult and adds its matches and errors to the state.
+    pub fn push_validation_result(&mut self, result: ValidationResult) {
+        self.join_new_matches(result.value);
+        self.errors_so_far.extend(result.errors);
     }
 }
 
@@ -95,7 +84,9 @@ mod tests {
     #[test]
     fn test_join_new_matches_objects() {
         let mut state = ValidatorState::new("{}".to_string(), "".to_string(), false);
-        state.add_new_match("key1".to_string(), Value::String("value1".to_string()));
+
+        let initial_matches = serde_json::json!({ "key1": "value1" });
+        state.join_new_matches(initial_matches);
 
         let new_matches = Value::Object({
             let mut map = Map::new();

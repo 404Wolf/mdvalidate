@@ -5,8 +5,7 @@ use tree_sitter::{InputEdit, Point, Tree};
 use crate::mdschema::validator::{
     errors::{Error, ParserError},
     node_walker::NodeWalker,
-    state::ValidatorState,
-    utils::new_markdown_parser,
+    utils::new_markdown_parser, validator_state::ValidatorState,
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -139,9 +138,9 @@ impl Validator {
         schema_cursor.goto_descendant(self.farthest_reached_descendant_index_pair.1);
 
         let mut node_validator = NodeWalker::new(&mut self.state, input_cursor, schema_cursor);
-        let (new_input_index, new_schema_index) = node_validator.validate();
+        let validation_result = node_validator.validate();
 
-        self.farthest_reached_descendant_index_pair = (new_input_index, new_schema_index);
+        self.farthest_reached_descendant_index_pair = validation_result.descendant_index_pair();
     }
 }
 
@@ -402,7 +401,7 @@ mod tests {
             "Expected no validation errors but found {:?}",
             errors
         );
-        assert_eq!(matches.get("name").unwrap(), "Wolf");
+        assert_eq!(matches, json!({"name": "Wolf"}));
     }
 
     #[test]
@@ -419,8 +418,8 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
             "Expected no validation errors but found {:?}",
             errors
         );
-        assert_eq!(matches.get("name").unwrap(), "Wolf");
-        assert_eq!(matches.get("ver").unwrap(), "1.2.3");
+
+        assert_eq!(matches, json!({"name": "Wolf", "ver": "1.2.3"}));
     }
 
     #[test]

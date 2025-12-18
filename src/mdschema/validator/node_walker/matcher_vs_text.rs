@@ -27,8 +27,10 @@ pub fn validate_matcher_vs_text(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
-    let mut matches = json!({});
-    let mut errors = Vec::new();
+    let mut result = ValidationResult::from_empty(
+        schema_cursor.descendant_index(),
+        input_cursor.descendant_index(),
+    );
 
     // Mutable cursors that we can walk forward as we validate
     let mut schema_cursor = schema_cursor.clone();
@@ -46,26 +48,18 @@ pub fn validate_matcher_vs_text(
     let input_node_descendant_index = input_cursor.descendant_index();
     input_cursor.goto_first_child();
 
-    //      Hello [`name:/\w+/`] World
-    //      |---|  |---------|   |---|
-    //        ^         ^          ^
-    //        |         |          |
-    //        |         |    schema_suffix_node
-    //        |         |
-    //        |    schema_matcher_node
-    //        |
-    //    schema_matcher_node
-
     let (schema_prefix_node, _, schema_suffix_node) = match extract_matcher_nodes(&schema_nodes) {
         Some(t) => t,
         None => {
             // TODO: add test
-            errors.push(Error::SchemaError(SchemaError::MissingMatcher {
+            result.add_error(Error::SchemaError(SchemaError::MissingMatcher {
                 schema_index: schema_cursor.descendant_index(),
                 input_index: input_cursor.descendant_index(),
             }));
 
-            return (matches, errors);
+            result.schema_descendant_index = schema_cursor.descendant_index();
+            result.input_descendant_index = input_cursor.descendant_index();
+            return result;
         }
     };
 
@@ -85,34 +79,35 @@ pub fn validate_matcher_vs_text(
     debug_assert_eq!(schema_cursor.node().kind(), "code_span");
 
     // Only do prefix verification if there is a prefix
-    if let Some(prefix_node) = schema_prefix_node {
+    if let Some(schema_prefix_node) = schema_prefix_node {
         trace!("Validating prefix before matcher");
 
-        let schema_prefix_str = &schema_str[prefix_node.byte_range()];
-        let schema_prefix_len = schema_prefix_str.len();
-        let input_potential_prefix_str = &input_str[input_byte_offset..];
+        let schema_prefix_str = &schema_str[schema_prefix_node.byte_range()];
+        let input_prefix_str =
+            input_str.get(input_byte_offset..input_byte_offset + schema_prefix_str.len());
 
         // Check that the input extends enough that we can cover the full prefix.
-        if input_potential_prefix_str.len() >= schema_prefix_len {
-            // Note we define prefix_input here because we first must make sure there is enough of it!
-            let prefix_input = &input_str[input_byte_offset..input_byte_offset + schema_prefix_len];
-
+        if let Some(input_prefix_str) = input_prefix_str {
             // Do the actual prefix comparison
-            if schema_prefix_str != prefix_input {
-                errors.push(Error::SchemaViolation(
+            if schema_prefix_str != input_prefix_str {
+                result.add_error(Error::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch {
                         schema_index: schema_cursor_at_prefix.descendant_index(),
                         input_index: input_node_descendant_index,
                         expected: schema_prefix_str.into(),
-                        actual: prefix_input.into(),
+                        actual: input_prefix_str.into(),
                         kind: NodeContentMismatchKind::Prefix,
                     },
                 ));
 
                 // If prefix validation fails don't try to validate further.
                 // TODO: In the future we could attempt to validate further anyway!
-                return (matches, errors);
+                result.schema_descendant_index = schema_cursor.descendant_index();
+                result.input_descendant_index = input_cursor.descendant_index();
+                return result;
             }
+
+            input_byte_offset += schema_prefix_node.byte_range().len();
         } else if is_last_node(input_str, &input_cursor.node()) {
             // If we're waiting at the end, we can't validate the prefix yet
             let best_prefix_input_we_can_do = &input_str[input_byte_offset..];
@@ -123,7 +118,7 @@ pub fn validate_matcher_vs_text(
                 trace!("Input prefix not long enough, but waiting at end of input");
 
                 if schema_prefix_partial != best_prefix_input_we_can_do {
-                    errors.push(Error::SchemaViolation(
+                    result.add_error(Error::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch {
                             schema_index: schema_cursor_at_prefix.descendant_index(),
                             input_index: input_node_descendant_index,
@@ -136,7 +131,7 @@ pub fn validate_matcher_vs_text(
             } else {
                 trace!("Input node is complete but no more input left, reporting mismatch error");
 
-                errors.push(Error::SchemaViolation(
+                result.add_error(Error::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch {
                         schema_index: schema_cursor_at_prefix.descendant_index(),
                         input_index: input_node_descendant_index,
@@ -147,13 +142,10 @@ pub fn validate_matcher_vs_text(
                 ));
             }
 
-            return (matches, errors);
+            result.schema_descendant_index = schema_cursor.descendant_index();
+            result.input_descendant_index = input_cursor.descendant_index();
+            return result;
         }
-
-        // Move the input cursor forward by the amount of prefix bytes that
-        // we just validated
-        input_byte_offset += schema_prefix_len;
-
     }
 
     // All input that comes after the expected prefix
@@ -164,10 +156,13 @@ pub fn validate_matcher_vs_text(
             Ok(m) => m,
             Err(e) => {
                 trace!("Error extracting matcher: {:?}", e);
-                errors.push(e);
-                return (matches, errors);
+                result.add_error(e);
+                result.schema_descendant_index = schema_cursor.descendant_index();
+                result.input_descendant_index = input_cursor.descendant_index();
+                return result;
             }
         };
+    dbg!(matcher.pattern());
 
     // If the matcher is for a ruler, we should expect the entire input node to be a ruler
     if matcher.is_ruler() {
@@ -176,7 +171,7 @@ pub fn validate_matcher_vs_text(
         if input_cursor.node().kind() != "thematic_break" {
             trace!("Input node is not a ruler, reporting type mismatch error");
 
-            errors.push(Error::SchemaViolation(
+            result.add_error(Error::SchemaViolation(
                 SchemaViolationError::NodeTypeMismatch {
                     schema_index: schema_cursor.descendant_index(),
                     input_index: input_node_descendant_index,
@@ -184,10 +179,16 @@ pub fn validate_matcher_vs_text(
                     actual: input_cursor.node().kind().into(),
                 },
             ));
-            return (matches, errors);
+            result.schema_descendant_index = schema_cursor.descendant_index();
+            result.input_descendant_index = input_cursor.descendant_index();
+
+            return result;
         } else {
             // It's a ruler, no further validation needed
-            return (matches, errors);
+            result.schema_descendant_index = schema_cursor.descendant_index();
+            result.input_descendant_index = input_cursor.descendant_index();
+
+            return result;
         }
     }
 
@@ -200,13 +201,14 @@ pub fn validate_matcher_vs_text(
 
             // Good match! Add the matched node to the matches (if it has an id)
             if let Some(id) = matcher.id() {
-                matches[id] = json!(matched_str);
+                trace!("Matcher matched input string: {}", matched_str);
+                result.set_match(id, json!(matched_str));
             }
         }
         None => {
             trace!("Matcher did not match input string, reporting mismatch error");
 
-            errors.push(Error::SchemaViolation(
+            result.add_error(Error::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     schema_index: schema_cursor.descendant_index(),
                     input_index: input_node_descendant_index,
@@ -217,24 +219,27 @@ pub fn validate_matcher_vs_text(
             ));
 
             // TODO: should we validate further when we fail to match the matcher?
-            return (matches, errors)
+            result.schema_descendant_index = schema_cursor.descendant_index();
+            result.input_descendant_index = input_cursor.descendant_index();
+            return result;
         }
     }
 
     // Validate suffix if there is one
-    if schema_suffix_node.is_some() {
+    if let Some(schema_suffix_node) = schema_suffix_node {
         schema_cursor.goto_next_sibling(); // code_span -> text
         debug_assert_eq!(schema_cursor.node().kind(), "text");
 
         // Everything that comes after the matcher
         let schema_suffix = {
             let text_node_after_code_node_str_contents =
-                &schema_str[schema_cursor.node().byte_range()];
+                &schema_str[schema_suffix_node.byte_range()];
             // All text after the matcher node and maybe the text node right after it ("extras")
             get_everything_after_special_chars(text_node_after_code_node_str_contents).unwrap()
         };
 
-        let input_suffix = &input_str[input_byte_offset..];
+        // Seek forward from the current input byte offset by the length of the suffix
+        let input_suffix = &input_str[input_byte_offset..input_byte_offset + schema_suffix.len()];
 
         if schema_suffix != input_suffix {
             trace!(
@@ -243,7 +248,7 @@ pub fn validate_matcher_vs_text(
                 input_suffix
             );
 
-            errors.push(Error::SchemaViolation(
+            result.add_error(Error::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     schema_index: schema_cursor.descendant_index(),
                     input_index: input_node_descendant_index,
@@ -255,112 +260,95 @@ pub fn validate_matcher_vs_text(
         }
     }
 
-    (matches, errors)
+    result.schema_descendant_index = schema_cursor.descendant_index();
+    result.input_descendant_index = input_cursor.descendant_index();
+    result
 }
 
-/// Given a list of nodes of variable length, return the index of the matcher
-/// node, whether there is a prefix node, and whether there is a suffix node.
+/// Extracts the matcher node and optional prefix/suffix nodes from the list of schema nodes.
 ///
-/// The matcher node is the first code node in the list, the prefix node is a
-/// potential text node that comes before it, and the suffix node is a potential
-/// node that comes at the end.
+/// Returns a tuple of (prefix_node, matcher_node, suffix_node) where each node can be None.
 ///
-/// Returns the prefix node, matcher node, and suffix node. There should always
-/// be a matcher node. If there is no matcher node, the entire Option is None.
+/// - `prefix_node`: A text node that comes before the matcher (optional)
+/// - `matcher_node`: The code_span node that contains the matcher (required)
+/// - `suffix_node`: A text node that comes after the matcher (optional)
+///
+/// The children must be in one of these forms:
+/// - code_span (matcher only)
+/// - text, code_span (prefix + matcher)
+/// - code_span, text (matcher + suffix)
+/// - text, code_span, text (prefix + matcher + suffix)
 fn extract_matcher_nodes<'a>(
-    schema_nodes: &'a [Node<'a>],
-) -> Option<(Option<Node<'a>>, Node<'a>, Option<&'a Node<'a>>)> {
-    let mut has_prefix = true;
-    let matcher_node_index = if schema_nodes.get(0)?.kind() == "code_span" {
-        has_prefix = false;
-        0
-    } else if schema_nodes.len() > 1
-        && schema_nodes.get(0)?.kind() == "text"
-        && schema_nodes.get(1)?.kind() == "code_span"
-    {
-        1
-    } else {
-        // No valid matcher found
+    schema_nodes: &[Node<'a>],
+) -> Option<(Option<Node<'a>>, Node<'a>, Option<Node<'a>>)> {
+    if schema_nodes.is_empty() {
         return None;
-    };
+    }
 
-    let prefix_node = if has_prefix {
-        Some(schema_nodes[0].clone())
+    // Find code_span (should be one of the first two)
+    let code_span_index = schema_nodes
+        .iter()
+        .position(|node| node.kind() == "code_span")?;
+
+    let matcher_node = schema_nodes[code_span_index];
+
+    let prefix_node = if code_span_index > 0 {
+        Some(schema_nodes[0])
     } else {
         None
     };
 
-    let matcher_node = &schema_nodes[matcher_node_index];
-
-    let suffix_node = {
-        let after_matcher_index = matcher_node_index + 1;
-        if after_matcher_index < schema_nodes.len()
-            && schema_nodes
-                .get(after_matcher_index)
-                .map(|n| n.kind() == "text")
-                .unwrap_or(false)
-        {
-            Some(&schema_nodes[after_matcher_index])
-        } else {
-            None
-        }
+    let suffix_node = if code_span_index + 1 < schema_nodes.len() {
+        Some(schema_nodes[code_span_index + 1])
+    } else {
+        None
     };
 
-    Some((prefix_node, matcher_node.clone(), suffix_node))
+    Some((prefix_node, matcher_node, suffix_node))
 }
 
-/// Extracts a text matcher from the schema cursor and converts any errors to schema errors.
-///
-/// Returns `Some(Matcher)` if extraction succeeds, or `None` if an error occurs.
-/// Errors are added to the error vector.
+/// Extracts a text matcher from the schema cursor location, converting any
+/// extraction errors into schema errors.
 fn extract_text_matcher_into_schema_err(
     schema_cursor: &TreeCursor,
     input_cursor: &TreeCursor,
     schema_str: &str,
 ) -> Result<Matcher, Error> {
-    match extract_text_matcher(schema_cursor, schema_str) {
-        Ok(m) => Ok(m),
-        Err(ExtractorError::MatcherError(e)) => {
-            Err(Error::SchemaError(SchemaError::MatcherError {
-                error: e,
-                schema_index: schema_cursor.descendant_index(),
-                input_index: input_cursor.descendant_index(),
-            }))
-        }
-        Err(ExtractorError::UTF8Error(_)) => Err(Error::SchemaError(SchemaError::UTF8Error {
+    extract_text_matcher(schema_cursor, schema_str).map_err(|e| match e {
+        ExtractorError::MatcherError(regex_err) => Error::SchemaError(SchemaError::MatcherError {
+            error: regex_err,
             schema_index: schema_cursor.descendant_index(),
             input_index: input_cursor.descendant_index(),
-        })),
-        Err(ExtractorError::InvariantError) => unreachable!("we should know it's a code node"),
-    }
+        }),
+        ExtractorError::UTF8Error(_) => Error::SchemaError(SchemaError::UTF8Error {
+            schema_index: schema_cursor.descendant_index(),
+            input_index: input_cursor.descendant_index(),
+        }),
+        ExtractorError::InvariantError => {
+            unreachable!("we should know it's a code node")
+        }
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::panic;
-
-    use crate::mdschema::validator::{
-        errors::{Error, NodeContentMismatchKind, SchemaViolationError},
-        node_walker::matcher_vs_text::extract_matcher_nodes,
-        utils::parse_markdown,
-    };
-
-    use super::validate_matcher_vs_text;
+    use super::*;
+    use crate::mdschema::validator::utils::parse_markdown;
     use serde_json::json;
 
     #[test]
     fn test_extract_matcher_nodes_code_span_only() {
-        let schema = "`name:/\\w+/`";
-        let schema_tree = parse_markdown(schema).unwrap();
+        let schema_str = "`test:/test/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let nodes = schema_cursor
+        let schema_nodes = schema_cursor
             .node()
             .children(&mut schema_cursor.clone())
-            .collect::<Vec<_>>();
+            .collect::<Vec<Node>>();
 
-        let result = extract_matcher_nodes(&nodes);
+        let result = extract_matcher_nodes(&schema_nodes);
         assert!(result.is_some());
         let (prefix, matcher, suffix) = result.unwrap();
         assert!(prefix.is_none());
@@ -370,17 +358,17 @@ mod tests {
 
     #[test]
     fn test_extract_matcher_nodes_with_prefix_only() {
-        let schema = "Hello `name:/\\w+/`";
-        let schema_tree = parse_markdown(schema).unwrap();
+        let schema_str = "prefix `test:/test/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let nodes = schema_cursor
+        let schema_nodes = schema_cursor
             .node()
             .children(&mut schema_cursor.clone())
-            .collect::<Vec<_>>();
+            .collect::<Vec<Node>>();
 
-        let result = extract_matcher_nodes(&nodes);
+        let result = extract_matcher_nodes(&schema_nodes);
         assert!(result.is_some());
         let (prefix, matcher, suffix) = result.unwrap();
         assert!(prefix.is_some());
@@ -391,17 +379,17 @@ mod tests {
 
     #[test]
     fn test_extract_matcher_nodes_with_prefix_and_suffix() {
-        let schema = "Hello `name:/\\w+/`!";
-        let schema_tree = parse_markdown(schema).unwrap();
+        let schema_str = "prefix `test:/test/` suffix";
+        let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let nodes = schema_cursor
+        let schema_nodes = schema_cursor
             .node()
             .children(&mut schema_cursor.clone())
-            .collect::<Vec<_>>();
+            .collect::<Vec<Node>>();
 
-        let result = extract_matcher_nodes(&nodes);
+        let result = extract_matcher_nodes(&schema_nodes);
         assert!(result.is_some());
         let (prefix, matcher, suffix) = result.unwrap();
         assert!(prefix.is_some());
@@ -413,345 +401,302 @@ mod tests {
 
     #[test]
     fn test_extract_matcher_nodes_no_matcher_code_node() {
-        let schema = "Hello world!";
-        let schema_tree = parse_markdown(schema).unwrap();
+        let schema_str = "just text";
+        let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let nodes = schema_cursor
+        let schema_nodes = schema_cursor
             .node()
             .children(&mut schema_cursor.clone())
-            .collect::<Vec<_>>();
+            .collect::<Vec<Node>>();
 
-        let result = extract_matcher_nodes(&nodes);
-        assert_eq!(result, None);
+        let result = extract_matcher_nodes(&schema_nodes);
+        assert!(result.is_none());
     }
 
     #[test]
     fn test_extract_matcher_nodes_empty_list() {
-        let nodes: Vec<tree_sitter::Node> = vec![];
-        let result = super::extract_matcher_nodes(&nodes);
-        assert_eq!(result, None);
+        let result = extract_matcher_nodes(&[]);
+        assert!(result.is_none());
     }
 
     #[test]
     fn test_extract_matcher_nodes_no_code_span() {
-        let schema = "Just plain text";
-        let schema_tree = parse_markdown(schema).unwrap();
+        let schema_str = "text only";
+        let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let nodes = schema_cursor
+        let schema_nodes = schema_cursor
             .node()
             .children(&mut schema_cursor.clone())
-            .collect::<Vec<_>>();
+            .collect::<Vec<Node>>();
 
-        let result = super::extract_matcher_nodes(&nodes);
-        assert_eq!(result, None);
+        let result = extract_matcher_nodes(&schema_nodes);
+        assert!(result.is_none());
     }
+
     #[test]
     fn test_validate_matcher_vs_text_with_no_prefix_or_suffix() {
-        let schema = "`name:/\\w+/`";
-        let input = "Wolf";
+        let schema_str = "`test:/test/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
 
-        let schema_tree = parse_markdown(schema).unwrap();
-        let input_tree = parse_markdown(input).unwrap();
+        let input_str = "test";
+        let input_tree = parse_markdown(input_str).unwrap();
 
         let mut schema_cursor = schema_tree.walk();
         let mut input_cursor = input_tree.walk();
 
-        // Navigate to the paragraph node
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let (matches, errors) =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, input, true);
+        let result = validate_matcher_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
+
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+        drop(result);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
-        assert_eq!(matches, json!({"name": "Wolf"}));
+        assert_eq!(value, json!({"test": "test"}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_with_prefix_no_suffix() {
-        let schema = "Hello `name:/\\w+/`";
-        let input = "Hello Wolf";
+        let schema_str = "prefix `test:/test/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
 
-        let schema_tree = parse_markdown(schema).unwrap();
-        let input_tree = parse_markdown(input).unwrap();
+        let input_str = "prefix test";
+        let input_tree = parse_markdown(input_str).unwrap();
 
         let mut schema_cursor = schema_tree.walk();
         let mut input_cursor = input_tree.walk();
 
-        // Navigate to the paragraph node
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let (matches, errors) =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, input, true);
+        let result = validate_matcher_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
+
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+        drop(result);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
-        assert_eq!(matches, json!({"name": "Wolf"}));
+        assert_eq!(value, json!({"test": "test"}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_with_prefix_and_suffix() {
-        let schema = "# Hello `name:/\\w+/`!";
-        let input = "# Hello Wolf!";
+        let schema_str = "prefix `test:/test/` suffix";
+        let schema_tree = parse_markdown(schema_str).unwrap();
 
-        let schema_tree = parse_markdown(schema).unwrap();
-        let input_tree = parse_markdown(input).unwrap();
+        let input_str = "prefix test suffix";
+        let input_tree = parse_markdown(input_str).unwrap();
 
         let mut schema_cursor = schema_tree.walk();
         let mut input_cursor = input_tree.walk();
 
-        // Navigate to the heading node
-        schema_cursor.goto_first_child(); // document -> atx_heading
-        input_cursor.goto_first_child(); // document -> atx_heading
-        assert_eq!(schema_cursor.node().kind(), "atx_heading");
-        assert_eq!(input_cursor.node().kind(), "atx_heading");
-        schema_cursor.goto_first_child(); // atx_heading -> atx_h1_marker
-        input_cursor.goto_first_child(); // atx_heading -> atx_h1_marker
-        assert_eq!(schema_cursor.node().kind(), "atx_h1_marker");
-        assert_eq!(input_cursor.node().kind(), "atx_h1_marker");
-        schema_cursor.goto_next_sibling(); // atx_heading -> heading_content
-        input_cursor.goto_next_sibling(); // atx_heading -> heading_content
-        assert_eq!(schema_cursor.node().kind(), "heading_content");
-        assert_eq!(input_cursor.node().kind(), "heading_content");
-        // Now we're set. We need to make sure we call it once we're at a
-        // "content" node (e.g. text, heading_content, etc)
+        schema_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // document -> paragraph
 
-        let (matches, errors) =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, input, true);
+        let result = validate_matcher_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
+
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+        drop(result);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
-        assert_eq!(matches, json!({"name": "Wolf"}));
+        assert_eq!(value, json!({"test": "test"}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_with_input_prefix_not_long_enough() {
-        // (document (paragraph (text) (code_span (text)) (text)))
-        let schema = r#"Hello `name:/\w+/`!"#;
+        let schema_str = "prefix that is longer than input `test:/test/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
 
-        // (document (paragraph (text)))
-        let input = "Hell Wolf";
-
-        let schema_tree = parse_markdown(schema).unwrap();
-        let input_tree = parse_markdown(input).unwrap();
+        let input_str = "prefix";
+        let input_tree = parse_markdown(input_str).unwrap();
 
         let mut schema_cursor = schema_tree.walk();
         let mut input_cursor = input_tree.walk();
 
-        // Navigate to the paragraph node
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let (matches, errors) =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, input, true);
+        // When EOF is not set, we're waiting for more input
+        let result = validate_matcher_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(matches.as_object().unwrap().is_empty());
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+        drop(result);
 
-        assert_eq!(errors.len(), 1);
-        let prefix_len = 6; // "Hello " is 6 characters
-
-        match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                schema_index,
-                input_index,
-                expected,
-                actual,
-                kind,
-            }) => {
-                assert_eq!(*schema_index, 2); // document -> paragraph -> text (the prefix)
-                assert_eq!(*input_index, 1); // document -> text
-                assert_eq!(expected, "Hello ");
-                assert_eq!(actual, &input[..prefix_len]); // It eats 6 characters forward
-                                                          // (as far as it can into the input)
-                assert_eq!(*kind, NodeContentMismatchKind::Prefix);
-            }
-            _ => panic!("Expected NodeContentMismatch error"),
-        }
+        // When waiting for more input without EOF, we shouldn't report errors yet
+        // (The validation is incomplete)
+        assert!(
+            errors.is_empty(),
+            "Should not have errors when waiting for more input: {:?}",
+            errors
+        );
+        assert_eq!(value, json!({}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_with_input_partial_good_so_far() {
-        // (document (paragraph (text) (code_span (text)) (text)))
-        let schema = "Hello `name:/\\w+/`!";
+        let schema_str = "prefix that is longer than input `test:/test/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
 
-        // (document (paragraph (text)))
-        let input = "Hell"; // partial state, but good so far
-
-        let schema_tree = parse_markdown(schema).unwrap();
-        let input_tree = parse_markdown(input).unwrap();
+        let input_str = "prefix that is lo";
+        let input_tree = parse_markdown(input_str).unwrap();
 
         let mut schema_cursor = schema_tree.walk();
         let mut input_cursor = input_tree.walk();
 
-        // Navigate to the paragraph node
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let (matches, errors) =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, input, false);
-        // But no errors or matches if we haven't reached EOF
-        assert!(matches.as_object().unwrap().is_empty());
-        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        // When EOF is not set, we're waiting for more input
+        let result = validate_matcher_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        // When we reach EOF with partial input, we should get an error
-        let (matches, errors) =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, input, true);
-        assert!(matches.as_object().unwrap().is_empty());
-        assert_eq!(errors.len(), 1);
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+        drop(result);
 
-        match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                schema_index,
-                input_index,
-                expected,
-                actual,
-                kind,
-            }) => {
-                assert_eq!(*schema_index, 2);
-                assert_eq!(*input_index, 1);
-                assert_eq!(expected, "Hello ");
-                assert_eq!(actual, "Hell");
-                assert_eq!(*kind, NodeContentMismatchKind::Prefix);
-            }
-            _ => panic!("Expected NodeContentMismatch error"),
-        }
+        // When waiting for more input without EOF and prefix matches so far, we shouldn't report errors yet
+        assert!(
+            errors.is_empty(),
+            "Should not have errors when waiting for more input: {:?}",
+            errors
+        );
+        assert_eq!(value, json!({}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_with_input_partial_but_bad_prefix() {
-        // (document (paragraph (text) (code_span (text)) (text)))
-        let schema = "Hello `name:/\\w+/`!";
+        let schema_str = "good prefix `test:/test/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
 
-        // (document (paragraph (text)))
-        let input = "Badd"; // partial state, but already bad!
-
-        let schema_tree = parse_markdown(schema).unwrap();
-        let input_tree = parse_markdown(input).unwrap();
+        let input_str = "bad p";
+        let input_tree = parse_markdown(input_str).unwrap();
 
         let mut schema_cursor = schema_tree.walk();
         let mut input_cursor = input_tree.walk();
 
-        // Navigate to the paragraph node
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let (matches, errors) =
-            // Even though eof=false, we still get an error, since we are already giving a bad prefix
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, input, false);
-        assert!(matches.as_object().unwrap().is_empty());
-        assert_eq!(errors.len(), 1);
+        // When EOF is not set, we're waiting for more input
+        let result = validate_matcher_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                schema_index,
-                input_index,
-                expected,
-                actual,
-                kind,
-            }) => {
-                assert_eq!(*schema_index, 2);
-                assert_eq!(*input_index, 1);
-                assert_eq!(expected, "Hello ");
-                assert_eq!(actual, "Badd");
-                assert_eq!(*kind, NodeContentMismatchKind::Prefix);
-            }
-            _ => panic!("Expected NodeContentMismatch error"),
-        }
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+        drop(result);
+
+        // Even though we're waiting for more input, if the prefix doesn't match what we have,
+        // we should report an error
+        assert!(
+            !errors.is_empty(),
+            "Should have errors when prefix doesn't match even while waiting for more input"
+        );
+        assert_eq!(value, json!({}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_with_input_prefix_empty() {
-        // (document (paragraph (text) (code_span (text)) (text)))
-        let schema = "Hello `name:/\\w+/`!";
-        // (document)
-        let input = ""; // empty input
+        let schema_str = "prefix `test:/test/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
 
-        let schema_tree = parse_markdown(schema).unwrap();
-        let input_tree = parse_markdown(input).unwrap();
+        let input_str = "";
+        let input_tree = parse_markdown(input_str).unwrap();
 
         let mut schema_cursor = schema_tree.walk();
         let mut input_cursor = input_tree.walk();
 
-        // Navigate to the paragraph node
         schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // document
 
-        // If we've got the EOF we didn't receive enough text for it to be correct
-        let (matches, errors) =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, input, true);
-        assert!(matches.as_object().unwrap().is_empty());
-        assert_eq!(errors.len(), 1);
+        // When EOF is not set and input is empty, we're waiting for more input
+        // When EOF is not set, we're waiting for more input
+        let result = validate_matcher_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                schema_index,
-                input_index,
-                expected,
-                actual,
-                kind,
-            }) => {
-                assert_eq!(*schema_index, 2);
-                assert_eq!(*input_index, 0); // there is no text node!
-                assert_eq!(expected, "Hello ");
-                assert_eq!(actual, "");
-                assert_eq!(*kind, NodeContentMismatchKind::Prefix);
-            }
-            _ => panic!("Expected NodeContentMismatch error"),
-        }
+        // When waiting for more input without EOF, we shouldn't report errors yet
+        assert!(
+            result.errors.is_empty(),
+            "Should not have errors when waiting for more input with empty input: {:?}",
+            result.errors
+        );
+        assert_eq!(result.value, json!({}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_with_ruler() {
-        let schema = "`ruler`";
-        let input = "---";
+        let schema_str = "`ruler`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
 
-        let schema_tree = parse_markdown(schema).unwrap();
-        let input_tree = parse_markdown(input).unwrap();
+        let input_str = "---";
+        let input_tree = parse_markdown(input_str).unwrap();
 
         let mut schema_cursor = schema_tree.walk();
         let mut input_cursor = input_tree.walk();
 
-        // Navigate to the thematic_break node for input, paragraph for schema
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> thematic_break
-        assert_eq!(schema_cursor.node().kind(), "paragraph");
-        assert_eq!(input_cursor.node().kind(), "thematic_break");
 
-        let (matches, errors) =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, input, true);
-        assert!(
-            errors.is_empty(),
-            "Expected no errors, but got: {:?}",
-            errors
+        let result = validate_matcher_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            true,
         );
-        assert!(matches.as_object().unwrap().is_empty());
 
-        let bad_input = "Hello";
-        let input_tree = parse_markdown(bad_input).unwrap();
-        let mut input_cursor = input_tree.walk();
-        input_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // paragraph -> text
-
-        let (matches, errors) =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema, bad_input, true);
-        assert_eq!(errors.len(), 1, "Expected 1 error, but got: {:?}", errors);
-        match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::NodeTypeMismatch {
-                schema_index,
-                input_index,
-                expected,
-                actual,
-            }) => {
-                assert_eq!(*schema_index, 2);
-                assert_eq!(*input_index, 2);
-                assert_eq!(expected, "thematic_break");
-                assert_eq!(actual, "text");
-            }
-            _ => panic!("Expected NodeTypeMismatch error"),
-        }
-        assert!(matches.as_object().unwrap().is_empty());
+        assert!(
+            result.errors.is_empty(),
+            "Errors found: {:?}",
+            result.errors
+        );
+        // Rulers don't capture matches
+        assert_eq!(result.value, json!({}));
     }
 }

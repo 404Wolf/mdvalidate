@@ -3,9 +3,9 @@ use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
-    errors::{Error, SchemaViolationError}, 
-    matcher::Matcher, 
-    node_walker::ValidationResult, 
+    errors::{Error, SchemaViolationError},
+    matcher::Matcher,
+    node_walker::ValidationResult,
     utils::is_list_node
 };
 
@@ -19,8 +19,7 @@ pub fn validate_matcher_vs_list(
     schema_str: &str,
     input_str: &str,
 ) -> ValidationResult {
-    let mut matches = json!({});
-    let mut errors = Vec::new();
+    let mut result = ValidationResult::from_empty(schema_cursor.descendant_index(), input_cursor.descendant_index());
 
     // Called when we have our cursors pointed at a schema list node and an
     // input list node where the schema has only one child (the list item to
@@ -38,21 +37,21 @@ pub fn validate_matcher_vs_list(
     );
 
     let input_list_node = input_cursor.node();
-    let input_cursor = input_cursor.clone();
-    let mut schema_cursor = schema_cursor.clone();
+    let mut input_cursor_local = input_cursor.clone();
+    let mut schema_cursor_local = schema_cursor.clone();
 
-    let input_list_children_count = input_list_node.children(&mut input_cursor.clone()).count();
+    let input_list_children_count = input_list_node.children(&mut input_cursor_local.clone()).count();
 
-    schema_cursor.goto_first_child(); // we're at a list_item
-    assert_eq!(schema_cursor.node().kind(), "list_item");
-    schema_cursor.goto_first_child(); // we're at a list_marker
-    assert_eq!(schema_cursor.node().kind(), "list_marker");
-    schema_cursor.goto_next_sibling(); // list_marker -> content (may be paragraph)
+    schema_cursor_local.goto_first_child(); // we're at a list_item
+    assert_eq!(schema_cursor_local.node().kind(), "list_item");
+    schema_cursor_local.goto_first_child(); // we're at a list_marker
+    assert_eq!(schema_cursor_local.node().kind(), "list_marker");
+    schema_cursor_local.goto_next_sibling(); // list_marker -> content (may be paragraph)
 
     // Get the matcher for this level
-    let matcher_str = &schema_str[schema_cursor.node().child(0).unwrap().byte_range()].to_string();
+    let matcher_str = &schema_str[schema_cursor_local.node().child(0).unwrap().byte_range()].to_string();
 
-    let child1_text = schema_cursor
+    let child1_text = schema_cursor_local
         .node()
         .child(1)
         .map(|child1| &schema_str[child1.byte_range()]);
@@ -62,10 +61,10 @@ pub fn validate_matcher_vs_list(
     // When there are multiple nodes in the input list we require a
     // repeating matcher
     if !main_matcher.is_repeated() && input_list_children_count > 1 {
-        errors.push(Error::SchemaViolation(
+        result.add_error(Error::SchemaViolation(
             SchemaViolationError::NonRepeatingMatcherInListContext {
-                schema_index: schema_cursor.descendant_index(),
-                input_index: input_cursor.descendant_index(),
+                schema_index: schema_cursor_local.descendant_index(),
+                input_index: input_cursor_local.descendant_index(),
             },
         ));
     }
@@ -76,7 +75,7 @@ pub fn validate_matcher_vs_list(
 
     // Process each list item at this level
     for child in input_list_node.children(
-        &mut input_cursor.clone(), // TODO: don't clone cursor
+        &mut input_cursor_local.clone(), // TODO: don't clone cursor
     ) {
         let mut child_cursor = child.walk();
 
@@ -101,25 +100,25 @@ pub fn validate_matcher_vs_list(
             let has_nested_list = child_cursor.goto_next_sibling();
             if has_nested_list && is_list_node(&child_cursor.node()) {
                 // Save a copy of the schema cursor
-                let mut schema_list_cursor = schema_cursor.clone();
+                let mut schema_list_cursor = schema_cursor_local.clone();
 
                 // Navigate to the nested list in the schema
                 let schema_has_nested_list = schema_list_cursor.goto_next_sibling();
 
                 if schema_has_nested_list && is_list_node(&schema_list_cursor.node()) {
                     // Process the nested list
-                    let (nested_matches, nested_errors) = validate_matcher_vs_list(
-                        &child_cursor,
-                        &schema_list_cursor,
+                    let nested_result = validate_matcher_vs_list(
+                        &mut child_cursor,
+                        &mut schema_list_cursor,
                         schema_str,
                         input_str,
                     );
 
                     // Add nested errors to our error collection
-                    errors.extend(nested_errors);
+                    result.errors.extend(nested_result.errors);
 
                     // Add each nested match as a separate object in the notes_objects array
-                    for (key, value) in nested_matches.as_object().unwrap() {
+                    for (key, value) in nested_result.value.as_object().unwrap() {
                         let mut note_obj = json!({});
                         note_obj[key] = value.clone();
                         notes_objects.push(note_obj);
@@ -141,8 +140,10 @@ pub fn validate_matcher_vs_list(
 
     // Add the main items to the result
     if let Some(id) = main_matcher_id {
-        matches[id] = json!(main_items);
+        result.set_match(id, json!(main_items));
     }
 
-    (matches, errors)
+    result.schema_descendant_index = schema_cursor_local.descendant_index();
+    result.input_descendant_index = input_cursor_local.descendant_index();
+    result
 }

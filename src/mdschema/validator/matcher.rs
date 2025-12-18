@@ -376,6 +376,8 @@ mod tests {
     #[test]
     fn test_with_no_id() {
         let matcher = Matcher::new("`ruler`", None).unwrap();
+        assert!(matcher.is_ruler());
+
         assert_eq!(matcher.id, None);
         assert_eq!(matcher.match_str("ruler"), Some("ruler"));
         assert_eq!(matcher.match_str("***"), Some("ruler"));
