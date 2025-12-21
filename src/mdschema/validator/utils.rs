@@ -63,6 +63,14 @@ pub fn is_textual_node(node: &Node) -> bool {
     }
 }
 
+/// Check if a node is a "textual container" (i.e., a paragraph node, list item node, or similar).
+pub fn is_textual_container(node: &Node) -> bool {
+    match node.kind() {
+        "paragraph" | "heading_content" | "list_item" => true,
+        _ => false,
+    }
+}
+
 /// Chekc if a node is a heading node.
 pub fn is_heading_node(node: &Node) -> bool {
     dbg!(&node.kind());

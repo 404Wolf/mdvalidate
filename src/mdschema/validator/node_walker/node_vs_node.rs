@@ -6,7 +6,7 @@ use crate::mdschema::validator::{
     node_walker::{
         list_vs_list::validate_list_vs_list, text_vs_text::validate_text_vs_text, ValidationResult,
     },
-    utils::{is_list_node, is_textual_node},
+    utils::{is_list_node, is_textual_container, is_textual_node},
 };
 
 /// Validate two arbitrary nodes against each other.
@@ -38,7 +38,7 @@ pub fn validate_node_vs_node(
     let mut schema_cursor = schema_cursor.clone();
 
     // 1) Both are textual nodes
-    if both_are_textual_nodes(&input_node, &schema_node) {
+    if both_are_textual_nodes_or_textual_containers(&input_node, &schema_node) {
         return validate_text_vs_text(
             &input_cursor,
             &schema_cursor,
@@ -122,8 +122,9 @@ pub fn validate_node_vs_node(
 }
 
 /// Check if both nodes are textual nodes.
-fn both_are_textual_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_textual_node(&input_node) && is_textual_node(&schema_node)
+fn both_are_textual_nodes_or_textual_containers(input_node: &Node, schema_node: &Node) -> bool {
+    (is_textual_node(&input_node) && is_textual_node(&schema_node))
+        || (is_textual_container(&input_node) && is_textual_container(&schema_node))
 }
 
 /// Check if both nodes are list nodes.
@@ -147,24 +148,28 @@ mod tests {
 
     #[test]
     fn test_validate_two_paragraphs_with_text_vs_text() {
-        let schema = parse_markdown("This is **bold** text.").unwrap();
-        let input = parse_markdown("This is **bold** text.").unwrap();
+        let schema_str = "this is **bold** text.";
+        let input_str = "this is **bold** text.";
+        let schema = parse_markdown(schema_str).unwrap();
+        let input = parse_markdown(input_str).unwrap();
 
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result = validate_node_vs_node(&input_cursor, &schema_cursor, "", "", false);
+        let result = validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
         assert!(result.errors.is_empty());
         assert_eq!(result.value, json!({}));
 
-        let schema = parse_markdown("This is *bold* text.").unwrap();
-        let input = parse_markdown("This is **bold** text.").unwrap();
+        let schema_str2 = "This is *bold* text.";
+        let input_str2 = "This is **bold** text.";
+        let schema2 = parse_markdown(schema_str2).unwrap();
+        let input2 = parse_markdown(input_str2).unwrap();
 
-        let schema_cursor = schema.walk();
-        let input_cursor = input.walk();
+        let schema_cursor = schema2.walk();
+        let input_cursor = input2.walk();
 
-        let result = validate_node_vs_node(&input_cursor, &schema_cursor, "", "", false);
+        let result = validate_node_vs_node(&input_cursor, &schema_cursor, schema_str2, input_str2, false);
 
         assert!(!result.errors.is_empty());
         assert_eq!(result.value, json!({}));
