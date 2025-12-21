@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::errors::Error;
+use crate::mdschema::validator::errors::ValidationError;
 
 pub mod node_walker;
 
@@ -10,6 +10,7 @@ pub use validation_result::ValidationResult;
 
 mod matcher_vs_list;
 mod matcher_vs_text;
+mod list_vs_list;
 mod node_vs_node;
 mod text_vs_text;
 mod utils;

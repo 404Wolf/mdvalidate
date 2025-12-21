@@ -1,16 +1,19 @@
-use log::debug;
 use tracing::instrument;
-use tree_sitter::TreeCursor;
+use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
-    errors::{Error, SchemaError, SchemaViolationError},
+    errors::ValidationError,
     node_walker::{
-        matcher_vs_list::validate_matcher_vs_list, matcher_vs_text::validate_matcher_vs_text,
-        text_vs_text::validate_text_vs_text, ValidationResult,
+        list_vs_list::validate_list_vs_list, text_vs_text::validate_text_vs_text, ValidationResult,
     },
-    utils::is_list_node,
+    utils::{is_list_node, is_textual_node},
 };
 
+/// Validate two arbitrary nodes against each other.
+///
+/// 1) If both nodes are textual nodes (schema is text, input is text), validate using `textual_vs_textual`.
+/// 2) If both nodes are list nodes, validate using `matcher_vs_list`.
+/// 3) If both nodes are heading nodes or document nodes, for each child of each, validate recursively using `validate_node_vs_node`.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "trace", fields(
     input = %input_cursor.node().kind(),
     schema = %schema_cursor.node().kind()
@@ -22,148 +25,116 @@ pub fn validate_node_vs_node(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
+    let mut result = ValidationResult::from_empty(
+        input_cursor.descendant_index(),
+        schema_cursor.descendant_index(),
+    );
+
+    let input_node = input_cursor.node();
+    let schema_node = schema_cursor.node();
+
+    // Make mutable copies that we can walk
     let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();
 
-    debug!("Input sexpr: {}", input_cursor.node().to_sexp());
-    debug!("Schema sexpr: {}", schema_cursor.node().to_sexp());
-
-    let schema_node = schema_cursor.node();
-    let input_node = input_cursor.node();
-
-    let mut result = ValidationResult::from_empty(
-        schema_cursor.descendant_index(),
-        input_cursor.descendant_index(),
-    );
-
-    let input_is_text_node = input_cursor.node().kind() == "text";
-
-    // It's a paragraph and it has a single text child
-    // TODO: support all types, including bold etc
-    let input_has_single_text_child = input_cursor.node().child_count() == 1
-        && input_cursor
-            .node()
-            .child(0)
-            .map(|c| c.kind() == "text")
-            .unwrap_or(false);
-
-    let input_is_text_only = input_is_text_node || input_has_single_text_child;
-    let schema_direct_children_code_node_count = schema_cursor
-        .node()
-        .children(&mut schema_cursor.clone())
-        .filter(|c| c.kind() == "code_span")
-        .count();
-
-    if schema_direct_children_code_node_count > 1 {
-        result.add_error(Error::SchemaError(
-            SchemaError::MultipleMatchersInNodeChildren {
-                schema_index: schema_cursor.descendant_index(),
-                input_index: input_cursor.descendant_index(),
-                received: schema_direct_children_code_node_count,
-            },
-        ));
-        result.schema_descendant_index = schema_cursor.descendant_index();
-        result.input_descendant_index = input_cursor.descendant_index();
-        return result;
+    // 1) Both are textual nodes
+    if both_are_textual_nodes(&input_node, &schema_node) {
+        return validate_text_vs_text(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            got_eof,
+        );
     }
 
-    if schema_direct_children_code_node_count == 1 && input_is_text_only {
-        let new_result =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, got_eof);
-
-        result.errors.extend(new_result.errors);
-        result.value = new_result.value;
-        result.schema_descendant_index = new_result.schema_descendant_index;
-        result.input_descendant_index = new_result.input_descendant_index;
-        return result;
-    } else if is_list_node(&schema_node) && is_list_node(&input_node) {
-        let new_result =
-            validate_matcher_vs_list(&input_cursor, &schema_cursor, schema_str, input_str);
-
-        result.errors.extend(new_result.errors);
-        result.value = new_result.value;
-        result.schema_descendant_index = new_result.schema_descendant_index;
-        result.input_descendant_index = new_result.input_descendant_index;
-        return result;
-    } else if schema_cursor.node().kind() == "text" {
-        let new_result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, got_eof);
-        result.errors.extend(new_result.errors);
-        result.schema_descendant_index = new_result.schema_descendant_index;
-        result.input_descendant_index = new_result.input_descendant_index;
+    // 2) Both are list nodes
+    if both_are_list_nodes(&input_node, &schema_node) {
+        return validate_list_vs_list(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            got_eof,
+        );
     }
 
-    if input_cursor.node().child_count() != schema_cursor.node().child_count() {
-        if is_list_node(&schema_cursor.node()) && is_list_node(&input_cursor.node()) {
-            // If both nodes are list nodes, don't handle them here
-        } else if got_eof {
-            // TODO: this feels wrong, we should check to make sure that when eof is false we detect nested incomplete nodes too
-            result.add_error(Error::SchemaViolation(
-                SchemaViolationError::ChildrenLengthMismatch {
-                    schema_index: schema_cursor.descendant_index(),
-                    input_index: input_cursor.descendant_index(),
-                    expected: schema_cursor.node().child_count(),
-                    actual: input_cursor.node().child_count(),
-                },
-            ));
-        }
-    }
+    // 3) Both are heading nodes or document nodes
+    if both_are_matching_top_level_nodes(&input_node, &schema_node) {
+        // Crawl down one layer to get to the actual children
+        if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
+            let new_result = validate_node_vs_node(
+                &input_cursor,
+                &schema_cursor,
+                schema_str,
+                input_str,
+                got_eof,
+            );
+            result.join_other_result(&new_result);
 
-    // TODO: what if one node has children and the other doesn't?
-    if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
-        let new_result =
-            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, got_eof);
+            result.schema_descendant_index = new_result.schema_descendant_index;
+            result.input_descendant_index = new_result.input_descendant_index;
 
-        result.errors.extend(new_result.errors);
-        // This is a merge for the JSON values.
-        if let Some(new_obj) = new_result.value.as_object() {
-            if let Some(current_obj) = result.value.as_object_mut() {
-                for (key, value) in new_obj {
-                    current_obj.insert(key.clone(), value.clone());
-                }
-            } else {
-                result.value = new_result.value;
-            }
-        }
-        result.schema_descendant_index = new_result.schema_descendant_index;
-        result.input_descendant_index = new_result.input_descendant_index;
+            loop {
+                // TODO: handle case where one has more children than the other
+                let input_had_sibling = input_cursor.goto_next_sibling();
+                let schema_had_sibling = schema_cursor.goto_next_sibling();
 
-        loop {
-            // TODO: handle case where one has more children than the other
-            let input_had_sibling = input_cursor.goto_next_sibling();
-            let schema_had_sibling = schema_cursor.goto_next_sibling();
+                if input_had_sibling && schema_had_sibling {
+                    let new_result = validate_node_vs_node(
+                        &input_cursor,
+                        &schema_cursor,
+                        schema_str,
+                        input_str,
+                        got_eof,
+                    );
 
-            if input_had_sibling && schema_had_sibling {
-                let new_result = validate_node_vs_node(
-                    &input_cursor,
-                    &schema_cursor,
-                    schema_str,
-                    input_str,
-                    got_eof,
-                );
-
-                result.errors.extend(new_result.errors);
-                // This is a merge for the JSON values.
-                if let Some(new_obj) = new_result.value.as_object() {
-                    if let Some(current_obj) = result.value.as_object_mut() {
-                        for (key, value) in new_obj {
-                            current_obj.insert(key.clone(), value.clone());
+                    result.errors.extend(new_result.errors);
+                    // This is a merge for the JSON values.
+                    if let Some(new_obj) = new_result.value.as_object() {
+                        if let Some(current_obj) = result.value.as_object_mut() {
+                            for (key, value) in new_obj {
+                                current_obj.insert(key.clone(), value.clone());
+                            }
+                        } else {
+                            result.value = new_result.value;
                         }
-                    } else {
-                        result.value = new_result.value;
                     }
+                    result.schema_descendant_index = new_result.schema_descendant_index;
+                    result.input_descendant_index = new_result.input_descendant_index;
+                } else {
+                    break;
                 }
-                result.schema_descendant_index = new_result.schema_descendant_index;
-                result.input_descendant_index = new_result.input_descendant_index;
-            } else {
-                break;
             }
+        } else {
+            result
+                .errors
+                .push(ValidationError::InternalInvariantViolated(
+                    "Both input and schema node were top level, but they didn't both have children"
+                        .into(),
+                ));
         }
     }
 
     result.schema_descendant_index = schema_cursor.descendant_index();
     result.input_descendant_index = input_cursor.descendant_index();
     result
+}
+
+/// Check if both nodes are textual nodes.
+fn both_are_textual_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_textual_node(&input_node) && is_textual_node(&schema_node)
+}
+
+/// Check if both nodes are list nodes.
+fn both_are_list_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_list_node(&input_node) && is_list_node(&schema_node)
+}
+
+/// Check if both nodes are top-level nodes (document or heading).
+fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    input_node.kind() == schema_node.kind()
+        && (input_node.kind() == "document" || input_node.kind().starts_with("heading"))
 }
 
 #[cfg(test)]
@@ -175,66 +146,27 @@ mod tests {
     };
 
     #[test]
-    fn test_validate_node_vs_node_simple_text_vs_text() {
-        let schema_str = "Some Literal";
-        let schema_tree = parse_markdown(schema_str).unwrap();
+    fn test_validate_two_paragraphs_with_text_vs_text() {
+        let schema = parse_markdown("This is **bold** text.").unwrap();
+        let input = parse_markdown("This is **bold** text.").unwrap();
 
-        let input_str = "Some Literal";
-        let input_tree = parse_markdown(input_str).unwrap();
+        let schema_cursor = schema.walk();
+        let input_cursor = input.walk();
 
-        let mut schema_cursor = schema_tree.walk();
-        let mut input_cursor = input_tree.walk();
+        let result = validate_node_vs_node(&input_cursor, &schema_cursor, "", "", false);
 
-        // Navigate to the paragraph node
-        schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // document -> paragraph
-
-        let result = validate_node_vs_node(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
-
-        // Literal matching doesn't capture anything, they just (maybe) error
-        assert!(
-            result.errors.is_empty(),
-            "Errors found: {:?}",
-            result.errors
-        );
+        assert!(result.errors.is_empty());
         assert_eq!(result.value, json!({}));
-    }
 
-    #[test]
-    fn test_validate_node_vs_node_simple_matcher() {
-        let schema_str = "`test:/test/`";
-        let schema_tree = parse_markdown(schema_str).unwrap();
+        let schema = parse_markdown("This is *bold* text.").unwrap();
+        let input = parse_markdown("This is **bold** text.").unwrap();
 
-        let input_str = "test";
-        let input_tree = parse_markdown(input_str).unwrap();
+        let schema_cursor = schema.walk();
+        let input_cursor = input.walk();
 
-        let mut schema_cursor = schema_tree.walk();
-        let mut input_cursor = input_tree.walk();
+        let result = validate_node_vs_node(&input_cursor, &schema_cursor, "", "", false);
 
-        // Navigate to the paragraph node
-        schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // document -> paragraph
-
-        let result = validate_node_vs_node(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
-
-        // The simple matcher should capture the literal "test"
-        assert!(
-            result.errors.is_empty(),
-            "Errors found: {:?}",
-            result.errors
-        );
-        assert_eq!(result.value, json!({"test": "test"}));
+        assert!(!result.errors.is_empty());
+        assert_eq!(result.value, json!({}));
     }
 }

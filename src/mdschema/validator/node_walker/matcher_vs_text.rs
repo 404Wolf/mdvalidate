@@ -4,7 +4,7 @@ use tracing::instrument;
 use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
-    errors::{Error, NodeContentMismatchKind, SchemaError, SchemaViolationError},
+    errors::{ValidationError, NodeContentMismatchKind, SchemaError, SchemaViolationError},
     matcher::{extract_text_matcher, get_everything_after_special_chars, ExtractorError, Matcher},
     node_walker::ValidationResult,
     utils::{is_last_node, waiting_at_end},
@@ -52,7 +52,7 @@ pub fn validate_matcher_vs_text(
         Some(t) => t,
         None => {
             // TODO: add test
-            result.add_error(Error::SchemaError(SchemaError::MissingMatcher {
+            result.add_error(ValidationError::SchemaError(SchemaError::MissingMatcher {
                 schema_index: schema_cursor.descendant_index(),
                 input_index: input_cursor.descendant_index(),
             }));
@@ -90,7 +90,7 @@ pub fn validate_matcher_vs_text(
         if let Some(input_prefix_str) = input_prefix_str {
             // Do the actual prefix comparison
             if schema_prefix_str != input_prefix_str {
-                result.add_error(Error::SchemaViolation(
+                result.add_error(ValidationError::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch {
                         schema_index: schema_cursor_at_prefix.descendant_index(),
                         input_index: input_node_descendant_index,
@@ -118,7 +118,7 @@ pub fn validate_matcher_vs_text(
                 trace!("Input prefix not long enough, but waiting at end of input");
 
                 if schema_prefix_partial != best_prefix_input_we_can_do {
-                    result.add_error(Error::SchemaViolation(
+                    result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch {
                             schema_index: schema_cursor_at_prefix.descendant_index(),
                             input_index: input_node_descendant_index,
@@ -131,7 +131,7 @@ pub fn validate_matcher_vs_text(
             } else {
                 trace!("Input node is complete but no more input left, reporting mismatch error");
 
-                result.add_error(Error::SchemaViolation(
+                result.add_error(ValidationError::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch {
                         schema_index: schema_cursor_at_prefix.descendant_index(),
                         input_index: input_node_descendant_index,
@@ -171,7 +171,7 @@ pub fn validate_matcher_vs_text(
         if input_cursor.node().kind() != "thematic_break" {
             trace!("Input node is not a ruler, reporting type mismatch error");
 
-            result.add_error(Error::SchemaViolation(
+            result.add_error(ValidationError::SchemaViolation(
                 SchemaViolationError::NodeTypeMismatch {
                     schema_index: schema_cursor.descendant_index(),
                     input_index: input_node_descendant_index,
@@ -208,7 +208,7 @@ pub fn validate_matcher_vs_text(
         None => {
             trace!("Matcher did not match input string, reporting mismatch error");
 
-            result.add_error(Error::SchemaViolation(
+            result.add_error(ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     schema_index: schema_cursor.descendant_index(),
                     input_index: input_node_descendant_index,
@@ -248,7 +248,7 @@ pub fn validate_matcher_vs_text(
                 input_suffix
             );
 
-            result.add_error(Error::SchemaViolation(
+            result.add_error(ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     schema_index: schema_cursor.descendant_index(),
                     input_index: input_node_descendant_index,
@@ -313,14 +313,14 @@ fn extract_text_matcher_into_schema_err(
     schema_cursor: &TreeCursor,
     input_cursor: &TreeCursor,
     schema_str: &str,
-) -> Result<Matcher, Error> {
+) -> Result<Matcher, ValidationError> {
     extract_text_matcher(schema_cursor, schema_str).map_err(|e| match e {
-        ExtractorError::MatcherError(regex_err) => Error::SchemaError(SchemaError::MatcherError {
+        ExtractorError::MatcherError(regex_err) => ValidationError::SchemaError(SchemaError::MatcherError {
             error: regex_err,
             schema_index: schema_cursor.descendant_index(),
             input_index: input_cursor.descendant_index(),
         }),
-        ExtractorError::UTF8Error(_) => Error::SchemaError(SchemaError::UTF8Error {
+        ExtractorError::UTF8Error(_) => ValidationError::SchemaError(SchemaError::UTF8Error {
             schema_index: schema_cursor.descendant_index(),
             input_index: input_cursor.descendant_index(),
         }),

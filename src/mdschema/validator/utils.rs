@@ -1,3 +1,4 @@
+use serde_json::Value;
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
 use tree_sitter_markdown::language;
 
@@ -54,6 +55,20 @@ pub fn is_list_node(node: &Node) -> bool {
     }
 }
 
+/// Check if a node is "textual" (i.e., a text node, bold node, code node, or similar).
+pub fn is_textual_node(node: &Node) -> bool {
+    match node.kind() {
+        "text" | "emphasis" | "strong_emphasis" | "code_span" => true,
+        _ => false,
+    }
+}
+
+/// Chekc if a node is a heading node.
+pub fn is_heading_node(node: &Node) -> bool {
+    dbg!(&node.kind());
+    node.kind().starts_with("atx_heading")
+}
+
 /// Determine whether the input is incomplete based on EOF status and last node.
 ///
 /// The input is incomplete if we haven't reached the EOF and the cursor is at
@@ -62,9 +77,122 @@ pub fn waiting_at_end(got_eof: bool, last_input_str: &str, input_cursor: &TreeCu
     !got_eof && is_last_node(last_input_str, &input_cursor.node())
 }
 
+/// Join two values together in-place.
+pub fn join_values(a: &mut Value, b: Value) {
+    match (a, b) {
+        (Value::Object(ref mut existing_map), Value::Object(new_map)) => {
+            for (key, value) in new_map {
+                existing_map.insert(key, value);
+            }
+        }
+        (Value::Array(ref mut existing_array), Value::Array(new_array)) => {
+            existing_array.extend(new_array);
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_markdown_and_get_tree(input: &str) -> Tree {
+        let mut parser = new_markdown_parser();
+        parser.parse(input, None).unwrap()
+    }
+
+    #[test]
+    fn test_join_values_objects() {
+        let mut a = serde_json::json!({ "key1": "value1" });
+        let b = serde_json::json!({ "key2": "value2" });
+
+        join_values(&mut a, b);
+
+        if let Value::Object(ref map) = a {
+            assert_eq!(map.get("key1"), Some(&Value::String("value1".to_string())));
+            assert_eq!(map.get("key2"), Some(&Value::String("value2".to_string())));
+        } else {
+            panic!("a is not an object");
+        }
+    }
+
+    #[test]
+    fn test_join_values_arrays() {
+        let mut a = Value::Array(vec![Value::String("value1".to_string())]);
+        let b = Value::Array(vec![
+            Value::String("value2".to_string()),
+            Value::String("value3".to_string()),
+        ]);
+
+        join_values(&mut a, b);
+
+        if let Value::Array(ref array) = a {
+            assert_eq!(array.len(), 3);
+            assert_eq!(array[0], Value::String("value1".to_string()));
+            assert_eq!(array[1], Value::String("value2".to_string()));
+            assert_eq!(array[2], Value::String("value3".to_string()));
+        } else {
+            panic!("a is not an array");
+        }
+    }
+
+    #[test]
+    fn test_is_heading_node() {
+        // Test atx heading node
+        let tree = parse_markdown_and_get_tree("# Heading");
+        let root = tree.root_node();
+        let heading_node = root.child(0).unwrap();
+        assert!(is_heading_node(&heading_node));
+
+        // Test non-heading node
+        let tree = parse_markdown_and_get_tree("Paragraph text");
+        let root = tree.root_node();
+        let paragraph_node = root.child(0).unwrap();
+        assert!(!is_heading_node(&paragraph_node));
+    }
+
+    #[test]
+    fn test_is_textual_node() {
+        // Test text node
+        let tree = parse_markdown_and_get_tree("text");
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+        let text_node = paragraph.child(0).unwrap();
+        assert!(is_textual_node(&text_node));
+
+        // Test emphasis node
+        let tree = parse_markdown_and_get_tree("*emphasis*");
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+        let emphasis_node = paragraph.child(0).unwrap();
+        assert!(is_textual_node(&emphasis_node));
+
+        // Test strong emphasis node
+        let tree = parse_markdown_and_get_tree("**strong emphasis**");
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+        let strong_emphasis_node = paragraph.child(0).unwrap();
+        assert!(is_textual_node(&strong_emphasis_node));
+
+        // Test code span node
+        let tree = parse_markdown_and_get_tree("`code`");
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+        let code_span_node = paragraph.child(0).unwrap();
+        assert!(is_textual_node(&code_span_node));
+
+        // Test code fence node
+        let tree = parse_markdown_and_get_tree("```\ncode\n```");
+        let root = tree.root_node();
+        let code_fence_node = root.child(0).unwrap();
+        assert!(!is_textual_node(&code_fence_node));
+
+        // Test paragraph node (should not be textual)
+        let tree = parse_markdown_and_get_tree("paragraph");
+        let root = tree.root_node();
+        let paragraph_node = root.child(0).unwrap();
+        assert!(!is_textual_node(&paragraph_node));
+    }
 
     #[test]
     fn test_waiting_at_end() {

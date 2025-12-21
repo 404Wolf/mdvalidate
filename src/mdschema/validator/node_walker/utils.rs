@@ -3,11 +3,11 @@ use serde_json::Value;
 
 #[cfg(test)]
 use crate::mdschema::validator::{
-    errors::Error, node_walker::NodeWalker, utils::new_markdown_parser,
+    errors::ValidationError, node_walker::NodeWalker, utils::new_markdown_parser,
 };
 
 #[cfg(test)]
-pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<Error>) {
+pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>) {
     use crate::mdschema::validator::validator_state::ValidatorState;
 
     let mut state = ValidatorState::new(schema.to_string(), input.to_string(), true);
@@ -26,7 +26,7 @@ pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<Error>) {
         .errors_so_far()
         .into_iter()
         .cloned()
-        .collect::<Vec<Error>>();
+        .collect::<Vec<ValidationError>>();
     let matches = state.matches_so_far().clone();
 
     (matches, errors)

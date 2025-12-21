@@ -1,67 +1,74 @@
 use crate::mdschema::validator::validator::Validator;
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use std::fmt;
-use std::io;
 
 use crate::mdschema::validator::matcher::Error as MatcherError;
 use crate::mdschema::validator::utils::find_node_by_index;
 
-impl std::error::Error for Error {}
-
-impl fmt::Display for Error {
+impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::Io(e) => write!(f, "IO error: {}", e),
-            Error::Utf8(e) => write!(f, "UTF-8 error: {}", e),
-            Error::InvalidRegex(e) => write!(f, "Invalid regex: {}", e),
-            Error::SchemaViolation(e) => write!(f, "Schema violation: {:?}", e),
-            Error::SchemaError(e) => write!(f, "Schema error: {:?}", e),
-            Error::ParserError(e) => write!(f, "Parser error: {:?}", e),
-            Error::InvalidMatcherFormat(s) => write!(f, "Invalid matcher format: {}", s),
-            Error::ValidatorCreationFailed => write!(f, "Validator creation failed"),
-            Error::ReadInputFailed(s) => write!(f, "Failed to read input: {}", s),
-            Error::PrettyPrintFailed(s) => write!(f, "Failed to pretty print: {}", s),
+            ValidationError::SchemaViolation(e) => write!(f, "Schema violation: {:?}", e),
+            ValidationError::SchemaError(e) => write!(f, "Schema error: {:?}", e),
+            ValidationError::InternalInvariantViolated(msg) => {
+                write!(f, "Internal invariant violated: {}. This is a bug.", msg)
+            }
+            ValidationError::IoError(e) => write!(f, "IO error: {}", e),
+            ValidationError::InvalidUTF8 => write!(f, "Invalid UTF-8"),
+            ValidationError::ParserError(e) => write!(f, "Parser error: {:?}", e),
+            ValidationError::ValidatorCreationFailed => write!(f, "Validator creation failed"),
         }
     }
 }
 
-impl From<io::Error> for Error {
-    fn from(e: io::Error) -> Self {
-        Error::Io(e.to_string())
-    }
-}
-
-impl From<std::str::Utf8Error> for Error {
-    fn from(_: std::str::Utf8Error) -> Self {
-        Error::Utf8(String::from_utf8(vec![]).unwrap_err().to_string())
-    }
-}
-
-impl From<regex::Error> for Error {
-    fn from(e: regex::Error) -> Self {
-        Error::InvalidRegex(e.to_string())
-    }
-}
-
+/// Error that happens during input parsing or processing.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub enum Error {
-    Io(String),
-    Utf8(String),
-    InvalidRegex(String),
+pub enum ValidationError {
+    /// Error when reading input.
+    IoError(String),
+
+    /// When we attempt to read a byte from the input, but the input is not valid UTF-8.
+    InvalidUTF8,
+
+    /// When we find a violation when validating the input against the schema.
     SchemaViolation(SchemaViolationError),
+
+    /// When the actual schema is invalid.
     SchemaError(SchemaError),
+
+    /// Some internal invariant was violated.
+    InternalInvariantViolated(String),
+
+    /// Error that happens during input parsing or processing.
     ParserError(ParserError),
-    InvalidMatcherFormat(String),
+
+    /// Failed to create validator.
     ValidatorCreationFailed,
-    ReadInputFailed(String),
-    PrettyPrintFailed(String),
 }
 
+/// Error that happens during input parsing or processing.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum ParserError {
+    /// When we attempt to read again after we already reached EOF.
+    ///
+    /// This is an internal error and should never happen.
     ReadAfterGotEOF,
-    InvalidUTF8,
+
+    /// Failed to read input.
+    ///
+    /// TODO: do we really need this?
+    ReadInputFailed(String),
+
+    /// Error given to us from the treesitter parser.
     TreesitterError,
+
+    /// Internal error when we fail to create a validator.
+    ///
+    /// TODO: add a nested enum so we get more context here.
+    ValidatorCreationFailed,
+
+    /// Failed to pretty print the error message.
+    PrettyPrintFailed(String),
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -198,110 +205,52 @@ pub enum NodeContentMismatchError {
     Matcher(usize),
 }
 
+#[derive(Debug)]
+pub enum PrettyPrintError {
+    FailedToPrettyPrint(String),
+    UTF8Error(String),
+}
+
+impl From<std::str::Utf8Error> for PrettyPrintError {
+    fn from(err: std::str::Utf8Error) -> Self {
+        PrettyPrintError::UTF8Error(err.to_string())
+    }
+}
+
+impl From<String> for PrettyPrintError {
+    fn from(err: String) -> Self {
+        PrettyPrintError::FailedToPrettyPrint(err)
+    }
+}
+
+impl From<&str> for PrettyPrintError {
+    fn from(err: &str) -> Self {
+        PrettyPrintError::FailedToPrettyPrint(err.to_string())
+    }
+}
+
 /// Pretty prints an Error using [ariadne](https://github.com/zesterer/ariadne).
 pub fn pretty_print_error(
-    error: &Error,
+    error: &ValidationError,
     validator: &Validator,
     filename: &str,
-) -> Result<String, String> {
+) -> Result<String, PrettyPrintError> {
+    let mut buffer = Vec::new();
+    validation_error_to_ariadne(error, validator, filename, &mut buffer)?;
+    Ok(String::from_utf8_lossy(&buffer).to_string())
+}
+
+fn validation_error_to_ariadne(
+    error: &ValidationError,
+    validator: &Validator,
+    filename: &str,
+    buffer: &mut Vec<u8>,
+) -> Result<(), PrettyPrintError> {
     let source_content = validator.last_input_str();
     let tree = &validator.input_tree;
 
-    let mut buffer = Vec::new();
-
-    match error {
-        Error::Io(e) => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("IO error")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message(format!("IO error: {}", e))
-                        .with_color(Color::Red),
-                )
-                .finish()
-                .write((filename, Source::from(source_content)), &mut buffer)
-                .map_err(|e| e.to_string())?;
-        }
-        Error::Utf8(e) => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("UTF-8 error")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message(format!("UTF-8 error: {}", e))
-                        .with_color(Color::Red),
-                )
-                .finish()
-                .write((filename, Source::from(source_content)), &mut buffer)
-                .map_err(|e| e.to_string())?;
-        }
-        Error::InvalidRegex(e) => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("Invalid regex")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message(format!("Invalid regex: {}", e))
-                        .with_color(Color::Red),
-                )
-                .finish()
-                .write((filename, Source::from(source_content)), &mut buffer)
-                .map_err(|e| e.to_string())?;
-        }
-        Error::InvalidMatcherFormat(msg) => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("Invalid matcher format")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message(format!("Invalid matcher format: {}", msg))
-                        .with_color(Color::Red),
-                )
-                .finish()
-                .write((filename, Source::from(source_content)), &mut buffer)
-                .map_err(|e| e.to_string())?;
-        }
-        Error::ValidatorCreationFailed => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("Validator creation failed")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message("Failed to create validator")
-                        .with_color(Color::Red),
-                )
-                .finish()
-                .write((filename, Source::from(source_content)), &mut buffer)
-                .map_err(|e| e.to_string())?;
-        }
-        Error::ReadInputFailed(msg) => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("Failed to read input")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message(format!("Failed to read input: {}", msg))
-                        .with_color(Color::Red),
-                )
-                .finish()
-                .write((filename, Source::from(source_content)), &mut buffer)
-                .map_err(|e| e.to_string())?;
-        }
-        Error::PrettyPrintFailed(msg) => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("Failed to pretty print")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message(format!("Failed to pretty print: {}", msg))
-                        .with_color(Color::Red),
-                )
-                .finish()
-                .write((filename, Source::from(source_content)), &mut buffer)
-                .map_err(|e| e.to_string())?;
-        }
-        Error::SchemaViolation(schema_err) => match schema_err {
+    let report = match error {
+        ValidationError::SchemaViolation(schema_err) => match schema_err {
             SchemaViolationError::NodeTypeMismatch {
                 schema_index: _,
                 input_index,
@@ -315,16 +264,12 @@ pub fn pretty_print_error(
                     .with_message("Node type mismatch")
                     .with_label(
                         Label::new((filename, input_range))
-                            .with_message(format!(
-                                "Expected '{}' but found '{}'",
-                                expected,
-                                actual,
-                            ))
+                            .with_message(
+                                format!("Expected '{}' but found '{}'", expected, actual,),
+                            )
                             .with_color(Color::Red),
                     )
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
             SchemaViolationError::NodeContentMismatch {
                 schema_index: _,
@@ -347,8 +292,6 @@ pub fn pretty_print_error(
                             .with_color(Color::Red),
                     )
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
             SchemaViolationError::NonRepeatingMatcherInListContext {
                 schema_index,
@@ -356,7 +299,7 @@ pub fn pretty_print_error(
             } => {
                 let input_node = find_node_by_index(tree.root_node(), *input_index);
                 let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let input_range = input_node.start_byte()..input_node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, input_range.clone()))
@@ -374,8 +317,6 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
 - `myLabel:/foo/`{1,12}
 "#)
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
             SchemaViolationError::ChildrenLengthMismatch {
                 schema_index,
@@ -385,7 +326,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
             } => {
                 let parent = find_node_by_index(tree.root_node(), *input_index);
                 let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let parent_range = parent.start_byte()..parent.end_byte();
 
                 let mut report = Report::build(ReportKind::Error, (filename, parent_range.clone()))
@@ -406,10 +347,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     );
                 }
 
-                report
-                    .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
+                report.finish()
             }
             SchemaViolationError::NodeListTooDeep {
                 schema_index,
@@ -418,7 +356,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
             } => {
                 let node = find_node_by_index(tree.root_node(), *input_index);
                 let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let node_range = node.start_byte()..node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, node_range.clone()))
@@ -442,8 +380,6 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                          below it, and the two allowed below that).",
                     )
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
             SchemaViolationError::WrongListCount {
                 schema_index,
@@ -454,7 +390,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
             } => {
                 let node = find_node_by_index(tree.root_node(), *input_index);
                 let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let node_range = node.start_byte()..node.end_byte();
 
                 let range_desc = match (min, max) {
@@ -484,30 +420,9 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                          that count).",
                     )
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
         },
-        Error::ParserError(parser_err) => {
-            let root_range = 0..source_content.len();
-            let message = match parser_err {
-                ParserError::ReadAfterGotEOF => "Attempted to read after EOF",
-                ParserError::InvalidUTF8 => "Invalid UTF-8 encountered",
-                ParserError::TreesitterError => "Tree-sitter parsing error",
-            };
-
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("Parser error")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message(message)
-                        .with_color(Color::Red),
-                )
-                .finish()
-                .write((filename, Source::from(source_content)), &mut buffer)
-                .map_err(|e| e.to_string())?;
-        }
-        Error::SchemaError(schema_err) => match schema_err {
+        ValidationError::SchemaError(schema_err) => match schema_err {
             SchemaError::MultipleMatchersInNodeChildren {
                 schema_index: _,
                 input_index,
@@ -528,8 +443,6 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     )
                     .with_help("Only one matcher is allowed per node's children.")
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
             SchemaError::BadListMatcher {
                 schema_index,
@@ -537,7 +450,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
             } => {
                 let schema_node = find_node_by_index(tree.root_node(), *schema_index);
                 let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let input_node = find_node_by_index(tree.root_node(), *input_index);
                 let input_range = input_node.start_byte()..input_node.end_byte();
 
@@ -553,15 +466,13 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                             .with_color(Color::Red),
                     )
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
             SchemaError::InvalidMatcherContents {
                 schema_index,
                 input_index,
             } => {
                 let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let input_node = find_node_by_index(tree.root_node(), *input_index);
                 let input_range = input_node.start_byte()..input_node.end_byte();
 
@@ -576,15 +487,13 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                             .with_color(Color::Red),
                     )
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
             SchemaError::UnclosedMatcher {
                 schema_index,
                 input_index,
             } => {
                 let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let input_node = find_node_by_index(tree.root_node(), *input_index);
                 let input_range = input_node.start_byte()..input_node.end_byte();
 
@@ -596,8 +505,6 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                             .with_color(Color::Red),
                     )
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
             SchemaError::MatcherError {
                 error,
@@ -607,7 +514,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 let input_node = find_node_by_index(tree.root_node(), *input_index);
                 let input_range = input_node.start_byte()..input_node.end_byte();
                 let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
 
                 Report::build(ReportKind::Error, (filename, input_range.clone()))
                     .with_message("Matcher error")
@@ -620,15 +527,13 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                             .with_color(Color::Red),
                     )
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
             SchemaError::UTF8Error {
                 schema_index,
                 input_index,
             } => {
                 let schema_content =
-                    node_content_by_index_or(tree.root_node(), *schema_index, source_content);
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let input_node = find_node_by_index(tree.root_node(), *input_index);
                 let input_range = input_node.start_byte()..input_node.end_byte();
 
@@ -643,24 +548,104 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                             .with_color(Color::Red),
                     )
                     .finish()
-                    .write((filename, Source::from(source_content)), &mut buffer)
-                    .map_err(|e| e.to_string())?;
             }
-            SchemaError::MissingMatcher { schema_index, input_index } => todo!(),
-        },
-    }
+            SchemaError::MissingMatcher {
+                schema_index,
+                input_index,
+            } => {
+                let input_node = find_node_by_index(tree.root_node(), *input_index);
+                let input_range = input_node.start_byte()..input_node.end_byte();
+                let schema_content =
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
 
-    Ok(String::from_utf8_lossy(&buffer).to_string())
+                Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    .with_message("Missing matcher")
+                    .with_label(
+                        Label::new((filename, input_range))
+                            .with_message(format!(
+                                "Missing matcher in matcher group. Schema: '{}'",
+                                schema_content
+                            ))
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+            }
+        },
+        ValidationError::InternalInvariantViolated(msg) => {
+            let root_range = 0..source_content.len();
+            Report::build(ReportKind::Error, (filename, root_range.clone()))
+                .with_message("Internal invariant violated")
+                .with_label(
+                    Label::new((filename, root_range))
+                        .with_message(format!(
+                            "Internal invariant violated: {}. This is a bug.",
+                            msg
+                        ))
+                        .with_color(Color::Red),
+                )
+                .finish()
+        }
+        ValidationError::IoError(msg) => {
+            let root_range = 0..source_content.len();
+            Report::build(ReportKind::Error, (filename, root_range.clone()))
+                .with_message("IO error")
+                .with_label(
+                    Label::new((filename, root_range))
+                        .with_message(format!("IO error: {}", msg))
+                        .with_color(Color::Red),
+                )
+                .finish()
+        }
+        ValidationError::InvalidUTF8 => {
+            let root_range = 0..source_content.len();
+            Report::build(ReportKind::Error, (filename, root_range.clone()))
+                .with_message("Invalid UTF-8")
+                .with_label(
+                    Label::new((filename, root_range))
+                        .with_message("Input contains invalid UTF-8")
+                        .with_color(Color::Red),
+                )
+                .finish()
+        }
+        ValidationError::ParserError(parser_err) => {
+            let root_range = 0..source_content.len();
+            Report::build(ReportKind::Error, (filename, root_range.clone()))
+                .with_message("Parser error")
+                .with_label(
+                    Label::new((filename, root_range))
+                        .with_message(format!("Parser error: {:?}", parser_err))
+                        .with_color(Color::Red),
+                )
+                .finish()
+        }
+        ValidationError::ValidatorCreationFailed => {
+            let root_range = 0..source_content.len();
+            Report::build(ReportKind::Error, (filename, root_range.clone()))
+                .with_message("Validator creation failed")
+                .with_label(
+                    Label::new((filename, root_range))
+                        .with_message("Failed to create validator")
+                        .with_color(Color::Red),
+                )
+                .finish()
+        }
+    };
+
+    report
+        .write((filename, Source::from(source_content)), buffer)
+        .map_err(|e| PrettyPrintError::from(e.to_string()))?;
+
+    Ok(())
 }
 
 /// Find a node's content by its index given by a cursor's .descendant_index().
-fn node_content_by_index_or<'a>(
+fn node_content_by_index<'a>(
     root: tree_sitter::Node<'a>,
     target_index: usize,
     source_content: &'a str,
-) -> &'a str {
+) -> Result<&'a str, std::str::Utf8Error> {
     let node = find_node_by_index(root, target_index);
-    node.utf8_text(source_content.as_bytes()).unwrap_or("n/a")
+    node.utf8_text(source_content.as_bytes())
 }
 
 #[cfg(test)]
@@ -670,13 +655,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_node_content_by_index_or() {
+    fn test_node_content_by_index() {
         let source = "# Heading\n\nThis is a paragraph.";
         let mut parser = new_markdown_parser();
         let tree = parser.parse(source, None).unwrap();
         let root = tree.root_node();
 
-        let heading_content = node_content_by_index_or(root, 3, source);
-        assert_eq!(heading_content, " Heading");
+        let heading_content = node_content_by_index(root, 3, source);
+        assert_eq!(heading_content.unwrap(), " Heading");
     }
 }

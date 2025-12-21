@@ -3,7 +3,7 @@ use serde_json::Value;
 use tree_sitter::{InputEdit, Point, Tree};
 
 use crate::mdschema::validator::{
-    errors::{Error, ParserError},
+    errors::{ValidationError, ParserError},
     node_walker::NodeWalker,
     utils::new_markdown_parser, validator_state::ValidatorState,
 };
@@ -49,11 +49,11 @@ impl Validator {
         Self::new(schema_str, input_str, false)
     }
 
-    pub fn report(&self) -> (impl Iterator<Item = &Error> + std::fmt::Debug, &Value) {
+    pub fn report(&self) -> (impl Iterator<Item = &ValidationError> + std::fmt::Debug, &Value) {
         (self.errors_so_far(), self.matches_so_far())
     }
 
-    pub fn errors_so_far(&self) -> impl Iterator<Item = &Error> + std::fmt::Debug {
+    pub fn errors_so_far(&self) -> impl Iterator<Item = &ValidationError> + std::fmt::Debug {
         self.state.errors_so_far().into_iter()
     }
 
@@ -66,13 +66,13 @@ impl Validator {
     /// Does not update the schema tree or change the descendant indices. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
-    fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), Error> {
+    fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), ValidationError> {
         // Update internal state of the last input string
         self.state.set_last_input_str(input.to_string());
 
         // If we already got EOF, do not accept more input
         if self.state.got_eof() {
-            return Err(Error::ParserError(ParserError::ReadAfterGotEOF));
+            return Err(ValidationError::ParserError(ParserError::ReadAfterGotEOF));
         }
 
         self.state.set_got_eof(got_eof);
@@ -112,7 +112,7 @@ impl Validator {
                 self.input_tree = parse;
                 Ok(())
             }
-            None => Err(Error::ParserError(ParserError::TreesitterError)),
+            None => Err(ValidationError::ParserError(ParserError::TreesitterError)),
         }
     }
 
@@ -120,11 +120,11 @@ impl Validator {
         self.state.last_input_str()
     }
 
-    pub fn read_final_input(&mut self, input: &str) -> Result<(), Error> {
+    pub fn read_final_input(&mut self, input: &str) -> Result<(), ValidationError> {
         self.read_input(input, true)
     }
 
-    pub fn read_more_input(&mut self, input: &str) -> Result<(), Error> {
+    pub fn read_more_input(&mut self, input: &str) -> Result<(), ValidationError> {
         self.read_input(input, false)
     }
 
@@ -154,7 +154,7 @@ mod tests {
 
     /// Helper function to create a validator and run validation, returning errors
     /// Panics if validator creation fails
-    fn do_validate(schema: &str, input: &str, eof: bool) -> (Vec<Error>, Value) {
+    fn do_validate(schema: &str, input: &str, eof: bool) -> (Vec<ValidationError>, Value) {
         let mut validator = Validator::new(schema, input, eof).expect("Failed to create validator");
         validator.validate();
         (
@@ -268,7 +268,7 @@ mod tests {
 
         let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch { .. }) => {}
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch { .. }) => {}
             _ => panic!("Expected TextMismatch error, got {:?}", errors[0]),
         }
     }
@@ -305,7 +305,7 @@ mod tests {
 
         let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
+            ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
                 schema_index,
                 input_index: _,
                 expected,
@@ -326,7 +326,7 @@ mod tests {
 
         let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::NodeContentMismatch { .. }) => {}
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch { .. }) => {}
             _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
         }
     }
@@ -807,7 +807,7 @@ Footer: goodbye
 
         let errors: Vec<_> = validator.errors_so_far().collect();
         match &errors[0] {
-            Error::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
+            ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
                 actual,
                 expected,
                 ..
@@ -848,7 +848,7 @@ Footer: goodbye
 
         let mut errors = validator.errors_so_far();
         match errors.next() {
-            Some(Error::SchemaError(SchemaError::MultipleMatchersInNodeChildren {
+            Some(ValidationError::SchemaError(SchemaError::MultipleMatchersInNodeChildren {
                 received,
                 input_index,
                 ..
@@ -871,7 +871,7 @@ Footer: goodbye
         let mut errors = validator.errors_so_far();
 
         match errors.next() {
-            Some(Error::SchemaViolation(_)) => {}
+            Some(ValidationError::SchemaViolation(_)) => {}
             _ => panic!("Expected SchemaViolation error but got: {:?}", errors),
         }
     }
@@ -887,7 +887,7 @@ Footer: goodbye
         let mut errors = validator.errors_so_far();
 
         match errors.next() {
-            Some(Error::SchemaViolation(SchemaViolationError::NodeContentMismatch {
+            Some(ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
                 expected,
                 ..
             })) => {

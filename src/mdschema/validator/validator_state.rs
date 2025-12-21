@@ -1,6 +1,6 @@
 use serde_json::{Map, Value};
 
-use crate::mdschema::validator::{errors::Error, node_walker::ValidationResult};
+use crate::mdschema::validator::{errors::ValidationError, node_walker::ValidationResult, utils::join_values};
 
 pub struct ValidatorState {
     /// The full input string as last read. Not used internally but useful for
@@ -14,7 +14,7 @@ pub struct ValidatorState {
     /// Map of matches found so far.
     matches_so_far: Value,
     /// Any errors encountered during validation.
-    errors_so_far: Vec<Error>,
+    errors_so_far: Vec<ValidationError>,
 }
 
 impl ValidatorState {
@@ -53,20 +53,12 @@ impl ValidatorState {
     }
 
     pub fn join_new_matches(&mut self, new_matches: Value) {
-        match (&mut self.matches_so_far, new_matches) {
-            (Value::Object(ref mut existing_map), Value::Object(new_map)) => {
-                for (key, value) in new_map {
-                    existing_map.insert(key, value);
-                }
-            }
-            (Value::Array(ref mut existing_array), Value::Array(new_array)) => {
-                existing_array.extend(new_array);
-            }
-            _ => {}
-        }
+        let joined = &mut self.matches_so_far.clone();
+        join_values(joined, new_matches);
+        self.matches_so_far = joined.clone();
     }
 
-    pub fn errors_so_far(&self) -> Vec<&Error> {
+    pub fn errors_so_far(&self) -> Vec<&ValidationError> {
         self.errors_so_far.iter().collect()
     }
 

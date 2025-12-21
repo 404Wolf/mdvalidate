@@ -3,7 +3,7 @@ use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
-    errors::{Error, SchemaViolationError},
+    errors::{ValidationError, SchemaViolationError},
     matcher::Matcher,
     node_walker::ValidationResult,
     utils::is_list_node
@@ -61,7 +61,7 @@ pub fn validate_matcher_vs_list(
     // When there are multiple nodes in the input list we require a
     // repeating matcher
     if !main_matcher.is_repeated() && input_list_children_count > 1 {
-        result.add_error(Error::SchemaViolation(
+        result.add_error(ValidationError::SchemaViolation(
             SchemaViolationError::NonRepeatingMatcherInListContext {
                 schema_index: schema_cursor_local.descendant_index(),
                 input_index: input_cursor_local.descendant_index(),
