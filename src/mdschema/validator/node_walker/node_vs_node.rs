@@ -4,12 +4,9 @@ use tree_sitter::{Node, TreeCursor};
 use crate::mdschema::validator::{
     errors::ValidationError,
     node_walker::{
-        list_vs_list::validate_list_vs_list,
-        matcher_vs_text::validate_matcher_vs_text,
-        text_vs_text::validate_text_vs_text,
-        ValidationResult,
+        list_vs_list::validate_list_vs_list, text_vs_text::validate_text_vs_text, ValidationResult,
     },
-    utils::{is_list_node, is_textual_container, is_textual_node},
+    ts_utils::{is_list_node, is_textual_container, is_textual_node},
 };
 
 /// Validate two arbitrary nodes against each other.
@@ -53,23 +50,13 @@ pub fn validate_node_vs_node(
 
     // 2) Both are textual containers - check for matcher usage
     if both_are_textual_containers(&input_node, &schema_node) {
-        if has_code_child(&schema_node) {
-            return validate_matcher_vs_text(
-                &input_cursor,
-                &schema_cursor,
-                schema_str,
-                input_str,
-                got_eof,
-            );
-        } else {
-            return validate_text_vs_text(
-                &input_cursor,
-                &schema_cursor,
-                schema_str,
-                input_str,
-                got_eof,
-            );
-        }
+        return validate_text_vs_text(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            got_eof,
+        );
     }
 
     // 3) Both are list nodes
@@ -156,16 +143,6 @@ fn both_are_textual_containers(input_node: &Node, schema_node: &Node) -> bool {
 }
 
 /// Check if the schema node has a code_span child (indicating a matcher).
-fn has_code_child(schema_node: &Node) -> bool {
-    for i in 0..schema_node.child_count() {
-        if let Some(child) = schema_node.child(i) {
-            if child.kind() == "code_span" {
-                return true;
-            }
-        }
-    }
-    false
-}
 
 /// Check if both nodes are list nodes.
 fn both_are_list_nodes(input_node: &Node, schema_node: &Node) -> bool {
@@ -183,10 +160,8 @@ mod tests {
     use serde_json::json;
 
     use crate::mdschema::validator::{
-        node_walker::node_vs_node::validate_node_vs_node, utils::parse_markdown,
+        node_walker::node_vs_node::validate_node_vs_node, ts_utils::parse_markdown,
     };
-
-    use super::has_code_child;
 
     #[test]
     fn test_validate_two_paragraphs_with_text_vs_text() {
@@ -198,7 +173,8 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result = validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result =
+            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
         assert!(result.errors.is_empty());
         assert_eq!(result.value, json!({}));
@@ -211,7 +187,13 @@ mod tests {
         let schema_cursor = schema2.walk();
         let input_cursor = input2.walk();
 
-        let result = validate_node_vs_node(&input_cursor, &schema_cursor, schema_str2, input_str2, false);
+        let result = validate_node_vs_node(
+            &input_cursor,
+            &schema_cursor,
+            schema_str2,
+            input_str2,
+            false,
+        );
 
         assert!(!result.errors.is_empty());
         assert_eq!(result.value, json!({}));
@@ -227,9 +209,14 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result = validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result =
+            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(result.errors.is_empty(), "Expected no errors, got: {:?}", result.errors);
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
         assert_eq!(result.value, json!({"name": "Alice"}));
     }
 
@@ -243,9 +230,14 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result = validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result =
+            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(result.errors.is_empty(), "Expected no errors, got: {:?}", result.errors);
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
         assert_eq!(result.value, json!({}));
     }
 
@@ -259,55 +251,14 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result = validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result =
+            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(result.errors.is_empty(), "Expected no errors, got: {:?}", result.errors);
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
         assert_eq!(result.value, json!({"name": "Alice"}));
-    }
-
-    #[test]
-    fn test_has_code_child() {
-        // Test with single code_span child (simple matcher)
-        let schema_str = "`name:/\\w+/`";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        schema_cursor.goto_first_child(); // document -> paragraph
-        assert!(has_code_child(&schema_cursor.node()), "Expected code child for simple matcher");
-
-        // Test with prefix, code_span, and suffix (complex matcher)
-        let schema_str = "Hello `name:/\\w+/` world!";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        schema_cursor.goto_first_child(); // document -> paragraph
-        assert!(has_code_child(&schema_cursor.node()), "Expected code child for matcher with prefix and suffix");
-
-        // Test with no code_span (regular text)
-        let schema_str = "Hello **world**!";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        schema_cursor.goto_first_child(); // document -> paragraph
-        assert!(!has_code_child(&schema_cursor.node()), "Expected no code child for regular text");
-
-        // Test with emphasis but no code_span
-        let schema_str = "This is *italic* text";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        schema_cursor.goto_first_child(); // document -> paragraph
-        assert!(!has_code_child(&schema_cursor.node()), "Expected no code child for italic text");
-
-        // Test with multiple code_spans
-        let schema_str = "Start `first:/\\w+/` middle `second:/\\d+/` end";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        schema_cursor.goto_first_child(); // document -> paragraph
-        assert!(has_code_child(&schema_cursor.node()), "Expected code child for multiple matchers");
-
-        // Test with list item containing code span (shouldn't be detected as matcher)
-        let schema_str = "- test `test`";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        schema_cursor.goto_first_child(); // document -> list
-        schema_cursor.goto_first_child(); // list -> list_item
-        assert!(!has_code_child(&schema_cursor.node()), "Expected no code child for list item with code span");
     }
 }

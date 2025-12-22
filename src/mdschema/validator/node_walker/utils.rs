@@ -1,11 +1,12 @@
-use crate::mdschema::validator::errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError};
 #[cfg(test)]
 use serde_json::Value;
-use tree_sitter::{Node, TreeCursor};
+
+#[cfg(test)]
+use crate::mdschema::validator::errors::ValidationError;
 
 #[cfg(test)]
 pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>) {
-    use crate::mdschema::validator::{utils::new_markdown_parser};
+    use crate::mdschema::validator::ts_utils::new_markdown_parser;
     use crate::mdschema::validator::validator_state::ValidatorState;
 
     let mut state = ValidatorState::new(schema.to_string(), input.to_string(), true);
@@ -32,96 +33,61 @@ pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>) 
     (matches, errors)
 }
 
-/// Compare node kinds and return an error if they don't match
-///
-/// # Arguments
-/// * `schema_node` - The schema node to compare against
-/// * `input_node` - The input node to compare
-/// * `schema_cursor` - The schema cursor, pointed at any node
-/// * `input_cursor` - The input cursor, pointed at any node
-///
-/// # Returns
-/// An optional validation error if the node kinds don't match
-pub fn compare_node_kinds(
-    schema_node: &Node,
-    input_node: &Node,
-    schema_cursor: &TreeCursor,
-    input_cursor: &TreeCursor,
-) -> Option<ValidationError> {
-    if schema_node.kind() != input_node.kind() {
-        Some(ValidationError::SchemaViolation(
-            SchemaViolationError::NodeTypeMismatch {
-                schema_index: schema_cursor.descendant_index(),
-                input_index: input_cursor.descendant_index(),
-                expected: schema_node.kind().into(),
-                actual: input_node.kind().into(),
-            },
-        ))
-    } else {
-        None
-    }
-}
-
-/// Compare text contents and return an error if they don't match
-///
-/// # Arguments
-/// * `schema_node` - The schema node to compare against
-/// * `input_node` - The input node to compare
-/// * `schema_str` - The full schema string
-/// * `input_str` - The full input string
-/// * `schema_cursor` - The schema cursor, pointed at any node that has text contents
-/// * `input_cursor` - The input cursor, pointed at any node that has text contents
-/// * `is_partial_match` - Whether the match is partial
-///
-/// # Returns
-/// An optional validation error if the text contents don't match
-pub fn compare_text_contents(
-    schema_node: &Node,
-    input_node: &Node,
-    schema_str: &str,
-    input_str: &str,
-    schema_cursor: &TreeCursor,
-    input_cursor: &TreeCursor,
-    is_partial_match: bool,
-) -> Option<ValidationError> {
-    let (mut schema_text, input_text) = match (
-        schema_node.utf8_text(schema_str.as_bytes()),
-        input_node.utf8_text(input_str.as_bytes()),
-    ) {
-        (Ok(schema), Ok(input)) => (schema, input),
-        (Err(_), _) | (_, Err(_)) => return None, // Can't compare invalid UTF-8
+#[cfg(test)]
+mod tests {
+    use crate::mdschema::validator::errors::{
+        NodeContentMismatchKind, SchemaViolationError, ValidationError,
     };
+    use crate::mdschema::validator::node_walker::list_vs_list::validate_list_vs_list;
+    use crate::mdschema::validator::ts_utils::parse_markdown;
 
-    // If we're doing a partial match (not at EOF), adjust schema text length
-    if is_partial_match {
-        // If we got more input than expected, it's an error
-        if input_text.len() > schema_text.len() {
-            return Some(ValidationError::SchemaViolation(
-                SchemaViolationError::NodeContentMismatch {
-                    schema_index: schema_cursor.descendant_index(),
-                    input_index: input_cursor.descendant_index(),
-                    expected: schema_text.into(),
-                    actual: input_text.into(),
-                    kind: NodeContentMismatchKind::Literal,
-                },
-            ));
-        } else {
-            // The schema might be longer than the input, so crop the schema to the input we've got
-            schema_text = &schema_text[..input_text.len()];
-        }
+    #[test]
+    fn test_list_vs_list_one_item_same_contents() {
+        let schema_str = "# List\n- Item 1\n- Item 2\n";
+        let input_str = "# List\n- Item 1\n- Item 2\n";
+
+        let schema_tree = parse_markdown(schema_str);
+        let input_tree = parse_markdown(input_str);
+
+        let schema_tree = schema_tree.as_ref().unwrap();
+        let input_tree = input_tree.as_ref().unwrap();
+
+        let schema_cursor = schema_tree.root_node().walk();
+        let input_cursor = input_tree.root_node().walk();
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert!(result.errors.is_empty());
     }
 
-    if schema_text != input_text {
-        Some(ValidationError::SchemaViolation(
-            SchemaViolationError::NodeContentMismatch {
-                schema_index: schema_cursor.descendant_index(),
-                input_index: input_cursor.descendant_index(),
-                expected: schema_text.into(),
-                actual: input_text.into(),
+    #[test]
+    fn test_list_vs_list_one_item_different_contents() {
+        let schema_str = "# List\n- Item 1\n- Item 2\n";
+        let input_str = "# List\n- Item 1\n- Item 3\n";
+
+        let schema_tree = parse_markdown(schema_str);
+        let input_tree = parse_markdown(input_str);
+
+        let schema_tree = schema_tree.as_ref().unwrap();
+        let input_tree = input_tree.as_ref().unwrap();
+
+        let schema_cursor = schema_tree.root_node().walk();
+        let input_cursor = input_tree.root_node().walk();
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(
+            result.errors[0],
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
+                schema_index: 2,
+                input_index: 2,
+                expected: "Item 2".into(),
+                actual: "Item 3".into(),
                 kind: NodeContentMismatchKind::Literal,
-            },
-        ))
-    } else {
-        None
+            })
+        );
     }
 }

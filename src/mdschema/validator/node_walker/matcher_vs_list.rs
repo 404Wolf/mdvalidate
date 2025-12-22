@@ -3,10 +3,7 @@ use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
-    errors::{ValidationError, SchemaViolationError},
-    matcher::Matcher,
-    node_walker::ValidationResult,
-    utils::is_list_node
+    errors::{SchemaViolationError, ValidationError}, matcher::matcher::Matcher, node_walker::ValidationResult, ts_utils::is_list_node
 };
 
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str), level = "debug", fields(
@@ -19,7 +16,10 @@ pub fn validate_matcher_vs_list(
     schema_str: &str,
     input_str: &str,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(schema_cursor.descendant_index(), input_cursor.descendant_index());
+    let mut result = ValidationResult::from_empty(
+        schema_cursor.descendant_index(),
+        input_cursor.descendant_index(),
+    );
 
     // Called when we have our cursors pointed at a schema list node and an
     // input list node where the schema has only one child (the list item to
@@ -40,7 +40,9 @@ pub fn validate_matcher_vs_list(
     let mut input_cursor_local = input_cursor.clone();
     let mut schema_cursor_local = schema_cursor.clone();
 
-    let input_list_children_count = input_list_node.children(&mut input_cursor_local.clone()).count();
+    let input_list_children_count = input_list_node
+        .children(&mut input_cursor_local.clone())
+        .count();
 
     schema_cursor_local.goto_first_child(); // we're at a list_item
     assert_eq!(schema_cursor_local.node().kind(), "list_item");
@@ -49,14 +51,15 @@ pub fn validate_matcher_vs_list(
     schema_cursor_local.goto_next_sibling(); // list_marker -> content (may be paragraph)
 
     // Get the matcher for this level
-    let matcher_str = &schema_str[schema_cursor_local.node().child(0).unwrap().byte_range()].to_string();
+    let matcher_str =
+        &schema_str[schema_cursor_local.node().child(0).unwrap().byte_range()].to_string();
 
     let child1_text = schema_cursor_local
         .node()
         .child(1)
         .map(|child1| &schema_str[child1.byte_range()]);
 
-    let main_matcher = Matcher::new(matcher_str.as_str(), child1_text).unwrap(); // TODO: don't unwrap
+    let main_matcher = Matcher::try_from_pattern_and_suffix_str(matcher_str.as_str(), child1_text).unwrap(); // TODO: don't unwrap
 
     // When there are multiple nodes in the input list we require a
     // repeating matcher

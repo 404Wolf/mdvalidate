@@ -5,7 +5,7 @@ use tree_sitter::{InputEdit, Point, Tree};
 use crate::mdschema::validator::{
     errors::{ValidationError, ParserError},
     node_walker::NodeWalker,
-    utils::new_markdown_parser, validator_state::ValidatorState,
+    ts_utils::new_markdown_parser, validator_state::ValidatorState,
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate

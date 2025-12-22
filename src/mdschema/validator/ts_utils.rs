@@ -1,0 +1,485 @@
+use tree_sitter::{Node, Parser, Tree, TreeCursor};
+use tree_sitter_markdown::language;
+
+use crate::mdschema::validator::errors::{
+    NodeContentMismatchKind, SchemaViolationError, ValidationError,
+};
+
+/// Get the current treesitter node for a cursor, and the subsequent sibling.
+pub fn get_node_and_next_node<'a>(cursor: &TreeCursor<'a>) -> Option<(Node<'a>, Option<Node<'a>>)> {
+    let mut input_cursor = cursor.clone();
+
+    let first_node = input_cursor.node();
+
+    let next_node = if input_cursor.goto_next_sibling() {
+        Some(input_cursor.node())
+    } else {
+        None
+    };
+
+    Some((first_node, next_node))
+}
+
+/// Create a new Tree-sitter parser for Markdown.
+pub fn new_markdown_parser() -> Parser {
+    let mut parser = Parser::new();
+    parser.set_language(&language()).unwrap();
+    parser
+}
+
+/// Parse a markdown string into a Tree-sitter tree.
+pub fn parse_markdown(text: &str) -> Option<Tree> {
+    let mut parser = new_markdown_parser();
+    parser.parse(text, None)
+}
+
+/// Determine whether a given node is the last node in the tree.
+///
+/// It is the last node if it is the deepest and right most node that ends at
+/// the end of the input.
+pub fn is_last_node(input_str: &str, node: &Node) -> bool {
+    input_str.trim().len() == node.byte_range().end
+        && node.next_sibling().is_none()
+        && node.child_count() == 0
+}
+
+/// Find a node by its index given by a cursor's .descendant_index().
+pub fn find_node_by_index(root: Node, target_index: usize) -> Node {
+    let mut cursor = root.walk();
+    cursor.goto_descendant(target_index);
+    cursor.node()
+}
+
+/// Check if a node is a list.
+pub fn is_list_node(node: &Node) -> bool {
+    match node.kind() {
+        "tight_list" | "loose_list" => true,
+        _ => false,
+    }
+}
+
+/// Check if a node is "textual" (i.e., a text node, bold node, code node, or similar).
+pub fn is_textual_node(node: &Node) -> bool {
+    match node.kind() {
+        "text" | "emphasis" | "strong_emphasis" | "code_span" => true,
+        _ => false,
+    }
+}
+
+/// Check if a node is a "textual container" (i.e., a paragraph node, list item node, or similar).
+pub fn is_textual_container(node: &Node) -> bool {
+    match node.kind() {
+        "paragraph" | "heading_content" | "list_item" => true,
+        _ => false,
+    }
+}
+
+/// Check if a node is a heading node.
+pub fn is_heading_node(node: &Node) -> bool {
+    dbg!(&node.kind());
+    node.kind().starts_with("atx_heading")
+}
+
+/// Determine whether the input is incomplete based on EOF status and last node.
+///
+/// The input is incomplete if we haven't reached the EOF and the cursor is at
+/// the last node. Otherwise we're in the middle, we're not "incomplete."
+pub fn waiting_at_end(got_eof: bool, last_input_str: &str, input_cursor: &TreeCursor) -> bool {
+    !got_eof && is_last_node(last_input_str, &input_cursor.node())
+}
+
+/// Compare node kinds and return an error if they don't match
+///
+/// # Arguments
+/// * `schema_node` - The schema node to compare against
+/// * `input_node` - The input node to compare
+/// * `schema_cursor` - The schema cursor, pointed at any node
+/// * `input_cursor` - The input cursor, pointed at any node
+///
+/// # Returns
+/// An optional validation error if the node kinds don't match
+pub fn compare_node_kinds(
+    schema_node: &Node,
+    input_node: &Node,
+    schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
+) -> Option<ValidationError> {
+    if schema_node.kind() != input_node.kind() {
+        Some(ValidationError::SchemaViolation(
+            SchemaViolationError::NodeTypeMismatch {
+                schema_index: schema_cursor.descendant_index(),
+                input_index: input_cursor.descendant_index(),
+                expected: schema_node.kind().into(),
+                actual: input_node.kind().into(),
+            },
+        ))
+    } else {
+        None
+    }
+}
+
+/// Compare text contents and return an error if they don't match
+///
+/// # Arguments
+/// * `schema_node` - The schema node to compare against
+/// * `input_node` - The input node to compare
+/// * `schema_str` - The full schema string
+/// * `input_str` - The full input string
+/// * `schema_cursor` - The schema cursor, pointed at any node that has text contents
+/// * `input_cursor` - The input cursor, pointed at any node that has text contents
+/// * `is_partial_match` - Whether the match is partial
+///
+/// # Returns
+/// An optional validation error if the text contents don't match
+pub fn compare_text_contents(
+    schema_node: &Node,
+    input_node: &Node,
+    schema_str: &str,
+    input_str: &str,
+    schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
+    is_partial_match: bool,
+) -> Option<ValidationError> {
+    let (mut schema_text, input_text) = match (
+        schema_node.utf8_text(schema_str.as_bytes()),
+        input_node.utf8_text(input_str.as_bytes()),
+    ) {
+        (Ok(schema), Ok(input)) => (schema, input),
+        (Err(_), _) | (_, Err(_)) => return None, // Can't compare invalid UTF-8
+    };
+
+    // If we're doing a partial match (not at EOF), adjust schema text length
+    if is_partial_match {
+        // If we got more input than expected, it's an error
+        if input_text.len() > schema_text.len() {
+            return Some(ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    schema_index: schema_cursor.descendant_index(),
+                    input_index: input_cursor.descendant_index(),
+                    expected: schema_text.into(),
+                    actual: input_text.into(),
+                    kind: NodeContentMismatchKind::Literal,
+                },
+            ));
+        } else {
+            // The schema might be longer than the input, so crop the schema to the input we've got
+            schema_text = &schema_text[..input_text.len()];
+        }
+    }
+
+    if schema_text != input_text {
+        Some(ValidationError::SchemaViolation(
+            SchemaViolationError::NodeContentMismatch {
+                schema_index: schema_cursor.descendant_index(),
+                input_index: input_cursor.descendant_index(),
+                expected: schema_text.into(),
+                actual: input_text.into(),
+                kind: NodeContentMismatchKind::Literal,
+            },
+        ))
+    } else {
+        None
+    }
+}
+
+/// Check if the treesitter schema node has a single code_span child (indicating
+/// a matcher).
+pub fn has_single_code_child(schema_cursor: &TreeCursor) -> bool {
+    let mut code_child_count = 0;
+    let cursor = schema_cursor.node().walk();
+    for child in schema_cursor.node().children(&mut cursor.clone()) {
+        if child.kind() == "code_span" {
+            code_child_count += 1;
+            if code_child_count > 1 {
+                return false;
+            }
+        }
+    }
+    code_child_count == 1
+}
+
+#[cfg(test)]
+pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<ValidationError>) {
+    use crate::mdschema::validator::validator_state::ValidatorState;
+
+    let mut state = ValidatorState::new(schema.to_string(), input.to_string(), true);
+
+    let mut parser = new_markdown_parser();
+    let schema_tree = parser.parse(schema, None).unwrap();
+    let input_tree = parser.parse(input, None).unwrap();
+
+    {
+        use crate::mdschema::validator::node_walker::NodeWalker;
+
+        let mut node_validator = NodeWalker::new(&mut state, input_tree.walk(), schema_tree.walk());
+
+        node_validator.validate();
+    }
+
+    let errors = state
+        .errors_so_far()
+        .into_iter()
+        .cloned()
+        .collect::<Vec<ValidationError>>();
+    let matches = state.matches_so_far().clone();
+
+    (matches, errors)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn parse_markdown_and_get_tree(input: &str) -> Tree {
+        let mut parser = new_markdown_parser();
+        parser.parse(input, None).unwrap()
+    }
+
+    #[test]
+    fn test_is_heading_node() {
+        // Test atx heading node
+        let tree = parse_markdown_and_get_tree("# Heading");
+        let root = tree.root_node();
+        let heading_node = root.child(0).unwrap();
+        assert!(is_heading_node(&heading_node));
+
+        // Test non-heading node
+        let tree = parse_markdown_and_get_tree("Paragraph text");
+        let root = tree.root_node();
+        let paragraph_node = root.child(0).unwrap();
+        assert!(!is_heading_node(&paragraph_node));
+    }
+
+    #[test]
+    fn test_is_textual_node() {
+        // Test text node
+        let tree = parse_markdown_and_get_tree("text");
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+        let text_node = paragraph.child(0).unwrap();
+        assert!(is_textual_node(&text_node));
+
+        // Test emphasis node
+        let tree = parse_markdown_and_get_tree("*emphasis*");
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+        let emphasis_node = paragraph.child(0).unwrap();
+        assert!(is_textual_node(&emphasis_node));
+
+        // Test strong emphasis node
+        let tree = parse_markdown_and_get_tree("**strong emphasis**");
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+        let strong_emphasis_node = paragraph.child(0).unwrap();
+        assert!(is_textual_node(&strong_emphasis_node));
+
+        // Test code span node
+        let tree = parse_markdown_and_get_tree("`code`");
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+        let code_span_node = paragraph.child(0).unwrap();
+        assert!(is_textual_node(&code_span_node));
+
+        // Test code fence node
+        let tree = parse_markdown_and_get_tree("```\ncode\n```");
+        let root = tree.root_node();
+        let code_fence_node = root.child(0).unwrap();
+        assert!(!is_textual_node(&code_fence_node));
+
+        // Test paragraph node (should not be textual)
+        let tree = parse_markdown_and_get_tree("paragraph");
+        let root = tree.root_node();
+        let paragraph_node = root.child(0).unwrap();
+        assert!(!is_textual_node(&paragraph_node));
+    }
+
+    #[test]
+    fn test_waiting_at_end() {
+        let input = "# First\nHello, world!";
+        let mut parser = new_markdown_parser();
+
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+        let mut cursor = root_node.walk();
+
+        // At root node, not the last node, so not waiting at end
+        assert_eq!(waiting_at_end(false, input, &cursor), false);
+
+        // Got EOF at root node, so not waiting at end
+        assert_eq!(waiting_at_end(true, input, &cursor), false);
+
+        // Navigate to the actual last node (deepest, rightmost node)
+        cursor.goto_first_child(); // atx_heading
+        cursor.goto_next_sibling(); // paragraph
+        cursor.goto_first_child(); // text node (last node)
+
+        assert_eq!(is_last_node(input, &cursor.node()), true);
+
+        // At the last node and haven't got EOF, so waiting at end
+        assert_eq!(waiting_at_end(false, input, &cursor), true);
+
+        // At the last node but got EOF, so not waiting at end
+        assert_eq!(waiting_at_end(true, input, &cursor), false);
+    }
+
+    #[test]
+    fn test_is_last_node() {
+        let input = "# First\nHello, world!";
+        let mut parser = new_markdown_parser();
+
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+
+        // Root node should be a document and should not be the last node
+        assert_eq!(root_node.kind(), "document");
+        assert_eq!(is_last_node(input, &root_node), false);
+
+        // First child is the heading, which is not the last node
+        let first_child = root_node.child(0).unwrap();
+        assert_eq!(first_child.kind(), "atx_heading");
+        assert_eq!(is_last_node(input, &first_child), false);
+
+        // Last child is the paragraph, but it's not the deepest node
+        let last_child = root_node.child(root_node.named_child_count() - 1).unwrap();
+        assert_eq!(last_child.kind(), "paragraph");
+        assert_eq!(is_last_node(input, &last_child), false);
+
+        // Text node is the deepest, rightmost node that ends at the input end
+        let text_node = last_child.child(0).unwrap();
+        assert_eq!(text_node.kind(), "text");
+        assert_eq!(is_last_node(input, &text_node), true);
+    }
+
+    #[test]
+    fn test_find_node_by_index() {
+        let input = "# Heading\n\nThis is a paragraph.";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+
+        let node = find_node_by_index(root_node, 0);
+        assert_eq!(node.kind(), "document");
+
+        let node = find_node_by_index(root_node, 1);
+        assert_eq!(node.kind(), "atx_heading");
+
+        let node = find_node_by_index(root_node, 2);
+        assert_eq!(node.kind(), "atx_h1_marker");
+
+        let node = find_node_by_index(root_node, 3);
+        assert_eq!(node.kind(), "heading_content");
+
+        let node = find_node_by_index(root_node, 4);
+        assert_eq!(node.kind(), "text");
+
+        let node = find_node_by_index(root_node, 5);
+        assert_eq!(node.kind(), "paragraph");
+
+        let node = find_node_by_index(root_node, 6);
+        assert_eq!(node.kind(), "text");
+    }
+
+    #[test]
+    fn test_get_node_and_next_node_with_both() {
+        let input = "# Heading\n\nThis is a paragraph.";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+        let mut cursor = root_node.walk();
+        cursor.goto_first_child(); // Move to the first child (the heading)
+
+        let (node, next_node) = get_node_and_next_node(&cursor).unwrap();
+        assert_eq!(node.kind(), "atx_heading");
+        assert!(next_node.is_some());
+        assert_eq!(next_node.unwrap().kind(), "paragraph");
+    }
+
+    #[test]
+    fn test_get_node_and_next_node_without_next() {
+        let input = "# Heading";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+        let mut cursor = root_node.walk();
+        cursor.goto_first_child(); // Move to the first child (the heading)
+        cursor.goto_next_sibling(); // Move to the next sibling (which doesn't exist)
+        let (node, next_node) = get_node_and_next_node(&cursor).unwrap();
+        assert_eq!(node.kind(), "atx_heading");
+        assert!(next_node.is_none());
+    }
+
+    #[test]
+    fn test_is_list_node() {
+        let input = "- Item 1\n- Item 2";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+        let list_node = root_node.child(0).unwrap();
+        assert!(is_list_node(&list_node));
+    }
+
+    #[test]
+    fn test_has_single_code_child() {
+        // Test with single code_span child (simple matcher)
+        let schema_str = "`name:/\\w+/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+        assert!(
+            has_single_code_child(&schema_cursor),
+            "Expected code child for simple matcher"
+        );
+
+        // Test with prefix, code_span, and suffix (complex matcher)
+        let schema_str = "Hello `name:/\\w+/` world!";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+        assert!(
+            has_single_code_child(&schema_cursor),
+            "Expected code child for matcher with prefix and suffix"
+        );
+
+        // Test with no code_span (regular text)
+        let schema_str = "Hello **world**!";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+        assert!(
+            !has_single_code_child(&schema_cursor),
+            "Expected no code child for regular text"
+        );
+
+        // Test with emphasis but no code_span
+        let schema_str = "This is *italic* text";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+        assert!(
+            !has_single_code_child(&schema_cursor),
+            "Expected no code child for italic text"
+        );
+
+        // Test with multiple code_spans
+        let schema_str = "Start `first:/\\w+/` middle `second:/\\d+/` end";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+        assert!(
+            !has_single_code_child(&schema_cursor),
+            "Expected no single code child for multiple matchers"
+        );
+
+        // Test with list item containing code span (shouldn't be detected as matcher)
+        let schema_str = "- test `test`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> list
+        schema_cursor.goto_first_child(); // list -> list_item
+        assert!(
+            !has_single_code_child(&schema_cursor),
+            "Expected no code child for list item with code span"
+        );
+    }
+}

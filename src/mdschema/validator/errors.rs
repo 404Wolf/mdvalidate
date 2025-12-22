@@ -1,9 +1,8 @@
-use crate::mdschema::validator::validator::Validator;
+use crate::mdschema::validator::{matcher::matcher::*, validator::Validator};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use std::fmt;
 
-use crate::mdschema::validator::matcher::Error as MatcherError;
-use crate::mdschema::validator::utils::find_node_by_index;
+use crate::mdschema::validator::ts_utils::find_node_by_index;
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -96,6 +95,13 @@ pub enum SchemaError {
     InvalidMatcherContents {
         schema_index: usize,
         input_index: usize,
+    },
+    /// When you attempt to make a matcher but the extras are
+    /// invalid. For example, `test:/1/`!{1,2}.
+    InvalidMatcherExtras {
+        schema_index: usize,
+        input_index: usize,
+        error: MatcherExtrasError,
     },
     /// When you create a matcher and don't close it.
     UnclosedMatcher {
@@ -521,7 +527,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     .with_label(
                         Label::new((filename, input_range))
                             .with_message(format!(
-                                "Matcher error: {:?}. Schema: '{}'",
+                                "Matcher error: {}. Schema: '{}'",
                                 error, schema_content
                             ))
                             .with_color(Color::Red),
@@ -565,6 +571,28 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                             .with_message(format!(
                                 "Missing matcher in matcher group. Schema: '{}'",
                                 schema_content
+                            ))
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+            }
+            SchemaError::InvalidMatcherExtras {
+                schema_index,
+                input_index,
+                error,
+            } => {
+                let schema_content =
+                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
+                let input_node = find_node_by_index(tree.root_node(), *input_index);
+                let input_range = input_node.start_byte()..input_node.end_byte();
+
+                Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    .with_message("Invalid matcher extras")
+                    .with_label(
+                        Label::new((filename, input_range))
+                            .with_message(format!(
+                                "Invalid matcher extras: {}. Schema: '{}'",
+                                error, schema_content
                             ))
                             .with_color(Color::Red),
                     )
@@ -650,7 +678,7 @@ fn node_content_by_index<'a>(
 
 #[cfg(test)]
 mod tests {
-    use crate::mdschema::validator::utils::new_markdown_parser;
+    use crate::mdschema::validator::ts_utils::new_markdown_parser;
 
     use super::*;
 
