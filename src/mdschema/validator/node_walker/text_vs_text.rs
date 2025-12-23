@@ -4,7 +4,7 @@ use tracing::instrument;
 use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
-    errors::*, matcher::matcher::{ExtractorError, Matcher, MatcherError, extract_text_matcher, get_everything_after_special_chars}, node_walker::ValidationResult, ts_utils::{
+    errors::*, matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars}, node_walker::ValidationResult, ts_utils::{
         compare_node_kinds, compare_text_contents, is_last_node, is_textual_node, waiting_at_end,
     }
 };
@@ -42,12 +42,7 @@ pub fn validate_text_vs_text(
     let input_node = input_cursor.node();
     let schema_node = schema_cursor.node();
 
-    let schema_nodes = schema_cursor
-        .node()
-        .children(&mut schema_cursor.clone())
-        .collect::<Vec<Node>>();
-
-    match extract_matcher_nodes(&schema_nodes) {
+    match extract_matcher_nodes(&schema_cursor) {
         Some((prefix_node, matcher_node, suffix_node)) => {
             // Try to create a matcher from the nodes
             match Matcher::try_from_nodes(matcher_node, suffix_node, schema_str) {
@@ -563,7 +558,9 @@ type SplitMatcherNodes<'a> = (Option<Node<'a>>, Node<'a>, Option<Node<'a>>);
 /// - text, code_span (prefix + matcher)
 /// - code_span, text (matcher + suffix)
 /// - text, code_span, text (prefix + matcher + suffix)
-fn extract_matcher_nodes<'a>(schema_nodes: &[Node<'a>]) -> Option<SplitMatcherNodes<'a>> {
+fn extract_matcher_nodes<'a>(schema_cursor: &TreeCursor<'a>) -> Option<SplitMatcherNodes<'a>> {
+    let schema_nodes = schema_cursor.node().children(&mut schema_cursor.clone()).collect::<Vec<_>>();
+
     if schema_nodes.is_empty() {
         return None;
     }
@@ -590,36 +587,11 @@ fn extract_matcher_nodes<'a>(schema_nodes: &[Node<'a>]) -> Option<SplitMatcherNo
     Some((prefix_node, matcher_node, suffix_node))
 }
 
-/// Extracts a text matcher from the schema cursor location, converting any
-/// extraction errors into schema errors.
-fn extract_text_matcher_into_schema_err(
-    schema_cursor: &TreeCursor,
-    input_cursor: &TreeCursor,
-    schema_str: &str,
-) -> Result<Matcher, ValidationError> {
-    extract_text_matcher(schema_cursor, schema_str).map_err(|e| match e {
-        ExtractorError::MatcherError(regex_err) => {
-            ValidationError::SchemaError(SchemaError::MatcherError {
-                error: regex_err,
-                schema_index: schema_cursor.descendant_index(),
-                input_index: input_cursor.descendant_index(),
-            })
-        }
-        ExtractorError::UTF8Error(_) => ValidationError::SchemaError(SchemaError::UTF8Error {
-            schema_index: schema_cursor.descendant_index(),
-            input_index: input_cursor.descendant_index(),
-        }),
-        ExtractorError::InvariantError => {
-            unreachable!("we should know it's a code node")
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::validate_matcher_vs_text as validate_matcher_vs_text_original;
     use serde_json::json;
-    use tree_sitter::{Node, TreeCursor};
+    use tree_sitter::{TreeCursor};
 
     use crate::mdschema::validator::{
         errors::*, matcher::matcher::Matcher, node_walker::{
@@ -634,12 +606,7 @@ mod tests {
         input_str: &str,
         got_eof: bool,
     ) -> ValidationResult {
-        let schema_nodes = schema_cursor
-            .node()
-            .children(&mut schema_cursor.clone())
-            .collect::<Vec<Node>>();
-
-        match extract_matcher_nodes(&schema_nodes) {
+        match extract_matcher_nodes(&schema_cursor) {
             Some((prefix_node, matcher_node, suffix_node)) => {
                 let matcher = Matcher::try_from_nodes(matcher_node, suffix_node, schema_str)
                     .expect("test utility expects valid matcher");
@@ -935,12 +902,7 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let schema_nodes = schema_cursor
-            .node()
-            .children(&mut schema_cursor.clone())
-            .collect::<Vec<Node>>();
-
-        let result = extract_matcher_nodes(&schema_nodes);
+        let result = extract_matcher_nodes(&schema_cursor);
         assert!(result.is_some());
         let (prefix, matcher_node, suffix) = result.unwrap();
         assert!(prefix.is_none());
@@ -955,12 +917,7 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let schema_nodes = schema_cursor
-            .node()
-            .children(&mut schema_cursor.clone())
-            .collect::<Vec<Node>>();
-
-        let result = extract_matcher_nodes(&schema_nodes);
+        let result = extract_matcher_nodes(&schema_cursor);
         assert!(result.is_some());
         let (prefix, matcher_node, suffix) = result.unwrap();
         assert!(prefix.is_some());
@@ -976,12 +933,7 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let schema_nodes = schema_cursor
-            .node()
-            .children(&mut schema_cursor.clone())
-            .collect::<Vec<Node>>();
-
-        let result = extract_matcher_nodes(&schema_nodes);
+        let result = extract_matcher_nodes(&schema_cursor);
         assert!(result.is_some());
         let (prefix, matcher_node, suffix) = result.unwrap();
         assert!(prefix.is_some());
@@ -998,18 +950,17 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let schema_nodes = schema_cursor
-            .node()
-            .children(&mut schema_cursor.clone())
-            .collect::<Vec<Node>>();
-
-        let result = extract_matcher_nodes(&schema_nodes);
+        let result = extract_matcher_nodes(&schema_cursor);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_extract_matcher_nodes_empty_list() {
-        let result = extract_matcher_nodes(&[]);
+        let schema_tree = parse_markdown("").unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document
+
+        let result = extract_matcher_nodes(&schema_cursor);
         assert!(result.is_none());
     }
 
@@ -1020,12 +971,7 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child(); // document -> paragraph
 
-        let schema_nodes = schema_cursor
-            .node()
-            .children(&mut schema_cursor.clone())
-            .collect::<Vec<Node>>();
-
-        let result = extract_matcher_nodes(&schema_nodes);
+        let result = extract_matcher_nodes(&schema_cursor);
         assert!(result.is_none());
     }
 

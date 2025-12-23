@@ -277,9 +277,26 @@ impl Matcher {
         Self::new(id, HashSet::new(), pattern, extras, original_str_len)
     }
 
+    /// Creates a new matcher from a tree-sitter cursor pointing at code node in
+    /// the Markdown schema's tree.
+    ///
+    /// This will attempt to grab the current node the cursor is pointing at,
+    /// which must be a code node, and the following one, which will be counted
+    /// as extras if it is a text node.
+    pub fn try_from_cursor(cursor: &TreeCursor, schema_str: &str) -> Result<Matcher, MatcherError> {
+        let (node, next_node) = get_node_and_next_node(cursor).ok_or_else(|| {
+            MatcherError::MatcherInteriorRegexInvalid(
+                "Cursor has no current node to extract matcher from".to_string(),
+            )
+        })?;
+
+        Self::try_from_nodes(node, next_node, schema_str)
+    }
+
     /// Create a new Matcher from two tree-sitter nodes and a schema string.
-    /// The first node should be a code_span node containing the matcher pattern.
-    /// The second node (optional) should be a text node containing extras.
+    ///
+    /// - The first node should be a code_span node containing the matcher pattern.
+    /// - The second node (optional) should be a text node containing extras.
     pub fn try_from_nodes(
         matcher_node: tree_sitter::Node,
         suffix_node: Option<tree_sitter::Node>,
@@ -530,6 +547,34 @@ mod tests {
         assert_eq!(matcher.match_str("hello"), Some("hello"));
         assert_eq!(matcher.match_str("123"), Some("123"));
         assert_eq!(matcher.match_str("!@#"), None);
+    }
+
+    #[test]
+    fn test_try_from_cursor() {
+        // Test successful matcher creation from cursor
+        let schema_str = "`word:/\\w+/`{,} suffix";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(schema_str, None).unwrap();
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+
+        let mut cursor = paragraph.walk();
+        cursor.goto_first_child(); // go to first child (text or code_span)
+
+        // Move cursor to the code_span node
+        while cursor.node().kind() != "code_span" {
+            if !cursor.goto_next_sibling() {
+                panic!("No code_span node found");
+            }
+        }
+
+        let matcher = Matcher::try_from_cursor(&cursor, schema_str).unwrap();
+
+        assert_eq!(matcher.id(), Some("word"));
+        assert_eq!(matcher.match_str("hello"), Some("hello"));
+        assert_eq!(matcher.match_str("123"), Some("123"));
+        assert_eq!(matcher.match_str("!@#"), None);
+        assert!(matcher.is_repeated());
     }
 
     #[test]

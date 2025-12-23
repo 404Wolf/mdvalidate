@@ -28,6 +28,7 @@ pub fn new_markdown_parser() -> Parser {
 }
 
 /// Parse a markdown string into a Tree-sitter tree.
+#[allow(dead_code)]
 pub fn parse_markdown(text: &str) -> Option<Tree> {
     let mut parser = new_markdown_parser();
     parser.parse(text, None)
@@ -72,12 +73,6 @@ pub fn is_textual_container(node: &Node) -> bool {
         "paragraph" | "heading_content" | "list_item" => true,
         _ => false,
     }
-}
-
-/// Check if a node is a heading node.
-pub fn is_heading_node(node: &Node) -> bool {
-    dbg!(&node.kind());
-    node.kind().starts_with("atx_heading")
 }
 
 /// Determine whether the input is incomplete based on EOF status and last node.
@@ -198,7 +193,7 @@ pub fn has_single_code_child(schema_cursor: &TreeCursor) -> bool {
     code_child_count == 1
 }
 
-#[cfg(test)]
+#[allow(dead_code)]
 pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<ValidationError>) {
     use crate::mdschema::validator::validator_state::ValidatorState;
 
@@ -229,26 +224,10 @@ pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<Valida
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Value};
 
     fn parse_markdown_and_get_tree(input: &str) -> Tree {
         let mut parser = new_markdown_parser();
         parser.parse(input, None).unwrap()
-    }
-
-    #[test]
-    fn test_is_heading_node() {
-        // Test atx heading node
-        let tree = parse_markdown_and_get_tree("# Heading");
-        let root = tree.root_node();
-        let heading_node = root.child(0).unwrap();
-        assert!(is_heading_node(&heading_node));
-
-        // Test non-heading node
-        let tree = parse_markdown_and_get_tree("Paragraph text");
-        let root = tree.root_node();
-        let paragraph_node = root.child(0).unwrap();
-        assert!(!is_heading_node(&paragraph_node));
     }
 
     #[test]
