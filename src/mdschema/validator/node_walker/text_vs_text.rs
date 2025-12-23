@@ -71,13 +71,12 @@ pub fn validate_text_vs_text(
                     )
                 }
                 // We got a matcher that's definitely a matcher, and is wrong
-                Err(MatcherError::MatcherInteriorRegexInvalid(_)) => {
-                    result.add_error(ValidationError::SchemaError(
-                        SchemaError::InvalidMatcherContents {
-                            schema_index: input_cursor.descendant_index(),
-                            input_index: input_cursor.descendant_index(),
-                        },
-                    ));
+                Err(error @ MatcherError::MatcherInteriorRegexInvalid(_)) => {
+                    result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
+                        error,
+                        schema_index: input_cursor.descendant_index(),
+                        input_index: input_cursor.descendant_index(),
+                    }));
                     return result;
                 }
                 Err(MatcherError::MatcherExtrasError(error)) => {
@@ -127,7 +126,7 @@ pub fn validate_text_vs_text(
                     SchemaViolationError::ChildrenLengthMismatch {
                         schema_index: schema_cursor.descendant_index(),
                         input_index: input_cursor.descendant_index(),
-                        expected: ChildrenCount::SpecificCount(schema_child_count),
+                        expected: ChildrenCount::from_specific(schema_child_count),
                         actual: input_child_count,
                     },
                 );
@@ -619,7 +618,7 @@ mod tests {
 
     use crate::mdschema::validator::{
         errors::*,
-        matcher::matcher::Matcher,
+        matcher::matcher::{Matcher, MatcherError},
         node_walker::{
             ValidationResult,
             text_vs_text::{extract_matcher_nodes, validate_text_vs_text},
@@ -1276,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_regex_treated_as_textual() {
+    fn test_invalid_regex_error() {
         // Test that invalid regex patterns are treated as regular textual content
         let schema_str = "`invalid:[regex/`"; // Invalid regex pattern (unclosed bracket)
         let input_str = "`invalid:[regex/`"; // Same invalid pattern
@@ -1293,8 +1292,30 @@ mod tests {
         let result =
             validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        // Should succeed without errors because it's treated as textual content
-        assert!(result.errors.is_empty());
+        assert!(!result.errors.is_empty());
+        match result.errors.first().unwrap() {
+            ValidationError::SchemaError(SchemaError::MatcherError {
+                error,
+                schema_index,
+                input_index,
+            }) => {
+                // Validate that we got the expected error fields
+                assert!(schema_index > &0);
+                assert!(input_index > &0);
+
+                match error {
+                    MatcherError::MatcherInteriorRegexInvalid(_) => {
+                        // Validate that we got the expected error message
+                        assert!(error.to_string().contains("Invalid matcher interior regex"));
+                    }
+                    _ => panic!("Unexpected error type: {:?}", error),
+                }
+            }
+            _ => panic!(
+                "Unexpected error type: {:?}",
+                result.errors.first().unwrap()
+            ),
+        }
     }
 
     #[test]

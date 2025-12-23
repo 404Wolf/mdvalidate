@@ -1,9 +1,9 @@
-use log::trace;
+use log::{trace, warn};
 use tracing::instrument;
 use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
-    errors::ValidationError,
+    errors::{ChildrenCount, SchemaViolationError, ValidationError},
     node_walker::{
         ValidationResult, list_vs_list::validate_list_vs_list, text_vs_text::validate_text_vs_text,
     },
@@ -78,75 +78,84 @@ pub fn validate_node_vs_node(
     }
 
     // 4) Both are heading nodes or document nodes
-    if both_are_matching_top_level_nodes(&input_node, &schema_node) {
-        // Crawl down one layer to get to the actual children
-        if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
-            trace!("Both are heading nodes or document nodes, validating heading vs heading");
+    //
+    // Crawl down one layer to get to the actual children
+    if both_are_matching_top_level_nodes(&input_node, &schema_node)
+        && input_cursor.goto_first_child()
+        && schema_cursor.goto_first_child()
+    {
+        trace!("Both are heading nodes or document nodes, validating heading vs heading");
 
-            let new_result = validate_node_vs_node(
-                &input_cursor,
-                &schema_cursor,
-                schema_str,
-                input_str,
-                got_eof,
+        let new_result = validate_node_vs_node(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            got_eof,
+        );
+        result.join_other_result(&new_result);
+
+        result.schema_descendant_index = new_result.schema_descendant_index;
+        result.input_descendant_index = new_result.input_descendant_index;
+
+        loop {
+            // TODO: handle case where one has more children than the other
+            let input_had_sibling = input_cursor.goto_next_sibling();
+            let schema_had_sibling = schema_cursor.goto_next_sibling();
+            trace!(
+                "input_cursor: {}, schema_cursor: {}",
+                input_cursor.node().to_sexp(),
+                schema_cursor.node().to_sexp()
             );
-            result.join_other_result(&new_result);
+            trace!(
+                "input_had_sibling: {}, schema_had_sibling: {}",
+                input_had_sibling, schema_had_sibling
+            );
 
-            result.schema_descendant_index = new_result.schema_descendant_index;
-            result.input_descendant_index = new_result.input_descendant_index;
-
-            loop {
-                // TODO: handle case where one has more children than the other
-                let input_had_sibling = input_cursor.goto_next_sibling();
-                let schema_had_sibling = schema_cursor.goto_next_sibling();
-                trace!(
-                    "input_cursor: {}, schema_cursor: {}",
-                    input_cursor.node().to_sexp(),
-                    schema_cursor.node().to_sexp()
-                );
-                trace!(
-                    "input_had_sibling: {}, schema_had_sibling: {}",
-                    input_had_sibling, schema_had_sibling
+            if input_had_sibling && schema_had_sibling {
+                let new_result = validate_node_vs_node(
+                    &input_cursor,
+                    &schema_cursor,
+                    schema_str,
+                    input_str,
+                    got_eof,
                 );
 
-                if input_had_sibling && schema_had_sibling {
-                    let new_result = validate_node_vs_node(
-                        &input_cursor,
-                        &schema_cursor,
-                        schema_str,
-                        input_str,
-                        got_eof,
-                    );
-
-                    result.errors.extend(new_result.errors);
-                    // This is a merge for the JSON values.
-                    if let Some(new_obj) = new_result.value.as_object() {
-                        if let Some(current_obj) = result.value.as_object_mut() {
-                            for (key, value) in new_obj {
-                                current_obj.insert(key.clone(), value.clone());
-                            }
-                        } else {
-                            result.value = new_result.value;
+                result.errors.extend(new_result.errors);
+                // This is a merge for the JSON values.
+                if let Some(new_obj) = new_result.value.as_object() {
+                    if let Some(current_obj) = result.value.as_object_mut() {
+                        for (key, value) in new_obj {
+                            current_obj.insert(key.clone(), value.clone());
                         }
+                    } else {
+                        result.value = new_result.value;
                     }
-                    result.schema_descendant_index = new_result.schema_descendant_index;
-                    result.input_descendant_index = new_result.input_descendant_index;
-                } else {
-                    break;
                 }
+                result.schema_descendant_index = new_result.schema_descendant_index;
+                result.input_descendant_index = new_result.input_descendant_index;
+            } else {
+                break;
             }
-        } else {
-            trace!("Both input and schema node were top level, but they didn't both have children");
-
-            result
-                .errors
-                .push(ValidationError::InternalInvariantViolated(
-                    "Both input and schema node were top level, but they didn't both have children"
-                        .into(),
-                ));
-
-            return result;
         }
+    } else {
+        warn!(
+            "Both input and schema node were top level, but they didn't both have children. Trees:\n{}\n{}",
+            input_node.to_sexp(),
+            schema_node.to_sexp()
+        );
+
+        result.add_error(ValidationError::SchemaViolation(
+            SchemaViolationError::ChildrenLengthMismatch {
+                schema_index: schema_cursor.descendant_index(),
+                input_index: input_cursor.descendant_index(),
+                // TODO: is there a case where we have a repeating list and this isn't true?
+                expected: ChildrenCount::from_specific(schema_cursor.node().child_count()),
+                actual: input_cursor.node().child_count(),
+            },
+        ));
+
+        return result;
     }
 
     result.schema_descendant_index = schema_cursor.descendant_index();
@@ -190,7 +199,9 @@ mod tests {
     use serde_json::json;
 
     use crate::mdschema::validator::{
-        node_walker::node_vs_node::validate_node_vs_node, ts_utils::parse_markdown,
+        errors::{ChildrenCount, SchemaViolationError, ValidationError},
+        node_walker::node_vs_node::validate_node_vs_node,
+        ts_utils::parse_markdown,
     };
 
     #[test]
@@ -290,5 +301,54 @@ mod tests {
             result.errors
         );
         assert_eq!(result.value, json!({"name": "Alice"}));
+    }
+
+    #[test]
+    fn test_empty_schema_with_non_empty_input() {
+        let schema_str = "";
+        let input_str = "# Some content\n";
+        let schema = parse_markdown(schema_str).unwrap();
+        let input = parse_markdown(input_str).unwrap();
+
+        let schema_cursor = schema.walk();
+        let input_cursor = input.walk();
+
+        let result =
+            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert!(
+            !result.errors.is_empty(),
+            "Expected validation errors when schema is empty but input is not"
+        );
+
+        match result.errors.first() {
+            Some(error) => {
+                match error {
+                    ValidationError::SchemaViolation(
+                        SchemaViolationError::ChildrenLengthMismatch {
+                            schema_index,
+                            input_index,
+                            expected,
+                            actual,
+                        },
+                    ) => {
+                        // Expected this specific error type
+                        assert!(schema_index >= &0, "schema_index should be non-negative");
+                        assert!(input_index >= &0, "input_index should be non-negative");
+                        assert_eq!(
+                            *expected,
+                            ChildrenCount::SpecificCount(0),
+                            "expected should be 0 for empty schema"
+                        );
+                        assert!(
+                            actual > &0,
+                            "actual should be greater than 0 for non-empty input"
+                        );
+                    }
+                    _ => panic!("Expected ChildrenLengthMismatch error, got: {:?}", error),
+                }
+            }
+            None => panic!("Expected error"),
+        }
     }
 }

@@ -3,9 +3,10 @@ use serde_json::Value;
 use tree_sitter::{InputEdit, Point, Tree};
 
 use crate::mdschema::validator::{
-    errors::{ValidationError, ParserError},
+    errors::{ParserError, ValidationError},
     node_walker::NodeWalker,
-    ts_utils::new_markdown_parser, validator_state::ValidatorState,
+    ts_utils::new_markdown_parser,
+    validator_state::ValidatorState,
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -49,7 +50,12 @@ impl Validator {
         Self::new(schema_str, input_str, false)
     }
 
-    pub fn report(&self) -> (impl Iterator<Item = &ValidationError> + std::fmt::Debug, &Value) {
+    pub fn report(
+        &self,
+    ) -> (
+        impl Iterator<Item = &ValidationError> + std::fmt::Debug,
+        &Value,
+    ) {
         (self.errors_so_far(), self.matches_so_far())
     }
 
@@ -146,6 +152,7 @@ impl Validator {
 
 #[cfg(test)]
 mod tests {
+    use crate::mdschema::validator::utils::test_logging;
     use serde_json::json;
 
     use crate::mdschema::validator::errors::{ChildrenCount, SchemaError, SchemaViolationError};
@@ -268,7 +275,9 @@ mod tests {
 
         let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch { .. }) => {}
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
+                ..
+            }) => {}
             _ => panic!("Expected TextMismatch error, got {:?}", errors[0]),
         }
     }
@@ -311,7 +320,7 @@ mod tests {
                 expected,
                 actual,
             }) => {
-                assert_eq!(*expected, ChildrenCount::SpecificCount(2));
+                assert_eq!(*expected, ChildrenCount::from_specific(2));
                 assert_eq!(*actual, 3);
                 assert_eq!(*schema_index, 9); // TODO: is this right?
             }
@@ -326,7 +335,9 @@ mod tests {
 
         let (errors, _) = do_validate(schema, input, true);
         match &errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch { .. }) => {}
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
+                ..
+            }) => {}
             _ => panic!("Expected NodeContentMismatch error, got {:?}", errors[0]),
         }
     }
@@ -582,6 +593,7 @@ Version: `ver:/[\d]+/`
 
     #[test]
     fn test_empty_document() {
+        test_logging();
         let schema = "";
         let input = "";
 
@@ -812,7 +824,7 @@ Footer: goodbye
                 expected,
                 ..
             }) => {
-                assert_eq!(*expected, ChildrenCount::SpecificCount(4));
+                assert_eq!(*expected, ChildrenCount::from_specific(4));
                 assert_eq!(*actual, 5);
             }
             _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),

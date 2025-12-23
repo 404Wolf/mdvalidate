@@ -90,12 +90,6 @@ pub enum SchemaError {
         schema_index: usize,
         input_index: usize,
     },
-    /// When you attempt to make a matcher but the interior contents are
-    /// invalid. For example, `////foobar/bad matcher!`.
-    InvalidMatcherContents {
-        schema_index: usize,
-        input_index: usize,
-    },
     /// When you attempt to make a matcher but the extras are
     /// invalid. For example, `test:/1/`!{1,2}.
     InvalidMatcherExtras {
@@ -543,27 +537,6 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                                 .with_message(format!(
                                     "No matchers found in children of list node (node kind: '{}'). Schema: '{}'",
                                     schema_node.kind(),
-                                    schema_content
-                                ))
-                                .with_color(Color::Red),
-                        )
-                        .finish()
-                }
-                SchemaError::InvalidMatcherContents {
-                    schema_index,
-                    input_index,
-                } => {
-                    let schema_content =
-                        node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                    let input_node = find_node_by_index(tree.root_node(), *input_index);
-                    let input_range = input_node.start_byte()..input_node.end_byte();
-
-                    Report::build(ReportKind::Error, (filename, input_range.clone()))
-                        .with_message("Invalid matcher contents")
-                        .with_label(
-                            Label::new((filename, input_range))
-                                .with_message(format!(
-                                    "Invalid matcher contents. Schema: '{}'",
                                     schema_content
                                 ))
                                 .with_color(Color::Red),

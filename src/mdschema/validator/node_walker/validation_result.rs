@@ -91,8 +91,8 @@ mod tests {
         result.join_other_result(&ValidationResult::from_empty(1, 1));
         result.add_error(ValidationError::ValidatorCreationFailed);
 
-        assert_eq!(result.descendant_index_pair(), (0, 0));
-        assert_eq!(result.value, json!({"id": "value", "key": "value"}));
+        assert_eq!(result.descendant_index_pair(), (1, 1)); // the farther!
+        assert_eq!(result.value, json!({"id": "value"}));
 
         assert_eq!(result.errors.len(), 1);
         match result.errors[0] {
