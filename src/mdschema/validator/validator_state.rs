@@ -88,7 +88,7 @@ mod tests {
 
         state.join_new_matches(new_matches);
 
-        if let Value::Object(ref map) = state.matches_so_far() {
+        if let Value::Object(map) = state.matches_so_far() {
             assert_eq!(map.get("key1"), Some(&Value::String("value1".to_string())));
             assert_eq!(map.get("key2"), Some(&Value::String("value2".to_string())));
         } else {
@@ -108,7 +108,7 @@ mod tests {
 
         state.join_new_matches(new_matches);
 
-        if let Value::Array(ref array) = state.matches_so_far() {
+        if let Value::Array(array) = state.matches_so_far() {
             assert_eq!(array.len(), 3);
             assert_eq!(array[0], Value::String("value1".to_string()));
             assert_eq!(array[1], Value::String("value2".to_string()));

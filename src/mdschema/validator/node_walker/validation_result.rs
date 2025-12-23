@@ -64,8 +64,12 @@ impl ValidationResult {
         self.errors.extend(other.errors.clone());
 
         // Make the descendant index pair the maximum of the two (as far as we got)
-        self.schema_descendant_index = self.schema_descendant_index.max(other.schema_descendant_index);
-        self.input_descendant_index = self.input_descendant_index.max(other.input_descendant_index);
+        self.schema_descendant_index = self
+            .schema_descendant_index
+            .max(other.schema_descendant_index);
+        self.input_descendant_index = self
+            .input_descendant_index
+            .max(other.input_descendant_index);
     }
 
     /// Get the descendant index pair (schema, input)

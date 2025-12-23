@@ -55,6 +55,8 @@
               fira-mono
               git-cliff
               cargo-release
+              ruff
+              black
               stdenv.cc.cc.lib
             ])
             ++ [

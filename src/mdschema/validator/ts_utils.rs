@@ -20,6 +20,11 @@ pub fn get_node_and_next_node<'a>(cursor: &TreeCursor<'a>) -> Option<(Node<'a>, 
     Some((first_node, next_node))
 }
 
+/// Whether the cursor has a node sibling following it.
+pub fn has_subsequent_node_of_kind(cursor: &TreeCursor, kind: &str) -> bool {
+    cursor.clone().goto_next_sibling() && cursor.node().kind() == kind
+}
+
 /// Create a new Tree-sitter parser for Markdown.
 pub fn new_markdown_parser() -> Parser {
     let mut parser = Parser::new();
@@ -49,6 +54,18 @@ pub fn find_node_by_index(root: Node, target_index: usize) -> Node {
     let mut cursor = root.walk();
     cursor.goto_descendant(target_index);
     cursor.node()
+}
+
+/// Get all siblings of a given node.
+pub fn get_siblings<'a>(input_cursor: &TreeCursor<'a>) -> Vec<Node<'a>> {
+    let parent = input_cursor.node().parent();
+    match parent {
+        Some(p) => {
+            let mut walker = p.walk();
+            p.children(&mut walker).collect()
+        }
+        None => vec![],
+    }
 }
 
 /// Check if a node is a list.
@@ -228,6 +245,37 @@ mod tests {
     fn parse_markdown_and_get_tree(input: &str) -> Tree {
         let mut parser = new_markdown_parser();
         parser.parse(input, None).unwrap()
+    }
+
+    #[test]
+    fn test_has_subsequent_node_of_kind() {
+        let input = "- test1\n- test2\n- test3";
+
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        cursor.goto_first_child(); // first list item
+        assert_eq!(cursor.node().kind(), "list_item");
+
+        let has_subsequent_list_item = has_subsequent_node_of_kind(&cursor, "list_item");
+        assert!(has_subsequent_list_item);
+    }
+
+    #[test]
+    fn test_get_siblings() {
+        let input = "- test1\n- test2\n- test3";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let root_node = tree.root_node();
+        let list_node = root_node.child(0).unwrap();
+        let list_item_node = list_node.child(1).unwrap(); // second list item
+        let cursor = list_item_node.walk();
+        let siblings = get_siblings(&cursor);
+        assert_eq!(siblings.len(), 3);
+        assert_eq!(siblings[0].kind(), "list_item");
+        assert_eq!(siblings[1].kind(), "list_item");
+        assert_eq!(siblings[2].kind(), "list_item");
     }
 
     #[test]

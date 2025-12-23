@@ -3,12 +3,12 @@ use serde_json::Value;
 /// Join two values together in-place.
 pub fn join_values(a: &mut Value, b: Value) {
     match (a, b) {
-        (Value::Object(ref mut existing_map), Value::Object(new_map)) => {
+        (Value::Object(existing_map), Value::Object(new_map)) => {
             for (key, value) in new_map {
                 existing_map.insert(key, value);
             }
         }
-        (Value::Array(ref mut existing_array), Value::Array(new_array)) => {
+        (Value::Array(existing_array), Value::Array(new_array)) => {
             existing_array.extend(new_array);
         }
         _ => {}

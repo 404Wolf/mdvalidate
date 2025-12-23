@@ -4,9 +4,12 @@ use tracing::instrument;
 use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
-    errors::*, matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars}, node_walker::ValidationResult, ts_utils::{
+    errors::*,
+    matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars},
+    node_walker::ValidationResult,
+    ts_utils::{
         compare_node_kinds, compare_text_contents, is_last_node, is_textual_node, waiting_at_end,
-    }
+    },
 };
 
 /// Validate a textual region of input against a textual region of schema.
@@ -87,6 +90,14 @@ pub fn validate_text_vs_text(
                     ));
                     return result;
                 }
+                Err(error) => {
+                    result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
+                        error,
+                        schema_index: input_cursor.descendant_index(),
+                        input_index: input_cursor.descendant_index(),
+                    }));
+                    return result;
+                }
             }
         }
         None => {
@@ -116,7 +127,7 @@ pub fn validate_text_vs_text(
                     SchemaViolationError::ChildrenLengthMismatch {
                         schema_index: schema_cursor.descendant_index(),
                         input_index: input_cursor.descendant_index(),
-                        expected: schema_child_count,
+                        expected: ChildrenCount::SpecificCount(schema_child_count),
                         actual: input_child_count,
                     },
                 );
@@ -522,8 +533,7 @@ pub fn validate_matcher_vs_text<'a>(
         if schema_suffix != input_suffix {
             trace!(
                 "Suffix mismatch: expected '{}', got '{}'",
-                schema_suffix,
-                input_suffix
+                schema_suffix, input_suffix
             );
 
             result.add_error(ValidationError::SchemaViolation(
@@ -559,7 +569,10 @@ type SplitMatcherNodes<'a> = (Option<Node<'a>>, Node<'a>, Option<Node<'a>>);
 /// - code_span, text (matcher + suffix)
 /// - text, code_span, text (prefix + matcher + suffix)
 fn extract_matcher_nodes<'a>(schema_cursor: &TreeCursor<'a>) -> Option<SplitMatcherNodes<'a>> {
-    let schema_nodes = schema_cursor.node().children(&mut schema_cursor.clone()).collect::<Vec<_>>();
+    let schema_nodes = schema_cursor
+        .node()
+        .children(&mut schema_cursor.clone())
+        .collect::<Vec<_>>();
 
     if schema_nodes.is_empty() {
         return None;
@@ -591,12 +604,16 @@ fn extract_matcher_nodes<'a>(schema_cursor: &TreeCursor<'a>) -> Option<SplitMatc
 mod tests {
     use super::validate_matcher_vs_text as validate_matcher_vs_text_original;
     use serde_json::json;
-    use tree_sitter::{TreeCursor};
+    use tree_sitter::TreeCursor;
 
     use crate::mdschema::validator::{
-        errors::*, matcher::matcher::Matcher, node_walker::{
-            ValidationResult, text_vs_text::{extract_matcher_nodes, validate_text_vs_text}
-        }, ts_utils::parse_markdown
+        errors::*,
+        matcher::matcher::Matcher,
+        node_walker::{
+            ValidationResult,
+            text_vs_text::{extract_matcher_nodes, validate_text_vs_text},
+        },
+        ts_utils::parse_markdown,
     };
 
     fn validate_matcher_vs_text<'a>(
@@ -610,9 +627,18 @@ mod tests {
             Some((prefix_node, matcher_node, suffix_node)) => {
                 let matcher = Matcher::try_from_nodes(matcher_node, suffix_node, schema_str)
                     .expect("test utility expects valid matcher");
-                validate_matcher_vs_text_original(input_cursor, schema_cursor, schema_str, input_str, got_eof, (prefix_node, (matcher, matcher_node), suffix_node))
-            },
-            None => unreachable!("this test utility is designed only for matchers and blows up for non matcher groups")
+                validate_matcher_vs_text_original(
+                    input_cursor,
+                    schema_cursor,
+                    schema_str,
+                    input_str,
+                    got_eof,
+                    (prefix_node, (matcher, matcher_node), suffix_node),
+                )
+            }
+            None => unreachable!(
+                "this test utility is designed only for matchers and blows up for non matcher groups"
+            ),
         }
     }
 
@@ -683,7 +709,7 @@ mod tests {
                 actual,
                 ..
             }) => {
-                assert_eq!(*expected, 4); // text, italic, text, strong
+                assert_eq!(*expected, ChildrenCount::SpecificCount(4)); // text, italic, text, strong
                 assert_eq!(*actual, 2); // text, strong
             }
             _ => panic!("Expected a ChildrenLengthMismatch error!"),

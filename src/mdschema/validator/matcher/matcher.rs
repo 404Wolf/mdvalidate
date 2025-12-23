@@ -39,6 +39,9 @@ pub enum MatcherError {
     ///
     /// We know this because we saw the `!` extra after the matcher.
     WasLiteralCode,
+    /// You tried to use a constructor meant for nodes but failed to meet an
+    /// invariant of the kind of node or state of the cursor used.
+    InvariantViolation(String),
 }
 
 impl std::fmt::Display for MatcherError {
@@ -53,6 +56,10 @@ impl std::fmt::Display for MatcherError {
             MatcherError::WasLiteralCode => {
                 write!(f, "Literal code")
             }
+            MatcherError::InvariantViolation(err) => {
+                write!(f, "Invariant violation: {}", err)
+            }
+
         }
     }
 }
@@ -285,10 +292,16 @@ impl Matcher {
     /// as extras if it is a text node.
     pub fn try_from_cursor(cursor: &TreeCursor, schema_str: &str) -> Result<Matcher, MatcherError> {
         let (node, next_node) = get_node_and_next_node(cursor).ok_or_else(|| {
-            MatcherError::MatcherInteriorRegexInvalid(
+            MatcherError::InvariantViolation(
                 "Cursor has no current node to extract matcher from".to_string(),
             )
         })?;
+
+        if node.kind() != "code_span" {
+            return Err(MatcherError::InvariantViolation(
+                "Cursor is not pointing at a code_span node".to_string(),
+            ));
+        }
 
         Self::try_from_nodes(node, next_node, schema_str)
     }
@@ -391,8 +404,24 @@ impl Matcher {
         &self.pattern
     }
 
+    /// The original string length of the matcher including the `s.
     pub fn original_str_len(&self) -> usize {
         self.original_str_len
+    }
+
+    /// Whether the matcher has variable length.
+    ///
+    /// The matcher has variable length if it does not have a specific max and min
+    /// constraint, and the max is not equal to a min. In other words, it does not have a
+    /// *specific* count. If we are not a repeating matcher it does not have
+    /// variable length.
+    pub fn variable_length(&self) -> bool {
+        let extras = self.extras();
+        match (extras.max_items(), extras.min_items()) {
+            (Some(max_items), Some(min_items)) => max_items != min_items,
+            _ if !extras.had_min_max() => false, // if we didn't have a min max, we are bounded since non-repeating
+            _ => true,
+        }
     }
 }
 
@@ -707,6 +736,35 @@ mod tests {
         assert!(!matcher.is_repeated());
         assert_eq!(matcher.extras().min_items(), None);
         assert_eq!(matcher.extras().max_items(), None);
+    }
+
+    #[test]
+    fn test_is_variable_length() {
+        let matcher =
+            Matcher::try_from_pattern_and_suffix_str("`test:/\\d+/`", Some("{,}")).unwrap();
+        assert!(matcher.variable_length());
+
+        let matcher =
+            Matcher::try_from_pattern_and_suffix_str("`test:/\\d+/`", Some("{,2}")).unwrap();
+        assert!(matcher.variable_length());
+
+        let matcher =
+            Matcher::try_from_pattern_and_suffix_str("`test:/\\d+/`", Some("{2,}")).unwrap();
+        assert!(matcher.variable_length());
+
+        // Min is not the same as max, so it's variable length
+        let matcher =
+            Matcher::try_from_pattern_and_suffix_str("`test:/\\d+/`", Some("{1,3}")).unwrap();
+        assert!(matcher.variable_length());
+
+        // Non repeaters are implicitly length 1
+        let matcher = Matcher::try_from_pattern_and_suffix_str("`foo:/bar/`", None).unwrap();
+        assert!(!matcher.variable_length());
+
+        // Finally, this is not variable length but is a repeater
+        let matcher =
+            Matcher::try_from_pattern_and_suffix_str("`test:/\\d+/`", Some("{3,3}")).unwrap();
+        assert!(!matcher.variable_length());
     }
 
     #[test]
