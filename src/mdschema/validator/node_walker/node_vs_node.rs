@@ -1,10 +1,11 @@
+use log::trace;
 use tracing::instrument;
 use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
     errors::ValidationError,
     node_walker::{
-        list_vs_list::validate_list_vs_list, text_vs_text::validate_text_vs_text, ValidationResult,
+        ValidationResult, list_vs_list::validate_list_vs_list, text_vs_text::validate_text_vs_text,
     },
     ts_utils::{is_list_node, is_textual_container, is_textual_node},
 };
@@ -39,6 +40,7 @@ pub fn validate_node_vs_node(
 
     // 1) Both are textual nodes - use text_vs_text directly
     if both_are_textual_nodes(&input_node, &schema_node) {
+        trace!("Both are textual nodes, validating text vs text");
         return validate_text_vs_text(
             &input_cursor,
             &schema_cursor,
@@ -50,6 +52,7 @@ pub fn validate_node_vs_node(
 
     // 2) Both are textual containers - check for matcher usage
     if both_are_textual_containers(&input_node, &schema_node) {
+        trace!("Both are textual containers, validating text vs text");
         return validate_text_vs_text(
             &input_cursor,
             &schema_cursor,
@@ -61,6 +64,7 @@ pub fn validate_node_vs_node(
 
     // 3) Both are list nodes
     if both_are_list_nodes(&input_node, &schema_node) {
+        trace!("Both are list nodes, validating list vs list");
         return validate_list_vs_list(
             &input_cursor,
             &schema_cursor,
@@ -74,6 +78,7 @@ pub fn validate_node_vs_node(
     if both_are_matching_top_level_nodes(&input_node, &schema_node) {
         // Crawl down one layer to get to the actual children
         if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
+            trace!("Both are heading nodes or document nodes, validating heading vs heading");
             let new_result = validate_node_vs_node(
                 &input_cursor,
                 &schema_cursor,
@@ -118,6 +123,7 @@ pub fn validate_node_vs_node(
                 }
             }
         } else {
+            trace!("Both input and schema node were top level, but they didn't both have children");
             result
                 .errors
                 .push(ValidationError::InternalInvariantViolated(

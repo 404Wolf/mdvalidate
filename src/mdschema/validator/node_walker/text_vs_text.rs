@@ -210,8 +210,7 @@ fn validate_textual_nodes(
     let input_node = input_cursor.node();
 
     // Check node kind first
-    if let Some(error) = compare_node_kinds(&schema_node, &input_node, schema_cursor, input_cursor)
-    {
+    if let Some(error) = compare_node_kinds(&schema_cursor, input_cursor, schema_str, input_str) {
         result.add_error(error);
         return result;
     }
@@ -263,7 +262,7 @@ fn validate_textual_container_children(
         if is_textual_node(&input_child) && is_textual_node(&schema_child) {
             // Both are textual, compare them directly
             if let Some(error) =
-                compare_node_kinds(&schema_child, &input_child, schema_cursor, input_cursor)
+                compare_node_kinds(&schema_cursor, &input_cursor, schema_str, input_str)
             {
                 result.add_error(error);
                 return result;
@@ -451,7 +450,8 @@ pub fn validate_matcher_vs_text<'a>(
     }
 
     // All input that comes after the expected prefix
-    let input_after_prefix = input_str[input_byte_offset..].to_string();
+    let input_after_prefix =
+        input_str[input_byte_offset..input_cursor.node().byte_range().end].to_string();
 
     // If the matcher is for a ruler, we should expect the entire input node to be a ruler
     if matcher.is_ruler() {
@@ -481,6 +481,12 @@ pub fn validate_matcher_vs_text<'a>(
         }
     }
 
+    trace!(
+        "Attempting to match the input \"{}\"'s prefix, which is {}",
+        input_cursor.node().utf8_text(input_str.as_bytes()).unwrap(),
+        input_after_prefix
+    );
+
     // Actually perform the match for the matcher
     match matcher.match_str(&input_after_prefix) {
         Some(matched_str) => {
@@ -497,6 +503,11 @@ pub fn validate_matcher_vs_text<'a>(
         None => {
             trace!("Matcher did not match input string, reporting mismatch error");
 
+            trace!(
+                "Attempting to match the input \"{}\"'s prefix, which is {}",
+                input_cursor.node().utf8_text(input_str.as_bytes()).unwrap(),
+                input_after_prefix
+            );
             result.add_error(ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     schema_index: schema_cursor.descendant_index(),
@@ -1403,5 +1414,74 @@ mod tests {
 
         // Should succeed because it falls back to textual validation when regex is invalid
         assert_eq!(result.errors.len(), 0);
+    }
+
+    #[test]
+    fn test_validate_list_item_with_nested_matcher() {
+        // Schema with a list item containing a matcher for "foo\d"
+        let schema_str = r#"
+- `test:/foo\d/`
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+
+        // Input with a list item containing multiple lines and nested list items
+        let input_str = r#"
+- bar
+  - foo1
+  - foo2
+ - baz
+ "#;
+        let input_tree = parse_markdown(input_str).unwrap();
+
+        let mut schema_cursor = schema_tree.walk();
+        let mut input_cursor = input_tree.walk();
+        dbg!(input_cursor.node().to_sexp());
+
+        schema_cursor.goto_first_child(); // document -> tight_list
+        input_cursor.goto_first_child(); // document -> tight_list
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+
+        schema_cursor.goto_first_child(); // tight_list -> list_item
+        input_cursor.goto_first_child(); // tight_list -> list_item
+        assert_eq!(schema_cursor.node().kind(), "list_item");
+        assert_eq!(input_cursor.node().kind(), "list_item");
+
+        schema_cursor.goto_first_child(); // list_item -> list_marker
+        input_cursor.goto_first_child(); // list_item -> list_marker
+
+        schema_cursor.goto_next_sibling(); // list_marker -> paragraph
+        input_cursor.goto_next_sibling(); // list_marker -> paragraph
+
+        dbg!(schema_cursor.node().to_sexp());
+
+        let result = validate_text_vs_text(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true, // eof is true
+        );
+
+        // The test should fail with a NodeContentMismatch error
+        assert_eq!(
+            result.errors.len(),
+            1,
+            "Expected one error, got {}",
+            result.errors.len()
+        );
+        match &result.errors[0] {
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
+                expected,
+                actual,
+                kind,
+                ..
+            }) => {
+                assert_eq!(expected, "^foo\\d");
+                assert_eq!(actual, "bar");
+                assert_eq!(*kind, NodeContentMismatchKind::Matcher);
+            }
+            e => panic!("Expected a NodeContentMismatch error! Got {:?}", e),
+        }
     }
 }

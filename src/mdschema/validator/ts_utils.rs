@@ -5,6 +5,31 @@ use crate::mdschema::validator::errors::{
     NodeContentMismatchKind, SchemaViolationError, ValidationError,
 };
 
+use regex::Regex;
+use std::sync::LazyLock;
+
+/// Ordered lists use numbers followed by period . or right paren )
+static ORDERED_LIST_MARKER_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\d+[.)]").unwrap());
+
+/// Check whether a list marker is an ordered list marker.
+///
+/// https://commonmark.org/help/tutorial/06-lists.html
+pub fn is_ordered_list_marker(marker: &str) -> bool {
+    ORDERED_LIST_MARKER_REGEX.is_match(marker)
+}
+
+/// Unordered lists can use either asterisks *, plus +, or hyphens - as list markers.
+///
+/// https://commonmark.org/help/tutorial/06-lists.html
+static UNORDERED_LIST_MARKER_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[*+\-]").unwrap());
+
+/// Check whether a list marker is an unordered list marker.
+pub fn is_unordered_list_marker(marker: &str) -> bool {
+    UNORDERED_LIST_MARKER_REGEX.is_match(marker)
+}
+
 /// Get the current treesitter node for a cursor, and the subsequent sibling.
 pub fn get_node_and_next_node<'a>(cursor: &TreeCursor<'a>) -> Option<(Node<'a>, Option<Node<'a>>)> {
     let mut input_cursor = cursor.clone();
@@ -103,20 +128,59 @@ pub fn waiting_at_end(got_eof: bool, last_input_str: &str, input_cursor: &TreeCu
 /// Compare node kinds and return an error if they don't match
 ///
 /// # Arguments
-/// * `schema_node` - The schema node to compare against
-/// * `input_node` - The input node to compare
 /// * `schema_cursor` - The schema cursor, pointed at any node
 /// * `input_cursor` - The input cursor, pointed at any node
+/// * `input_str` - The input string
+/// * `schema_str` - The schema string
 ///
 /// # Returns
 /// An optional validation error if the node kinds don't match
 pub fn compare_node_kinds(
-    schema_node: &Node,
-    input_node: &Node,
     schema_cursor: &TreeCursor,
     input_cursor: &TreeCursor,
+    input_str: &str,
+    schema_str: &str,
 ) -> Option<ValidationError> {
-    if schema_node.kind() != input_node.kind() {
+    let schema_node = schema_cursor.node();
+    let input_node = input_cursor.node();
+
+    let schema_kind = schema_node.kind();
+    let input_kind = input_node.kind();
+
+    // Special case! If they are both tight lists, check the first children of
+    // each of them, which are list markers. This will indicate whether they are
+    // the same type of list.
+    if schema_cursor.node().kind() == "tight_list" && input_cursor.node().kind() == "tight_list" {
+        let schema_list_marker = extract_list_marker(schema_cursor, schema_str);
+        let input_list_marker = extract_list_marker(input_cursor, input_str);
+
+        // They must both be unordered, both be ordered, or both have the same marker
+        if schema_list_marker == input_list_marker {
+            // They can be the same list symbol!
+        } else if is_ordered_list_marker(schema_list_marker)
+            && is_ordered_list_marker(input_list_marker)
+        {
+            // Or both ordered
+        } else if is_unordered_list_marker(schema_list_marker)
+            && is_unordered_list_marker(input_list_marker)
+        {
+            // Or both unordered
+        } else {
+            // But anything else is a mismatch
+
+            return Some(ValidationError::SchemaViolation(
+                SchemaViolationError::NodeTypeMismatch {
+                    schema_index: schema_cursor.descendant_index(),
+                    input_index: input_cursor.descendant_index(),
+                    // TODO: find a better way to represent the *kind* of list in this error
+                    expected: format!("{}({})", input_cursor.node().kind(), schema_list_marker),
+                    actual: format!("{}({})", input_cursor.node().kind(), input_list_marker),
+                },
+            ));
+        }
+    }
+
+    if schema_kind != input_kind {
         Some(ValidationError::SchemaViolation(
             SchemaViolationError::NodeTypeMismatch {
                 schema_index: schema_cursor.descendant_index(),
@@ -128,6 +192,17 @@ pub fn compare_node_kinds(
     } else {
         None
     }
+}
+
+/// Extract the list marker from a tight_list node
+///
+/// TODO: Handle UTF8 errors properly instead of unwrapping
+pub fn extract_list_marker<'a>(cursor: &TreeCursor<'a>, schema_str: &'a str) -> &'a str {
+    let mut cursor = cursor.clone();
+    cursor.goto_first_child(); // Go to first list_item
+    cursor.goto_first_child(); // Go to list_marker
+    let marker = cursor.node();
+    marker.utf8_text(schema_str.as_bytes()).unwrap()
 }
 
 /// Compare text contents and return an error if they don't match
@@ -248,6 +323,26 @@ mod tests {
     }
 
     #[test]
+    fn test_is_ordered_list_marker() {
+        assert!(is_ordered_list_marker("1."));
+        assert!(is_ordered_list_marker("2."));
+        assert!(is_ordered_list_marker("3."));
+        assert!(!is_ordered_list_marker("a."));
+        assert!(!is_ordered_list_marker("b."));
+        assert!(!is_ordered_list_marker("c."));
+    }
+
+    #[test]
+    fn test_is_unordered_list_marker() {
+        assert!(is_unordered_list_marker("*"));
+        assert!(is_unordered_list_marker("-"));
+        assert!(is_unordered_list_marker("+"));
+        assert!(!is_unordered_list_marker("1."));
+        assert!(!is_unordered_list_marker("2."));
+        assert!(!is_unordered_list_marker("3."));
+    }
+
+    #[test]
     fn test_has_subsequent_node_of_kind() {
         let input = "- test1\n- test2\n- test3";
 
@@ -260,6 +355,20 @@ mod tests {
 
         let has_subsequent_list_item = has_subsequent_node_of_kind(&cursor, "list_item");
         assert!(has_subsequent_list_item);
+    }
+
+    #[test]
+    fn test_extract_list_markers() {
+        let input = "- test1\n- test2\n- test3\n# Irrelevant Heading";
+
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(input, None).unwrap();
+        let mut cursor = tree.walk();
+        cursor.goto_first_child(); // Go to tight_list
+        assert_eq!(cursor.node().kind(), "tight_list");
+
+        let list_marker = extract_list_marker(&cursor, input);
+        assert_eq!(list_marker, "-");
     }
 
     #[test]
@@ -508,5 +617,24 @@ mod tests {
             !has_single_code_child(&schema_cursor),
             "Expected no code child for list item with code span"
         );
+    }
+
+    #[test]
+    fn test_compare_node_kinds_list() {
+        let input_1 = " - test1";
+        let input_1_tree = parse_markdown(input_1).unwrap();
+        let mut input_1_cursor = input_1_tree.walk();
+
+        let input_2 = " * test1";
+        let input_2_tree = parse_markdown(input_2).unwrap();
+        let mut input_2_cursor = input_2_tree.walk();
+
+        input_1_cursor.goto_first_child();
+        input_2_cursor.goto_first_child();
+        assert_eq!(input_2_cursor.node().kind(), "tight_list");
+        assert_eq!(input_1_cursor.node().kind(), "tight_list");
+
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        assert!(result.is_none());
     }
 }
