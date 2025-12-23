@@ -15,6 +15,25 @@ pub fn join_values(a: &mut Value, b: Value) {
     }
 }
 
+#[macro_export]
+macro_rules! test_logging {
+    () => {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+            )
+            .without_time()
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_thread_names(false)
+            .with_span_events(
+                tracing_subscriber::fmt::format::FmtSpan::ENTER
+                    | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+            )
+            .init();
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

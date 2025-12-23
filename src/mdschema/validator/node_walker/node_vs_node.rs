@@ -41,6 +41,7 @@ pub fn validate_node_vs_node(
     // 1) Both are textual nodes - use text_vs_text directly
     if both_are_textual_nodes(&input_node, &schema_node) {
         trace!("Both are textual nodes, validating text vs text");
+
         return validate_text_vs_text(
             &input_cursor,
             &schema_cursor,
@@ -53,6 +54,7 @@ pub fn validate_node_vs_node(
     // 2) Both are textual containers - check for matcher usage
     if both_are_textual_containers(&input_node, &schema_node) {
         trace!("Both are textual containers, validating text vs text");
+
         return validate_text_vs_text(
             &input_cursor,
             &schema_cursor,
@@ -65,6 +67,7 @@ pub fn validate_node_vs_node(
     // 3) Both are list nodes
     if both_are_list_nodes(&input_node, &schema_node) {
         trace!("Both are list nodes, validating list vs list");
+
         return validate_list_vs_list(
             &input_cursor,
             &schema_cursor,
@@ -79,6 +82,7 @@ pub fn validate_node_vs_node(
         // Crawl down one layer to get to the actual children
         if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
             trace!("Both are heading nodes or document nodes, validating heading vs heading");
+
             let new_result = validate_node_vs_node(
                 &input_cursor,
                 &schema_cursor,
@@ -95,6 +99,15 @@ pub fn validate_node_vs_node(
                 // TODO: handle case where one has more children than the other
                 let input_had_sibling = input_cursor.goto_next_sibling();
                 let schema_had_sibling = schema_cursor.goto_next_sibling();
+                trace!(
+                    "input_cursor: {}, schema_cursor: {}",
+                    input_cursor.node().to_sexp(),
+                    schema_cursor.node().to_sexp()
+                );
+                trace!(
+                    "input_had_sibling: {}, schema_had_sibling: {}",
+                    input_had_sibling, schema_had_sibling
+                );
 
                 if input_had_sibling && schema_had_sibling {
                     let new_result = validate_node_vs_node(
@@ -124,17 +137,21 @@ pub fn validate_node_vs_node(
             }
         } else {
             trace!("Both input and schema node were top level, but they didn't both have children");
+
             result
                 .errors
                 .push(ValidationError::InternalInvariantViolated(
                     "Both input and schema node were top level, but they didn't both have children"
                         .into(),
                 ));
+
+            return result;
         }
     }
 
     result.schema_descendant_index = schema_cursor.descendant_index();
     result.input_descendant_index = input_cursor.descendant_index();
+
     result
 }
 
@@ -157,8 +174,15 @@ fn both_are_list_nodes(input_node: &Node, schema_node: &Node) -> bool {
 
 /// Check if both nodes are top-level nodes (document or heading).
 fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    input_node.kind() == schema_node.kind()
-        && (input_node.kind() == "document" || input_node.kind().starts_with("heading"))
+    if input_node.kind() != schema_node.kind() {
+        return false;
+    }
+
+    match input_node.kind() {
+        "document" => true,
+        "atx_heading" => true,
+        _ => false,
+    }
 }
 
 #[cfg(test)]
