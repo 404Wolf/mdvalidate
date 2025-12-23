@@ -145,15 +145,20 @@ pub fn validate_node_vs_node(
             schema_node.to_sexp()
         );
 
-        result.add_error(ValidationError::SchemaViolation(
-            SchemaViolationError::ChildrenLengthMismatch {
-                schema_index: schema_cursor.descendant_index(),
-                input_index: input_cursor.descendant_index(),
-                // TODO: is there a case where we have a repeating list and this isn't true?
-                expected: ChildrenCount::from_specific(schema_cursor.node().child_count()),
-                actual: input_cursor.node().child_count(),
-            },
-        ));
+        let schema_child_count = schema_cursor.node().child_count();
+        let input_child_count = input_cursor.node().child_count();
+
+        if schema_child_count != input_child_count {
+            result.add_error(ValidationError::SchemaViolation(
+                SchemaViolationError::ChildrenLengthMismatch {
+                    schema_index: schema_cursor.descendant_index(),
+                    input_index: input_cursor.descendant_index(),
+                    // TODO: is there a case where we have a repeating list and this isn't true?
+                    expected: ChildrenCount::from_specific(schema_child_count),
+                    actual: input_child_count,
+                },
+            ));
+        }
 
         return result;
     }

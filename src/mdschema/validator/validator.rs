@@ -152,7 +152,6 @@ impl Validator {
 
 #[cfg(test)]
 mod tests {
-    use crate::mdschema::validator::utils::test_logging;
     use serde_json::json;
 
     use crate::mdschema::validator::errors::{ChildrenCount, SchemaError, SchemaViolationError};
@@ -551,6 +550,7 @@ Version: `ver:/[\d]+/`
             !errors.is_empty(),
             "Expected validation error for different code content"
         );
+        // TODO: actually validate the error
     }
 
     #[test]
@@ -593,7 +593,6 @@ Version: `ver:/[\d]+/`
 
     #[test]
     fn test_empty_document() {
-        test_logging();
         let schema = "";
         let input = "";
 
@@ -977,11 +976,13 @@ Content for section 3."#;
                 // After the first chunk, indices should advance or stay the same
                 assert!(
                     indices_after.0 >= indices_before.0,
-                    "Input descendant index regressed after reading chunk"
+                    "Input descendant index regressed after reading chunk {}. Before: {:?}, After: {:?}, Chunk length: {}",
+                    i, indices_before, indices_after, chunk.len()
                 );
                 assert!(
                     indices_after.1 >= indices_before.1,
-                    "Schema descendant index regressed after reading chunk"
+                    "Schema descendant index regressed after reading chunk {}. Before: {:?}, After: {:?}, Chunk length: {}",
+                    i, indices_before, indices_after, chunk.len()
                 );
             }
         }

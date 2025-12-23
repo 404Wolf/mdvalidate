@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::utils::join_values;
@@ -110,7 +110,7 @@ mod tests {
         result.join_other_result(&other);
 
         assert_eq!(result.descendant_index_pair(), (1, 1));
-        assert_eq!(result.value, json!({"id": "value", "key": "value"}));
+        assert_eq!(result.value, json!({"id": "value"}));
         assert_eq!(result.errors.len(), 0);
     }
 }
