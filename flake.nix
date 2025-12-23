@@ -5,6 +5,10 @@
     flake-utils.url = "github:numtide/flake-utils";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     treefmt.url = "github:numtide/treefmt-nix";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -13,17 +17,24 @@
       nixpkgs,
       flake-utils,
       treefmt,
+      fenix,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = import nixpkgs { inherit system; };
 
+        toolchain = fenix.packages.${system}.toolchainOf {
+          channel = "1.90";
+          sha256 = "sha256-SJwZ8g0zF2WrKDVmHrVG3pD2RGoQeo24MEXnNx5FyuI=";
+        };
+
         treefmtEval = treefmt.lib.evalModule pkgs {
           projectRootFile = "flake.nix";
           programs.nixfmt.enable = true;
           programs.yamlfmt.enable = true;
-          programs.typstfmt.enable = true;
+          programs.typstyle.enable = true;
+          programs.black.enable = true;
           programs.toml-sort.enable = true;
         };
       in
@@ -34,27 +45,28 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = (
-            with pkgs;
-            [
-              perf
+          packages =
+            (with pkgs; [
               nil
               nixd
               nixfmt
               typst
-              cargo
-              rustc
               mermaid-cli
-              rust-analyzer
               fira-mono
               git-cliff
               cargo-release
-            ]
-          );
+              ruff
+              black
+              stdenv.cc.cc.lib
+            ])
+            ++ [
+              toolchain.defaultToolchain
+            ];
           shellHook = ''
             export PATH=$PATH:target/debug
             export LLVM_COV=${pkgs.llvmPackages_latest.llvm}/bin/llvm-cov
             export LLVM_PROFDATA=${pkgs.llvmPackages_latest.llvm}/bin/llvm-profdata
+            export LD_LIBRARY_PATH=${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH
           '';
         };
 

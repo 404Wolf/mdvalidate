@@ -1,63 +1,37 @@
-use tree_sitter::Parser;
+use serde_json::Value;
 
-#[allow(dead_code)]
-pub fn node_to_str(node: &tree_sitter::Node, input_str: &str) -> String {
-    let mut cursor = node.walk();
-    node_to_str_rec(&mut cursor, input_str, 0)
-}
-
-#[allow(dead_code)]
-fn node_to_str_rec(cursor: &mut tree_sitter::TreeCursor, input_str: &str, depth: usize) -> String {
-    let node = cursor.node();
-    let indent = "  ".repeat(depth);
-    let mut result = format!(
-        "{}{}[{}..{}]({})",
-        indent,
-        node.kind(),
-        node.byte_range().start,
-        node.byte_range().end,
-        cursor.descendant_index()
-    );
-
-    if node.child_count() == 0 {
-        let text = &input_str[node.byte_range()];
-        result.push_str(&format!(": {:?}", text));
-    }
-
-    result.push('\n');
-
-    if cursor.goto_first_child() {
-        loop {
-            result.push_str(&node_to_str_rec(cursor, input_str, depth + 1));
-            if !cursor.goto_next_sibling() {
-                break;
+/// Join two values together in-place.
+pub fn join_values(a: &mut Value, b: Value) {
+    match (a, b) {
+        (Value::Object(existing_map), Value::Object(new_map)) => {
+            for (key, value) in new_map {
+                existing_map.insert(key, value);
             }
         }
-        cursor.goto_parent();
+        (Value::Array(existing_array), Value::Array(new_array)) => {
+            existing_array.extend(new_array);
+        }
+        _ => {}
     }
-
-    result
 }
 
-/// Create a new Tree-sitter parser for Markdown.
-pub fn new_markdown_parser() -> Parser {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_markdown::language())
-        .unwrap();
-    parser
-}
+#[allow(dead_code)]
+pub fn test_logging() {
+    use tracing_subscriber::EnvFilter;
 
-/// Determine whether a given node is the last node in the tree.
-pub fn is_last_node(input_str: &str, node: &tree_sitter::Node) -> bool {
-    input_str.trim().len() == node.byte_range().end
-}
-
-/// Find a node by its index given by a cursor's .descendant_index().
-pub fn find_node_by_index(root: tree_sitter::Node, target_index: usize) -> tree_sitter::Node {
-    let mut cursor = root.walk();
-    cursor.goto_descendant(target_index);
-    cursor.node()
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
+        )
+        .without_time()
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_span_events(
+            tracing_subscriber::fmt::format::FmtSpan::ENTER
+                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+        )
+        .init();
 }
 
 #[cfg(test)]
@@ -65,22 +39,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_node_to_str() {
-        let source = "# Heading\n\nThis is a paragraph.";
-        let mut parser = new_markdown_parser();
-        let tree = parser.parse(source, None).unwrap();
-        let root_node = tree.root_node();
-        let result = node_to_str(&root_node, source);
-        println!("{}", result);
+    fn test_join_values_objects() {
+        let mut a = serde_json::json!({ "key1": "value1" });
+        let b = serde_json::json!({ "key2": "value2" });
+
+        join_values(&mut a, b);
+
+        if let Value::Object(ref map) = a {
+            assert_eq!(map.get("key1"), Some(&Value::String("value1".to_string())));
+            assert_eq!(map.get("key2"), Some(&Value::String("value2".to_string())));
+        } else {
+            panic!("a is not an object");
+        }
     }
 
     #[test]
-    fn test_find_node_by_index() {
-        let source = "# Heading\n\nThis is a paragraph.";
-        let mut parser = new_markdown_parser();
-        let tree = parser.parse(source, None).unwrap();
-        let root_node = tree.root_node();
-        let node = find_node_by_index(root_node, 2);
-        assert_eq!(node.kind(), "atx_h1_marker");
+    fn test_join_values_arrays() {
+        let mut a = Value::Array(vec![Value::String("value1".to_string())]);
+        let b = Value::Array(vec![
+            Value::String("value2".to_string()),
+            Value::String("value3".to_string()),
+        ]);
+
+        join_values(&mut a, b);
+
+        if let Value::Array(ref array) = a {
+            assert_eq!(array.len(), 3);
+            assert_eq!(array[0], Value::String("value1".to_string()));
+            assert_eq!(array[1], Value::String("value2".to_string()));
+            assert_eq!(array[2], Value::String("value3".to_string()));
+        } else {
+            panic!("a is not an array");
+        }
     }
 }

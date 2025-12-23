@@ -1,46 +1,98 @@
 use crate::mdschema::validator::{
-    errors::{pretty_print_error, ValidationError},
-    node_validators::NodeValidationResult,
+    errors::{pretty_print_error, ParserError, ValidationError, PrettyPrintError},
     validator::Validator,
 };
 use colored::Colorize;
-use log::{debug, trace};
+use serde_json::Value;
 use std::io::{Read, Write};
-use tree_sitter::Tree;
 
 static DEFAULT_BUFFER_SIZE: usize = 2048;
+
+#[derive(Debug)]
+pub enum ProcessingError {
+    ReadInputFailed(String),
+    ValidatorCreationFailed,
+    Validation(ValidationError),
+    PrettyPrint(PrettyPrintError),
+    Io(std::io::Error),
+    Utf8(std::str::Utf8Error),
+}
+
+impl From<std::io::Error> for ProcessingError {
+    fn from(error: std::io::Error) -> Self {
+        ProcessingError::Io(error)
+    }
+}
+
+impl From<std::str::Utf8Error> for ProcessingError {
+    fn from(error: std::str::Utf8Error) -> Self {
+        ProcessingError::Utf8(error)
+    }
+}
+
+impl std::fmt::Display for ProcessingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProcessingError::ReadInputFailed(msg) => write!(f, "Read input failed: {}", msg),
+            ProcessingError::ValidatorCreationFailed => write!(f, "Validator creation failed"),
+            ProcessingError::Validation(e) => write!(f, "Validation error: {}", e),
+            ProcessingError::PrettyPrint(e) => write!(f, "Pretty print error: {:?}", e),
+            ProcessingError::Io(e) => write!(f, "IO error: {}", e),
+            ProcessingError::Utf8(e) => write!(f, "UTF-8 error: {}", e),
+        }
+    }
+}
+
+impl std::error::Error for ProcessingError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ProcessingError::ReadInputFailed(_) => None,
+            ProcessingError::ValidatorCreationFailed => None,
+            ProcessingError::Validation(_) => None,
+            ProcessingError::PrettyPrint(_) => None,
+            ProcessingError::Io(e) => Some(e),
+            ProcessingError::Utf8(e) => Some(e),
+        }
+    }
+}
+
+impl From<ValidationError> for ProcessingError {
+    fn from(error: ValidationError) -> Self {
+        ProcessingError::Validation(error)
+    }
+}
+
+impl From<ParserError> for ProcessingError {
+    fn from(error: ParserError) -> Self {
+        ProcessingError::Validation(ValidationError::ParserError(error))
+    }
+}
+
+impl From<PrettyPrintError> for ProcessingError {
+    fn from(error: PrettyPrintError) -> Self {
+        ProcessingError::PrettyPrint(error)
+    }
+}
 
 pub fn process<R: Read>(
     schema_str: &String,
     input: &mut R,
     fast_fail: bool,
-) -> Result<(NodeValidationResult, Tree, String), ValidationError> {
+) -> Result<((Vec<ValidationError>, Value), Validator, String), ProcessingError> {
     let buffer_size = get_buffer_size();
-
-    debug!("Starting validation");
 
     let mut input_str = String::new();
     let mut buffer = vec![0; buffer_size];
 
-    debug!("Creating validator with buffer size: {}", buffer_size);
-    let mut validator = Validator::new(schema_str.as_str(), input_str.as_str(), false)
+    let mut validator = Validator::new_incomplete(schema_str.as_str(), input_str.as_str())
         .ok_or(ValidationError::ValidatorCreationFailed)?;
 
-    let mut iteration_count = 0;
-
     loop {
-        iteration_count += 1;
-        trace!("Reading iteration #{}", iteration_count);
-
         let bytes_read = input.read(&mut buffer)?;
 
         // If we're done reading, mark EOF
         if bytes_read == 0 {
-            debug!("Reached EOF, processing final input");
-
-            if let Err(e) = validator.read_input(&input_str, true) {
-                return Err(ValidationError::ReadInputFailed(e));
-            }
+            validator.read_final_input(&input_str)?;
             validator.validate();
 
             break;
@@ -49,22 +101,19 @@ pub fn process<R: Read>(
         let new_text = std::str::from_utf8(&buffer[..bytes_read])?;
         input_str.push_str(new_text);
 
-        if let Err(e) = validator.read_input(&input_str, false) {
-            return Err(ValidationError::ReadInputFailed(e));
-        }
+        validator.read_more_input(&input_str)?;
         validator.validate();
 
         // Check for fast-fail AFTER validation
-        if fast_fail && !validator.errors().is_empty() {
+        if fast_fail && validator.errors_so_far().count() > 0 {
             break;
         }
     }
 
-    let errors = validator.errors();
-    let matches = validator.matches();
-    let input_tree = validator.input_tree;
+    let errors: Vec<_> = validator.errors_so_far().cloned().collect();
+    let matches = validator.matches_so_far().clone();
 
-    Ok(((errors, matches), input_tree, input_str))
+    Ok(((errors, matches), validator, input_str))
 }
 
 pub fn process_stdio<R: Read, W: Write>(
@@ -74,8 +123,8 @@ pub fn process_stdio<R: Read, W: Write>(
     filename: &str,
     fast_fail: bool,
     quiet: bool,
-) -> Result<(NodeValidationResult, bool), ValidationError> {
-    let ((errors, matches), input_tree, input_str) = process(schema_str, input, fast_fail)?;
+) -> Result<((Vec<ValidationError>, Value), bool), ProcessingError> {
+    let ((errors, matches), validator, _input_str) = process(schema_str, input, fast_fail)?;
 
     let mut errored = false;
     if errors.is_empty() {
@@ -93,8 +142,7 @@ pub fn process_stdio<R: Read, W: Write>(
         }
     } else {
         for error in &errors {
-            let pretty = pretty_print_error(&input_tree, error, &input_str, filename)
-                .map_err(ValidationError::PrettyPrintFailed)?;
+            let pretty = pretty_print_error(error, &validator, filename)?;
             eprintln!("{}", pretty);
             errored = true;
         }
@@ -115,9 +163,9 @@ mod tests {
     use super::*;
     use std::io::{self, Cursor, Read};
 
-    fn get_validator<R: Read>(schema: &String, mut input: R, eof: bool) -> NodeValidationResult {
-        let ((errors, matches), _, _) =
-            process(schema, &mut input, eof).expect("Validation should complete without errors");
+    fn get_validator<R: Read>(schema: &String, mut input: R, fast_fail: bool) -> (Vec<ValidationError>, Value) {
+        let ((errors, matches), _validator, _) =
+            process(schema, &mut input, fast_fail).expect("Validation should complete without errors");
         (errors, matches)
     }
 
