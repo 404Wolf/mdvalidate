@@ -6,9 +6,7 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::{
     errors::{ChildrenCount, SchemaError, SchemaViolationError, ValidationError},
     matcher::matcher::{Matcher, MatcherError},
-    node_walker::{
-        ValidationResult, node_vs_node::validate_node_vs_node, text_vs_text::validate_text_vs_text,
-    },
+    node_walker::{ValidationResult, text_vs_text::validate_text_vs_text},
     ts_utils::{
         compare_node_kinds, get_siblings, has_single_code_child, has_subsequent_node_of_kind,
     },
@@ -447,7 +445,6 @@ mod tests {
     use std::panic;
 
     use serde_json::json;
-    use tracing_subscriber::EnvFilter;
 
     use crate::mdschema::validator::{
         errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
@@ -713,7 +710,12 @@ mod tests {
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
         dbg!(&result);
 
-        assert_eq!(result.errors.len(), 1, "Expected one error, got: {:?}", result.errors);
+        assert_eq!(
+            result.errors.len(),
+            1,
+            "Expected one error, got: {:?}",
+            result.errors
+        );
 
         match &result.errors[0] {
             ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
@@ -728,7 +730,10 @@ mod tests {
                 assert_eq!(expected, "^line2test\\d");
                 assert_eq!(actual, "test3");
             }
-            _ => panic!("Expected NodeContentMismatch error with Matcher kind, got: {:?}", result.errors[0]),
+            _ => panic!(
+                "Expected NodeContentMismatch error with Matcher kind, got: {:?}",
+                result.errors[0]
+            ),
         }
 
         assert_eq!(
