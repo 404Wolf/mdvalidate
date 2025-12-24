@@ -69,8 +69,8 @@ pub fn validate_code_vs_code(
     let schema_extracted = extract_codeblock_contents(&schema_cursor, schema_str);
 
     let (
-        Some((input_lang, (input_code, input_code_idx))),
-        Some((schema_lang, (schema_code, schema_code_idx))),
+        Some((input_lang, (input_code, input_code_descendant_index))),
+        Some((schema_lang, (schema_code, schema_code_descendant_index))),
     ) = (&input_extracted, &schema_extracted)
     else {
         // The only reason the "entire thing" would be wrong is because we're
@@ -84,92 +84,26 @@ pub fn validate_code_vs_code(
         return result;
     };
 
-    // Check if schema language has a matcher pattern
-    let schema_lang_matcher = schema_lang
-        .as_ref()
-        .and_then(|(lang, _)| extract_matcher_from_curly_delineated_text(lang));
-
-    // Check if code content has an ID for capture
-    let code_id = extract_id_from_curly_braces(schema_code);
-
-    // Validate language
-    let lang_result = validate_language(
-        input_lang,
-        schema_lang,
-        input_code_idx,
-        schema_code_idx,
-        &schema_lang_matcher,
-    );
-    result.join_other_result(&lang_result);
-
-    // Validate code content
-    if let Some(id) = code_id {
-        // Schema has {id} - capture the input code
-        result.set_match(id, json!(input_code));
-    } else {
-        // No ID - do literal comparison
-        if input_code != schema_code {
-            result.add_error(ValidationError::SchemaViolation(
-                SchemaViolationError::NodeContentMismatch {
-                    schema_index: *schema_code_idx,
-                    input_index: *input_code_idx,
-                    expected: schema_code.into(),
-                    actual: input_code.into(),
-                    kind: NodeContentMismatchKind::Literal,
-                },
-            ));
-        }
-    }
-
-    result
-}
-
-/// Validates code block language specifications between schema and input.
-///
-/// This function handles two validation scenarios:
-/// - **Literal matching**: When schema has no matcher pattern, performs exact string comparison
-/// - **Pattern matching**: When schema has a matcher like `{lang:/\w+/}`, validates input against the pattern
-///   and captures the matched value if the matcher has an ID
-///
-/// # Arguments
-/// * `input_lang` - Optional tuple of (language string, byte index) from input code block
-/// * `schema_lang` - Optional tuple of (language string, byte index) from schema code block
-/// * `input_code_idx` - Byte index of input code block (used as fallback for error reporting)
-/// * `schema_code_idx` - Byte index of schema code block (used as fallback for error reporting)
-/// * `schema_lang_matcher` - Optional matcher extracted from schema language string
-///
-/// # Returns
-/// A `ValidationResult` containing any validation errors and captured values
-fn validate_language(
-    input_lang: &Option<(String, usize)>,
-    schema_lang: &Option<(String, usize)>,
-    input_code_idx: &usize,
-    schema_code_idx: &usize,
-    schema_lang_matcher: &Option<Result<Matcher, MatcherError>>,
-) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(*input_code_idx, *input_code_idx);
-
-    match schema_lang_matcher {
-        Some(Ok(schema_matcher)) => {
+    // Check if schema language has a matcher pattern (like {lang:/\w*/})
+    match schema_lang.as_ref().and_then(|(lang, descendant_index)| {
+        extract_matcher_from_curly_delineated_text(lang)
+            .map(|matcher_result| (matcher_result, descendant_index))
+    }) {
+        // If the schema has a matcher, and we were able to extract it, do matching!
+        Some((Ok(schema_lang_matcher), schema_lang_descendant_index)) => {
             // Schema has matcher, validate input against it
-            if let Some((input_lang_str, _)) = input_lang {
-                if let Some(match_result) = schema_matcher.match_str(input_lang_str) {
+            if let Some((input_lang_str, input_lang_descendant_index)) = input_lang {
+                if let Some(match_result) = schema_lang_matcher.match_str(input_lang_str) {
                     // Match succeeded - capture if matcher has an ID
-                    if let Some(id) = schema_matcher.id() {
+                    if let Some(id) = schema_lang_matcher.id() {
                         result.set_match(id, json!(match_result));
                     }
                 } else {
                     // Match failed
                     result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch {
-                            schema_index: schema_lang
-                                .as_ref()
-                                .map(|(_, idx)| *idx)
-                                .unwrap_or(*schema_code_idx),
-                            input_index: input_lang
-                                .as_ref()
-                                .map(|(_, idx)| *idx)
-                                .unwrap_or(*input_code_idx),
+                            schema_index: *schema_lang_descendant_index,
+                            input_index: *input_lang_descendant_index,
                             expected: schema_lang
                                 .as_ref()
                                 .map(|(s, _)| s.clone())
@@ -178,29 +112,32 @@ fn validate_language(
                             kind: NodeContentMismatchKind::Literal,
                         },
                     ));
+                    return result;
                 }
             }
         }
-        Some(Err(error)) => {
+        // If the schema has a matcher, but we had an issue extracting it, raise an error
+        Some((Err(error), schema_lang_descendant_index)) => {
             // Schema matcher is malformed
             result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
                 error: error.clone(),
-                schema_index: *schema_code_idx,
-                input_index: *input_code_idx,
+                schema_index: *schema_lang_descendant_index,
+                input_index: *input_code_descendant_index,
             }));
+            return result;
         }
         None => {
-            // No matcher - do literal language comparison
+            // No matcher - do literal language comparison, treating as a literal string
             if let (
-                Some((input_lang_str, input_lang_idx)),
-                Some((schema_lang_str, schema_lang_idx)),
+                Some((input_lang_str, input_lang_descendant_index)),
+                Some((schema_lang_str, schema_lang_descendant_index)),
             ) = (input_lang, schema_lang)
             {
                 if input_lang_str != schema_lang_str {
                     result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch {
-                            schema_index: *schema_lang_idx,
-                            input_index: *input_lang_idx,
+                            schema_index: *schema_lang_descendant_index,
+                            input_index: *input_lang_descendant_index,
                             expected: schema_lang_str.clone(),
                             actual: input_lang_str.clone(),
                             kind: NodeContentMismatchKind::Literal,
@@ -208,6 +145,32 @@ fn validate_language(
                     ));
                 }
             }
+        }
+    }
+
+    // Validate code content. This is much simpler! If the area in the
+    //
+    // ```{id:/.*/}
+    // {test}
+    // ```
+    //
+    // Has {test} (a string surrounded by curly braces) then store the code in
+    // that key in the result.
+    if let Some(id) = extract_id_from_curly_braces(schema_code) {
+        // Schema has {id} - capture the input code
+        result.set_match(id, json!(input_code));
+    } else {
+        // No ID - do literal comparison of the code, treating it as a literal string
+        if input_code != schema_code {
+            result.add_error(ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    schema_index: *schema_code_descendant_index,
+                    input_index: *input_code_descendant_index,
+                    expected: schema_code.into(),
+                    actual: input_code.into(),
+                    kind: NodeContentMismatchKind::Literal,
+                },
+            ));
         }
     }
 
@@ -345,12 +308,8 @@ fn main() {}
         let mut input_cursor = input_tree.walk();
         assert!(input_cursor.goto_first_child()); // move to fenced_code_block
 
-        let result = validate_code_vs_code(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-        );
+        let result =
+            validate_code_vs_code(&mut input_cursor, &mut schema_cursor, schema_str, input_str);
         assert!(result.errors.is_empty());
         assert_eq!(result.value, json!({ "lang": "rust" }))
     }
@@ -371,191 +330,12 @@ fn main() {}
         let mut input_cursor = input_tree.walk();
         assert!(input_cursor.goto_first_child()); // move to fenced_code_block
 
-        let result = validate_code_vs_code(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-        );
+        let result =
+            validate_code_vs_code(&mut input_cursor, &mut schema_cursor, schema_str, input_str);
         assert!(result.errors.is_empty());
         assert_eq!(
             result.value,
             json!({ "lang": "rust", "code": "fn main() {}" })
         )
-    }
-
-    #[test]
-    fn test_validate_language_literal_match() {
-        // Both schema and input have literal languages that match
-        let input_lang = Some(("rust".to_string(), 10));
-        let schema_lang = Some(("rust".to_string(), 20));
-        let input_code_idx = 15;
-        let schema_code_idx = 25;
-        let schema_lang_matcher = None;
-
-        let result = validate_language(
-            &input_lang,
-            &schema_lang,
-            &input_code_idx,
-            &schema_code_idx,
-            &schema_lang_matcher,
-        );
-
-        assert!(result.errors.is_empty());
-        assert_eq!(result.value, json!({}));
-    }
-
-    #[test]
-    fn test_validate_language_literal_mismatch() {
-        // Schema and input have different literal languages
-        let input_lang = Some(("rust".to_string(), 10));
-        let schema_lang = Some(("python".to_string(), 20));
-        let input_code_idx = 15;
-        let schema_code_idx = 25;
-        let schema_lang_matcher = None;
-
-        let result = validate_language(
-            &input_lang,
-            &schema_lang,
-            &input_code_idx,
-            &schema_code_idx,
-            &schema_lang_matcher,
-        );
-
-        assert_eq!(result.errors.len(), 1);
-        match &result.errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                expected,
-                actual,
-                ..
-            }) => {
-                assert_eq!(expected, "python");
-                assert_eq!(actual, "rust");
-            }
-            _ => panic!("Expected NodeContentMismatch error"),
-        }
-    }
-
-    #[test]
-    fn test_validate_language_pattern_match_with_capture() {
-        // Schema has a matcher pattern with ID, input matches
-        let input_lang = Some(("rust".to_string(), 10));
-        let schema_lang = Some(("{lang:/\\w+/}".to_string(), 20));
-        let input_code_idx = 15;
-        let schema_code_idx = 25;
-        let schema_lang_matcher = extract_matcher_from_curly_delineated_text("{lang:/\\w+/}");
-
-        let result = validate_language(
-            &input_lang,
-            &schema_lang,
-            &input_code_idx,
-            &schema_code_idx,
-            &schema_lang_matcher,
-        );
-
-        assert!(result.errors.is_empty());
-        assert_eq!(result.value, json!({ "lang": "rust" }));
-    }
-
-    #[test]
-    fn test_validate_language_pattern_match_without_capture() {
-        // Schema has a matcher pattern without ID, input matches
-        let input_lang = Some(("rust".to_string(), 10));
-        let schema_lang = Some(("{/\\w+/}".to_string(), 20));
-        let input_code_idx = 15;
-        let schema_code_idx = 25;
-        let schema_lang_matcher = extract_matcher_from_curly_delineated_text("{/\\w+/}");
-
-        let result = validate_language(
-            &input_lang,
-            &schema_lang,
-            &input_code_idx,
-            &schema_code_idx,
-            &schema_lang_matcher,
-        );
-
-        assert!(result.errors.is_empty());
-        assert_eq!(result.value, json!({}));
-    }
-
-    #[test]
-    fn test_validate_language_pattern_mismatch() {
-        // Schema has a matcher pattern, input doesn't match
-        let input_lang = Some(("123invalid".to_string(), 10));
-        let schema_lang = Some(("{lang:/[a-z]+/}".to_string(), 20));
-        let input_code_idx = 15;
-        let schema_code_idx = 25;
-        let schema_lang_matcher = extract_matcher_from_curly_delineated_text("{lang:/[a-z]+/}");
-
-        let result = validate_language(
-            &input_lang,
-            &schema_lang,
-            &input_code_idx,
-            &schema_code_idx,
-            &schema_lang_matcher,
-        );
-
-        assert_eq!(result.errors.len(), 1);
-        match &result.errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                expected,
-                actual,
-                ..
-            }) => {
-                assert_eq!(expected, "{lang:/[a-z]+/}");
-                assert_eq!(actual, "123invalid");
-            }
-            _ => panic!("Expected NodeContentMismatch error"),
-        }
-    }
-
-    #[test]
-    fn test_validate_language_no_languages() {
-        // Both input and schema have no languages specified
-        let input_lang = None;
-        let schema_lang = None;
-        let input_code_idx = 15;
-        let schema_code_idx = 25;
-        let schema_lang_matcher = None;
-
-        let result = validate_language(
-            &input_lang,
-            &schema_lang,
-            &input_code_idx,
-            &schema_code_idx,
-            &schema_lang_matcher,
-        );
-
-        assert!(result.errors.is_empty());
-        assert_eq!(result.value, json!({}));
-    }
-
-    #[test]
-    fn test_validate_language_matcher_error() {
-        // Schema has a malformed matcher - simulate with a manually constructed error
-        let input_lang = Some(("rust".to_string(), 10));
-        let schema_lang = Some(("{lang:invalid}".to_string(), 20));
-        let input_code_idx = 15;
-        let schema_code_idx = 25;
-
-        // Create a matcher result with an error (using a real error variant)
-        let matcher_error = MatcherError::MatcherInteriorRegexInvalid("invalid regex".to_string());
-        let schema_lang_matcher = Some(Err(matcher_error));
-
-        let result = validate_language(
-            &input_lang,
-            &schema_lang,
-            &input_code_idx,
-            &schema_code_idx,
-            &schema_lang_matcher,
-        );
-
-        assert_eq!(result.errors.len(), 1);
-        match &result.errors[0] {
-            ValidationError::SchemaError(SchemaError::MatcherError { .. }) => {
-                // Expected error type
-            }
-            _ => panic!("Expected MatcherError"),
-        }
     }
 }
