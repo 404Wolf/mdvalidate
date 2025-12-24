@@ -1,4 +1,4 @@
-use log::{trace, warn};
+use log::trace;
 use tracing::instrument;
 use tree_sitter::{Node, TreeCursor};
 
@@ -139,7 +139,7 @@ pub fn validate_node_vs_node(
             }
         }
     } else {
-        warn!(
+        trace!(
             "Both input and schema node were top level, but they didn't both have children. Trees:\n{}\n{}",
             input_node.to_sexp(),
             schema_node.to_sexp()
@@ -208,6 +208,45 @@ mod tests {
         node_walker::node_vs_node::validate_node_vs_node,
         ts_utils::parse_markdown,
     };
+
+    #[test]
+    fn validate_list_vs_list_with_nesting() {
+        let schema_str = r#"
+- `test:/\w+/`{2,2}
+  - `test2:/\w+/`{1,1}
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- test1
+- test2
+  - deepy
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let input_cursor = input_tree.walk();
+        assert_eq!(input_cursor.node().kind(), "document");
+
+        let result =
+            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
+
+        assert_eq!(
+            result.value,
+            json!({
+                "test": [
+                    "test1",
+                    "test2",
+                    { "test2": [ "deepy" ] }
+                ]
+            })
+        );
+    }
 
     #[test]
     fn test_validate_two_paragraphs_with_text_vs_text() {

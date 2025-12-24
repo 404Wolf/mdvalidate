@@ -47,6 +47,11 @@ impl ValidationResult {
         self.errors.push(error);
     }
 
+    /// Whether the result has errors.
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
     /// Add a match under an `id`.
     #[allow(dead_code)]
     pub fn set_match(&mut self, id: &str, value: Value) {

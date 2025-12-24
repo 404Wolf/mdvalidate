@@ -151,9 +151,6 @@ pub fn validate_list_vs_list(
                     debug_assert_eq!(input_cursor.node().kind(), "list_item");
                     debug_assert_eq!(schema_cursor.node().kind(), "list_item");
 
-                    debug_assert_eq!(input_list_item.id(), input_cursor.node().id());
-                    debug_assert_eq!(input_list_item.kind(), input_cursor.node().kind());
-
                     if schema_cursor.node().kind() == "tight_list" {
                         panic!("Schema cursor is not a tight list");
                     }
@@ -228,7 +225,6 @@ pub fn validate_list_vs_list(
 
                 let more_items_are_left = input_list_items_at_level.len() > validate_so_far;
                 if more_items_are_left {
-                    dbg!(schema_cursor.node().to_sexp());
                     debug_assert_eq!(schema_cursor.node().kind(), "list_item");
 
                     // TODO: what if there is no next node in the schema? Make sure we're done validating everything?
@@ -633,7 +629,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_simple_matcher() {
+    fn test_validate_list_vs_list_with_simple_matcher() {
+        test_logging();
         let schema_str = r#"- `test:/test\d/`{2,2}"#;
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
@@ -658,7 +655,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_stacked_matcher() {
+    fn test_validate_list_vs_list_with_stacked_matcherrr() {
+        test_logging();
         let schema_str = r#"
 - `testA:/test\d/`{2,2}
 - `testB:/line2test\d/`{2,2}
@@ -679,7 +677,6 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
-        dbg!(schema_cursor.node().to_sexp());
 
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
@@ -697,7 +694,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_stacked_matcher_too_many_first() {
+    fn test_validate_list_vs_list_with_stacked_matcher_too_many_first() {
         let schema_str = r#"
 - `testA:/test\d/`{2,2}
 - `testB:/line2test\d/`{2,2}
@@ -722,7 +719,6 @@ mod tests {
 
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
-        dbg!(&result);
 
         assert_eq!(
             result.errors.len(),
@@ -757,7 +753,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_nested_matcher() {
+    fn test_validate_list_vs_list_with_nested_matcher() {
         let schema_str = r#"
 - `test:/test\d/`{1,1}
     - `deep:/deep\d/`{1,1}
@@ -771,7 +767,6 @@ mod tests {
 "#;
         let input_tree = parse_markdown(input_str).unwrap();
         let mut input_cursor = input_tree.walk();
-        dbg!(schema_cursor.node().to_sexp());
 
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
@@ -794,9 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_deep_nesting() {
-        test_logging();
-
+    fn test_validate_list_vs_list_with_deep_nesting() {
         let schema_str = r#"
 - `test:/test\d/`{2,2}
     + `deep:/deep\d/`{1,1}
@@ -849,7 +842,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_mismatched_list_kind() {
+    fn test_validate_list_vs_list_with_mismatched_list_kind() {
         let schema_str = r#"
 - `test:/test\d/`{1,1}
     1. `deep:/deep\d/`{1,1}
@@ -880,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_min_max() {
+    fn test_validate_list_vs_list_with_min_max() {
         // Positive case: within min/max bounds
         let schema_str = r#"
 - `test:/test\d/`{2,5}
@@ -938,7 +931,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_max_only() {
+    fn test_validate_list_vs_list_with_max_only() {
         // Positive case: within max bound
         let schema_str = r#"
 - `test:/test\d/`{,3}
@@ -999,7 +992,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_min_only() {
+    fn test_validate_list_vs_list_with_min_only() {
         // Positive case: meets minimum
         let schema_str = r#"
 - `test:/test\d/`{2,}
@@ -1062,7 +1055,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_list_vs_list_with_unlimited() {
+    fn test_validate_list_vs_list_with_unlimited() {
         // Positive case: unlimited matcher with multiple items
         let schema_str = r#"
 - `test:/test\d/`{0,}

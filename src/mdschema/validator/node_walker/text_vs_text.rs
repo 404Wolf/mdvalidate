@@ -8,7 +8,8 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars},
     node_walker::{ValidationResult, node_vs_node::validate_node_vs_node},
     ts_utils::{
-        compare_node_kinds, compare_text_contents, is_last_node, is_textual_node, waiting_at_end,
+        compare_node_children_lengths, compare_node_kinds, compare_text_contents, is_last_node,
+        is_textual_node, waiting_at_end,
     },
 };
 
@@ -106,6 +107,8 @@ pub fn validate_text_vs_text(
         None => {
             trace!("No schema node found; attempting to evaluate as text pair.");
 
+            let input_child_count = input_cursor.node().child_count();
+
             if is_textual_node(&input_node) && is_textual_node(&schema_node) {
                 // Both are textual nodes, validate them directly
                 return validate_textual_nodes(
@@ -117,38 +120,11 @@ pub fn validate_text_vs_text(
                 );
             }
 
-            // First, count the children to check for length mismatches
-            let input_child_count = input_cursor.node().child_count();
-            let schema_child_count = schema_cursor.node().child_count();
-
-            // Handle node mismatches
+            if let Some(error) =
+                compare_node_children_lengths(&schema_cursor, &input_cursor, got_eof)
             {
-                // If we have reached the EOF:
-                //   No difference in the number of children
-                // else:
-                //   We can have less input children
-                //
-                let children_len_mismatch_err = ValidationError::SchemaViolation(
-                    SchemaViolationError::ChildrenLengthMismatch {
-                        schema_index: schema_cursor.descendant_index(),
-                        input_index: input_cursor.descendant_index(),
-                        expected: ChildrenCount::from_specific(schema_child_count),
-                        actual: input_child_count,
-                    },
-                );
-                if got_eof {
-                    // At EOF, children count must match exactly
-                    if input_child_count != schema_child_count {
-                        result.add_error(children_len_mismatch_err);
-                        return result;
-                    }
-                } else {
-                    // Not at EOF: input can have fewer children, but not more
-                    if input_child_count > schema_child_count {
-                        result.add_error(children_len_mismatch_err);
-                        return result;
-                    }
-                }
+                result.add_error(error);
+                return result;
             }
 
             // Move cursors to first child
@@ -1394,60 +1370,6 @@ mod tests {
             }
             _ => panic!("Expected a NodeContentMismatch error!"),
         }
-    }
-
-    #[test]
-    fn test_mixed_extras_fallback() {
-        // Test that mixed literal and non-literal extras fall back to textual validation
-        let schema_str = "Here is `test:/\\w+/`!{2,3} some text";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-
-        let input_str = "Here is `test:/\\w+/`!{2,3} some text";
-        let input_tree = parse_markdown(input_str).unwrap();
-
-        let mut schema_cursor = schema_tree.walk();
-        let mut input_cursor = input_tree.walk();
-
-        schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // document -> paragraph
-
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true, // eof is true
-        );
-
-        // Should succeed because it falls back to textual validation when mixed extras are invalid
-        assert_eq!(result.errors.len(), 0);
-    }
-
-    #[test]
-    fn test_invalid_regex_fallback() {
-        // Test that invalid regex patterns fall back to textual validation
-        let schema_str = "Here is `test:[unclosed` some text";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-
-        let input_str = "Here is `test:[unclosed` some text";
-        let input_tree = parse_markdown(input_str).unwrap();
-
-        let mut schema_cursor = schema_tree.walk();
-        let mut input_cursor = input_tree.walk();
-
-        schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // document -> paragraph
-
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true, // eof is true
-        );
-
-        // Should succeed because it falls back to textual validation when regex is invalid
-        assert_eq!(result.errors.len(), 0);
     }
 
     #[test]

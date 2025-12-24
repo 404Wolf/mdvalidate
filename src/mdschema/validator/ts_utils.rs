@@ -194,6 +194,55 @@ pub fn compare_node_kinds(
     }
 }
 
+/// Compare node children lengths and return an error if they don't match
+///
+/// # Arguments
+/// * `schema_cursor` - The schema cursor, pointed at any node
+/// * `input_cursor` - The input cursor, pointed at any node
+/// * `got_eof` - Whether we have reached the end of file
+///
+/// # Returns
+/// An optional validation error if the children lengths don't match
+pub fn compare_node_children_lengths(
+    schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
+    got_eof: bool,
+) -> Option<ValidationError> {
+    use crate::mdschema::validator::errors::{ChildrenCount, SchemaViolationError};
+
+    // First, count the children to check for length mismatches
+    let input_child_count = input_cursor.node().child_count();
+    let schema_child_count = schema_cursor.node().child_count();
+
+    // Handle node mismatches
+    // If we have reached the EOF:
+    //   No difference in the number of children
+    // else:
+    //   We can have less input children
+    //
+    let children_len_mismatch_err = ValidationError::SchemaViolation(
+        SchemaViolationError::ChildrenLengthMismatch {
+            schema_index: schema_cursor.descendant_index(),
+            input_index: input_cursor.descendant_index(),
+            expected: ChildrenCount::from_specific(schema_child_count),
+            actual: input_child_count,
+        },
+    );
+    if got_eof {
+        // At EOF, children count must match exactly
+        if input_child_count != schema_child_count {
+            return Some(children_len_mismatch_err);
+        }
+    } else {
+        // Not at EOF: input can have fewer children, but not more
+        if input_child_count > schema_child_count {
+            return Some(children_len_mismatch_err);
+        }
+    }
+
+    None
+}
+
 /// Extract the list marker from a tight_list node
 ///
 /// TODO: Handle UTF8 errors properly instead of unwrapping

@@ -44,19 +44,17 @@ impl EnvConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
 
     #[test]
-    fn test_default_config() {
-        let config = EnvConfig::default();
-        assert!(!config.is_debug_mode());
-    }
-
-    #[test]
-    fn test_env_config_load_defaults_when_no_vars() {
-        // This test assumes no DEV_DEBUG env var is set
-        // In a real scenario, we might want to use a test harness that clears env vars
+    fn test_env_config_with_dev_debug_enabled() {
+        unsafe {
+            env::set_var("DEV_DEBUG", "true");
+        }
         let config = EnvConfig::load();
-        // Should not panic and should return some config
-        assert!(!config.dev_debug || config.dev_debug); // Always true, just ensures it loads
+        assert!(config.is_debug_mode());
+        unsafe {
+            env::remove_var("DEV_DEBUG");
+        }
     }
 }
