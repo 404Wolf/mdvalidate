@@ -8,42 +8,66 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError},
     node_walker::{ValidationResult, text_vs_text::validate_text_vs_text},
     ts_utils::{
-        compare_node_kinds, has_single_code_child, has_subsequent_node_of_kind, is_list_node,
+        compare_node_kinds, get_node_and_next_node, has_single_code_child, has_subsequent_node_of_kind, is_list_node,
         walk_to_list_item_content,
     },
 };
 
 /// Validate a list node against a schema list node.
 ///
-/// For each element in the schema list, if it is a literal, match it against
-/// the corresponding input list element and move on.
+/// Matches list items in order, supporting both literal comparison and pattern
+/// matching (including recursively).
 ///
-/// ```md
-/// - test1^
-/// - test2
-/// ```
+/// Schema list items can be:
+/// - Literals: matched exactly against corresponding input items
+/// - Matchers: patterns like `id:/test\d/`{2,2} that match multiple items
+/// - Recursively: nested lists can be matched against nested lists, where the
+///   nested lists' nodes are Literals or Matchers
 ///
-/// ```md
-/// - test1^
-/// - test2
-/// ```
+/// # Example: Literal matching
 ///
-/// If the cursor is at a matcher in the schema list, check what its range of
-/// allowed number of matching input nodes is. Only the last schema matcher node
-/// in a list of them can have an unbounded range.
+/// When the schema contains literal items, they must match exactly:
 ///
-/// Then move on to the next element in the schema list, and repeat.
-///
+/// **Schema:**
 /// ```md
 /// - test1
-/// - test2^ can't match this one anymore!
-/// - footest2
+/// - test2
 /// ```
 ///
+/// **Input:**
 /// ```md
-/// - `id:/test\d/`{2,2}^
-/// - `id:/footest\d/`{,2}
+/// - test1
+/// - test2
 /// ```
+///
+/// This validates successfully because each input item matches its corresponding schema item.
+///
+/// # Example: Matcher with bounded range
+///
+/// Matchers consume multiple input items according to their quantity constraints.
+/// When a matcher reaches its maximum, the next schema matcher begins consuming items:
+///
+/// **Schema:**
+/// ```md
+/// - `id:/test\d/`{2,2}
+/// - `id:/footest\d/`{1,2}
+/// ```
+///
+/// **Input:**
+/// ```md
+/// - test1
+/// - test2
+/// - footest1
+/// ```
+///
+/// The first matcher consumes `test1` and `test2` (reaching its max of 2).
+/// Then the second matcher begins and consumes `footest1`.
+///
+/// Note that `test2` cannot be matched by the second matcher—once a matcher
+/// reaches its limit, the cursor has moved past those items.
+///
+/// Note that a limitation here is that you cannot have a variable-length list
+/// that is not the final list in your schema.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     input = %input_cursor.node().kind(),
     schema = %schema_cursor.node().kind()
@@ -144,8 +168,7 @@ pub fn validate_list_vs_list(
                     if input_cursor.clone().goto_next_sibling() && got_eof {
                         trace!(
                             "Error: More items than max allowed ({} > {})",
-                            "at least one more",
-                            max_items
+                            "at least one more", max_items
                         );
                         result.add_error(ValidationError::SchemaViolation(
                             SchemaViolationError::ChildrenLengthMismatch {
@@ -375,6 +398,48 @@ pub fn validate_list_vs_list(
     result
 }
 
+/// Creates a new matcher from a tree-sitter cursor pointing at code node in
+/// the Markdown schema's tree.
+///
+/// This will attempt to grab the current node the cursor is pointing at,
+/// which must be a code node, and the following one, which will be counted
+/// as extras if it is a text node.
+fn try_from_code_and_text_node_cursor(cursor: &TreeCursor, schema_str: &str) -> Result<Matcher, MatcherError> {
+    let (node, next_node) = get_node_and_next_node(cursor).ok_or_else(|| {
+        MatcherError::InvariantViolation(
+            "Cursor has no current node to extract matcher from".to_string(),
+        )
+    })?;
+
+    if node.kind() != "code_span" {
+        return Err(MatcherError::InvariantViolation(
+            "Cursor is not pointing at a code_span node".to_string(),
+        ));
+    }
+
+    try_from_code_and_text_node(node, next_node, schema_str)
+}
+
+/// Create a new Matcher from two tree-sitter nodes and a schema string.
+///
+/// - The first node should be a code_span node containing the matcher pattern.
+/// - The second node (optional) should be a text node containing extras.
+fn try_from_code_and_text_node(
+    matcher_node: tree_sitter::Node,
+    suffix_node: Option<tree_sitter::Node>,
+    schema_str: &str,
+) -> Result<Matcher, MatcherError> {
+    let matcher_text = matcher_node.utf8_text(schema_str.as_bytes()).map_err(|_| {
+        MatcherError::MatcherInteriorRegexInvalid("Invalid UTF-8 in matcher node".to_string())
+    })?;
+
+    let suffix_text = suffix_node
+        .map(|node| node.utf8_text(schema_str.as_bytes()).ok())
+        .flatten();
+
+    Matcher::try_from_pattern_and_suffix_str(matcher_text, suffix_text)
+}
+
 /// Walk from a list item node to the actual content, which is a paragraph node.
 /// Extract a repeated matcher from a list item node.
 ///
@@ -423,7 +488,7 @@ fn extract_repeated_matcher_from_list_item(
     list_item_cursor.goto_first_child();
     debug_assert_eq!(list_item_cursor.node().kind(), "code_span");
 
-    match Matcher::try_from_cursor(&list_item_cursor, schema_str) {
+    match try_from_code_and_text_node_cursor(&list_item_cursor, schema_str) {
         Ok(matcher) if matcher.is_repeated() => Some(Ok(matcher)),
         Ok(_) => None,
         Err(e @ MatcherError::MatcherInteriorRegexInvalid(_)) => Some(Err(e)),
@@ -514,6 +579,37 @@ mod tests {
 
         ensure_at_first_list_item(&mut input_cursor);
         assert_eq!(input_cursor.node().kind(), "list_item");
+    }
+
+    #[test]
+    fn test_try_from_code_and_text_node_cursor() {
+        // Test successful matcher creation from cursor
+        use crate::mdschema::validator::ts_utils::new_markdown_parser;
+        use super::try_from_code_and_text_node_cursor;
+
+        let schema_str = "`word:/\\w+/`{,} suffix";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(schema_str, None).unwrap();
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+
+        let mut cursor = paragraph.walk();
+        cursor.goto_first_child(); // go to first child (text or code_span)
+
+        // Move cursor to the code_span node
+        while cursor.node().kind() != "code_span" {
+            if !cursor.goto_next_sibling() {
+                panic!("No code_span node found");
+            }
+        }
+
+        let matcher = try_from_code_and_text_node_cursor(&cursor, schema_str).unwrap();
+
+        assert_eq!(matcher.id(), Some("word"));
+        assert_eq!(matcher.match_str("hello"), Some("hello"));
+        assert_eq!(matcher.match_str("123"), Some("123"));
+        assert_eq!(matcher.match_str("!@#"), None);
+        assert!(matcher.is_repeated());
     }
 
     #[test]
@@ -1241,5 +1337,84 @@ mod tests {
                 "Empty list should be acceptable for {{0,}} matcher or fail on kind mismatch"
             );
         }
+    }
+
+    #[test]
+    fn test_list_vs_list_one_item_different_contents() {
+        let schema_str = r#"
+- Item 1
+- Item 2
+"#;
+        let input_str = r#"
+- Item 1
+- Item 3
+"#;
+
+        let schema_tree = parse_markdown(schema_str);
+        let input_tree = parse_markdown(input_str);
+
+        let schema_tree = schema_tree.as_ref().unwrap();
+        let input_tree = input_tree.as_ref().unwrap();
+
+        let mut schema_cursor = schema_tree.root_node().walk();
+        let mut input_cursor = input_tree.root_node().walk();
+
+        // Walk to the tight_list node under the heading, then ensure we're at the first list_item
+        schema_cursor.goto_first_child(); // document -> tight_list
+        ensure_at_first_list_item(&mut schema_cursor);
+
+        input_cursor.goto_first_child(); // document -> tight_list
+        ensure_at_first_list_item(&mut input_cursor);
+
+        assert_eq!(input_cursor.node().kind(), "list_item");
+        assert_eq!(schema_cursor.node().kind(), "list_item");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(
+            result.errors[0],
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
+                // TODO: make sure these indexes are correct
+                schema_index: 9,
+                input_index: 9,
+                expected: "Item 2".into(),
+                actual: "Item 3".into(),
+                kind: NodeContentMismatchKind::Literal,
+            })
+        );
+    }
+
+    #[test]
+    fn test_list_vs_list_one_item_same_contents() {
+        let schema_str = "# List\n- Item 1\n- Item 2\n";
+        let input_str = "# List\n- Item 1\n- Item 2\n";
+
+        let schema_tree = parse_markdown(schema_str);
+        let input_tree = parse_markdown(input_str);
+
+        let schema_tree = schema_tree.as_ref().unwrap();
+        let input_tree = input_tree.as_ref().unwrap();
+
+        let mut schema_cursor = schema_tree.root_node().walk();
+        let mut input_cursor = input_tree.root_node().walk();
+
+        // Walk to the tight_list node under the heading, then ensure we're at the first list_item
+        schema_cursor.goto_first_child(); // document -> heading
+        schema_cursor.goto_next_sibling(); // heading -> tight_list
+        ensure_at_first_list_item(&mut schema_cursor);
+
+        input_cursor.goto_first_child(); // document -> heading
+        input_cursor.goto_next_sibling(); // heading -> tight_list
+        ensure_at_first_list_item(&mut input_cursor);
+
+        assert_eq!(input_cursor.node().kind(), "list_item");
+        assert_eq!(schema_cursor.node().kind(), "list_item");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert!(result.errors.is_empty());
     }
 }

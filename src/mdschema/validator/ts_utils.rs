@@ -105,6 +105,14 @@ pub fn is_textual_container(node: &Node) -> bool {
     }
 }
 
+/// Check whether a node is a codeblock.
+pub fn is_codeblock(node: &Node) -> bool {
+    match node.kind() {
+        "fenced_code_block" => true,
+        _ => false,
+    }
+}
+
 /// Determine whether the input is incomplete based on EOF status and last node.
 ///
 /// The input is incomplete if we haven't reached the EOF and the cursor is at
@@ -321,12 +329,89 @@ pub fn has_single_code_child(schema_cursor: &TreeCursor) -> bool {
     code_child_count == 1
 }
 
+/// Extract the language and body of a codeblock.
+///
+/// # Arguments
+///
+/// * `cursor`: The cursor pointing to the codeblock node.
+/// * `src`: The source text of the document.
+///
+/// # Returns
+///
+/// An `Option` containing:
+/// - The optional language tuple: `(language_string, descendant_index)` if the language text is present
+/// - The body tuple: `(body_string, descendant_index)` of the code content
+/// Where `descendant_index` is the index of the descendant node that contains the language or body text.
+///
+/// Returns `None` if the codeblock is invalid or it isn't a codeblock to begin with.
+pub fn extract_codeblock_contents(
+    cursor: &TreeCursor,
+    src: &str,
+) -> Option<(Option<(String, usize)>, (String, usize))> {
+    // A codeblock looks like this:
+    //
+    // └── (fenced_code_block)
+    //     ├── (info_string)?   // only present when there is a language
+    //     │   └── (text)
+    //     └── (code_fence_content)
+    //         └── (text)
+    //
+    // └── (fenced_code_block)
+    //     └── (code_fence_content)
+    //         └── (text)
+
+    let mut cursor = cursor.clone();
+    if cursor.node().kind() != "fenced_code_block" {
+        return None;
+    }
+
+    // Move to the first child and determine if it's an info_string or the content
+    if !cursor.goto_first_child() {
+        return None;
+    }
+
+    let mut language: Option<(String, usize)> = None;
+
+    if cursor.node().kind() == "info_string" {
+        // Extract language from info_string -> text
+        if !cursor.goto_first_child() || cursor.node().kind() != "text" {
+            return None;
+        }
+        language = Some((cursor.node().utf8_text(src.as_bytes()).ok()?.to_string(), cursor.descendant_index()));
+
+        // Go back to info_string, then to its sibling: code_fence_content
+        if !cursor.goto_parent() || !cursor.goto_next_sibling() {
+            return None;
+        }
+    } else if cursor.node().kind() != "code_fence_content" {
+        // First child is neither info_string nor code_fence_content -> invalid layout
+        return None;
+    }
+
+    // At this point, cursor must be at code_fence_content
+    debug_assert_eq!(cursor.node().kind(), "code_fence_content");
+
+    // Get the full text from code_fence_content node itself, not just the first child
+    let code_fence_node = cursor.node();
+    let text = code_fence_node.utf8_text(src.as_bytes()).ok()?;
+
+    // Navigate to first text child to get its descendant_index
+    if !cursor.goto_first_child() || cursor.node().kind() != "text" {
+        return None;
+    }
+
+    let body = (text.to_string(), cursor.descendant_index());
+
+    Some((language, body))
+}
+
 /// Walk from a list_item node to its content paragraph.
 ///
 /// Moves the cursor from a list_item through the list_marker to the paragraph node.
 ///
 /// # Tree Structure
-/// ```text
+///
+/// ```ansi
 /// list_item
 /// ├── list_marker
 /// └── paragraph
@@ -376,6 +461,113 @@ mod tests {
     fn parse_markdown_and_get_tree(input: &str) -> Tree {
         let mut parser = new_markdown_parser();
         parser.parse(input, None).unwrap()
+    }
+
+    #[test]
+    fn test_is_codeblock() {
+        // Without language, 3 backticks
+        let input = "```\ncode\n```\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert!(is_codeblock(&cursor.node()));
+
+        // With language, 3 backticks
+        let input = "```rust\ncode\n```\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert!(is_codeblock(&cursor.node()));
+
+        // Without language, 4 backticks
+        let input = "````\ncode\n````\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert!(is_codeblock(&cursor.node()));
+
+        // With language, 4 backticks
+        let input = "````rust\ncode\n````\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert!(is_codeblock(&cursor.node()));
+    }
+
+    #[test]
+    fn test_extract_codeblock_contents() {
+        // Without language, 3 backticks
+        let input = "```\ncode\n```\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert_eq!(
+            extract_codeblock_contents(&cursor, input),
+            Some((None, ("code".into(), 3)))
+        );
+
+        // With language, 3 backticks
+        let input = "```rust\ncode\n```\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert_eq!(
+            extract_codeblock_contents(&cursor, input),
+            Some((Some(("rust".into(), 3)), ("code".into(), 5)))
+        );
+
+        // Without language, 4 backticks
+        let input = "````\ncode\n````\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert_eq!(
+            extract_codeblock_contents(&cursor, input),
+            Some((None, ("code".into(), 3)))
+        );
+
+        // With language, 4 backticks
+        let input = "````rust\ncode\n````\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert_eq!(
+            extract_codeblock_contents(&cursor, input),
+            Some((Some(("rust".into(), 3)), ("code".into(), 5)))
+        );
+    }
+
+    #[test]
+    fn test_extract_codeblock_contents_multiline() {
+        // Multiline code without language
+        let input = "```\nline1\nline2\nline3\n```\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert_eq!(
+            extract_codeblock_contents(&cursor, input),
+            Some((None, ("line1\nline2\nline3".into(), 3)))
+        );
+
+        // Multiline code with language
+        let input = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert_eq!(
+            extract_codeblock_contents(&cursor, input),
+            Some((Some(("rust".into(), 3)), ("fn main() {\n    println!(\"Hello\");\n}".into(), 5)))
+        );
+
+        // Multiline code with indentation
+        let input = "```python\ndef hello():\n    print(\"world\")\n    return True\n```\n";
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert_eq!(
+            extract_codeblock_contents(&cursor, input),
+            Some((Some(("python".into(), 3)), ("def hello():\n    print(\"world\")\n    return True".into(), 5)))
+        );
     }
 
     #[test]

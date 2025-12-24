@@ -15,14 +15,9 @@ use crate::mdschema::validator::{
 
 /// Validate a textual region of input against a textual region of schema.
 ///
-/// Both the input cursor and schema cursor should either:
-/// - Both point to textual nodes, like "emphasis", "text", or similar.
-/// - Both point to textual containers, like "heading_content", "paragraph", or similar.
-///
-/// If the schema cursor points to a text node, followed by a code node, maybe
-/// followed by a text node, those three nodes are delegated as a "matcher"
-/// group, and for that chunk of three text nodes, `matcher_vs_text` will be
-/// used for validation.
+/// Handles text nodes (emphasis, strong, text) and textual containers (paragraphs, headings).
+/// When the schema contains a text-code-text pattern, those nodes form a "matcher group"
+/// and are validated using `validate_matcher_vs_text` instead of literal comparison.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     input = %input_cursor.node().kind(),
     schema = %schema_cursor.node().kind()
@@ -53,7 +48,7 @@ pub fn validate_text_vs_text(
     match extract_matcher_nodes(&schema_cursor) {
         Some((prefix_node, matcher_node, suffix_node)) => {
             // Try to create a matcher from the nodes
-            match Matcher::try_from_nodes(matcher_node, suffix_node, schema_str) {
+            match try_from_code_and_text_node(matcher_node, suffix_node, schema_str) {
                 // We got a matcher!
                 Ok(matcher) => validate_matcher_vs_text(
                     &input_cursor,
@@ -297,34 +292,38 @@ fn validate_textual_container_children(
     result
 }
 
+/// Create a new Matcher from two tree-sitter nodes and a schema string.
+///
+/// - The first node should be a code_span node containing the matcher pattern.
+/// - The second node (optional) should be a text node containing extras.
+fn try_from_code_and_text_node(
+    matcher_node: tree_sitter::Node,
+    suffix_node: Option<tree_sitter::Node>,
+    schema_str: &str,
+) -> Result<Matcher, MatcherError> {
+    let matcher_text = matcher_node.utf8_text(schema_str.as_bytes()).map_err(|_| {
+        MatcherError::MatcherInteriorRegexInvalid("Invalid UTF-8 in matcher node".to_string())
+    })?;
+
+    let suffix_text = suffix_node
+        .map(|node| node.utf8_text(schema_str.as_bytes()).ok())
+        .flatten();
+
+    Matcher::try_from_pattern_and_suffix_str(matcher_text, suffix_text)
+}
+
 /// Validate a sequence of nodes that includes a matcher node against a text
 /// node. This is used for when we have 1-3 nodes, where there may be a center
 /// node that is a code node that is a matcher.
 ///
 /// The schema cursor should point at:
-/// - A text node, followed by a code node, maybe followed by a text node
-/// - A code node, maybe followed by a text node
-/// - A code node only
+/// Validate text using a matcher pattern from the schema.
 ///
-/// You should not call this function directly. Instead, use the
-/// `validate_text_vs_text` function with the cursors pointing to two text
-/// nodes, and that may end up using this to do the matcher validation.
+/// Called by `validate_text_vs_text` when a matcher group is detected in the schema.
+/// A matcher group consists of text-code-text nodes where the code contains a pattern.
 ///
-/// # Arguments
-///
-/// * `input_cursor` - The cursor pointing to the input text node.
-/// * `schema_cursor` - The cursor pointing to the schema text node.
-/// * `schema_str` - The string representation of the schema text node.
-/// * `input_str` - The string representation of the input text node.
-/// * `got_eof` - Whether the input text node has reached the end of the file.
-/// * `matcher_group` - The optional prefix, matcher, and suffix nodes. This is
-///   obtained by calling `get_matcher_group` on the schema cursor. We do this
-///   ahead of time so we don't need to call it multiple times. If that function
-///   returns `None` that means that we are not dealing with a matcher group.
-///
-/// # Returns
-///
-/// A `ValidationResult` indicating the result of the validation.
+/// The matcher can match against input text and optionally capture the matched value.
+/// Supports prefix/suffix matching and various pattern types (regex, literal, etc.).
 pub fn validate_matcher_vs_text<'a>(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
@@ -607,7 +606,7 @@ mod tests {
 
     use crate::mdschema::validator::{
         errors::*,
-        matcher::matcher::{Matcher, MatcherError},
+        matcher::matcher::MatcherError,
         node_walker::{
             ValidationResult,
             text_vs_text::{extract_matcher_nodes, validate_text_vs_text},
@@ -622,9 +621,11 @@ mod tests {
         input_str: &str,
         got_eof: bool,
     ) -> ValidationResult {
+        use super::try_from_code_and_text_node;
+        
         match extract_matcher_nodes(&schema_cursor) {
             Some((prefix_node, matcher_node, suffix_node)) => {
-                let matcher = Matcher::try_from_nodes(matcher_node, suffix_node, schema_str)
+                let matcher = try_from_code_and_text_node(matcher_node, suffix_node, schema_str)
                     .expect("test utility expects valid matcher");
                 validate_matcher_vs_text_original(
                     input_cursor,
@@ -998,6 +999,42 @@ mod tests {
 
         let result = extract_matcher_nodes(&schema_cursor);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_from_code_and_text_node() {
+        // Test successful matcher creation from nodes
+        use crate::mdschema::validator::ts_utils::new_markdown_parser;
+        use super::try_from_code_and_text_node;
+        
+        let schema_str = "`word:/\\w+/` suffix";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(schema_str, None).unwrap();
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+
+        let mut cursor = paragraph.walk();
+        cursor.goto_first_child(); // go to first child (text or code_span)
+
+        // Find the code_span node
+        let mut matcher_node = None;
+        let mut suffix_node = None;
+
+        for child in paragraph.children(&mut cursor) {
+            if child.kind() == "code_span" {
+                matcher_node = Some(child);
+            } else if child.kind() == "text" && matcher_node.is_some() {
+                suffix_node = Some(child);
+            }
+        }
+
+        let matcher_node = matcher_node.expect("Should find code_span node");
+        let matcher = try_from_code_and_text_node(matcher_node, suffix_node, schema_str).unwrap();
+
+        assert_eq!(matcher.id(), Some("word"));
+        assert_eq!(matcher.match_str("hello"), Some("hello"));
+        assert_eq!(matcher.match_str("123"), Some("123"));
+        assert_eq!(matcher.match_str("!@#"), None);
     }
 
     #[test]
