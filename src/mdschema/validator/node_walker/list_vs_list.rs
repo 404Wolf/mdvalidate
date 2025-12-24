@@ -8,7 +8,7 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError},
     node_walker::{ValidationResult, text_vs_text::validate_text_vs_text},
     ts_utils::{
-        compare_node_kinds, get_siblings, has_single_code_child, has_subsequent_node_of_kind,
+        compare_node_kinds, has_single_code_child, has_subsequent_node_of_kind, is_list_node,
     },
 };
 
@@ -99,243 +99,214 @@ pub fn validate_list_vs_list(
                 return result;
             }
 
-            let input_list_items_at_level = &get_siblings(&input_cursor);
-            trace!(
-                "Found {} input list items at this level",
-                &input_list_items_at_level.len()
-            );
+            let mut values_at_level = Vec::with_capacity(max_items.unwrap_or(1));
+            let mut validate_so_far = 0;
 
-            // If there aren't enough items, if we are at EOF, we can report an error right away.
-            if input_list_items_at_level.len() < min_items && got_eof {
+            loop {
+                trace!("Validating list item #{}", validate_so_far + 1,);
+
+                debug_assert_eq!(input_cursor.node().kind(), "list_item");
+                debug_assert_eq!(schema_cursor.node().kind(), "list_item");
+
+                // TODO: for now we only ever validate the item as text to save on overhead of node_vs_node
+                // Explore whether this is a bad assumption
+                let new_matches = validate_text_vs_text(
+                    &input_cursor,
+                    &schema_cursor,
+                    schema_str,
+                    input_str,
+                    got_eof,
+                );
+
+                validate_so_far += 1;
+                values_at_level.push(new_matches.value);
+                result.errors.extend(new_matches.errors);
+
                 trace!(
-                    "Error: Not enough input items ({} < {}) and at EOF",
-                    input_list_items_at_level.len(),
-                    min_items
+                    "Completed validation of list item #{}, moving to next",
+                    validate_so_far
+                );
+
+                // If we've now validated the max number of items, stop.
+                if let Some(max_items) = max_items
+                    && validate_so_far == max_items
+                {
+                    trace!(
+                        "Reached max items limit ({}), stopping validation",
+                        max_items
+                    );
+                    break;
+                }
+
+                // Otherwise move to the next sibling, or break if there are none left
+                if !input_cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+
+            // Check if we validated enough items
+            if validate_so_far < min_items && got_eof {
+                trace!(
+                    "Error: Not enough items validated ({} < {}) and at EOF",
+                    validate_so_far, min_items
                 );
                 result.add_error(ValidationError::SchemaViolation(
                     SchemaViolationError::ChildrenLengthMismatch {
                         schema_index: schema_cursor.descendant_index(),
                         input_index: input_cursor.descendant_index(),
                         expected: ChildrenCount::from_range(min_items, max_items),
-                        actual: input_list_items_at_level.len(),
+                        actual: validate_so_far,
                     },
                 ));
-            } else {
-                // Okay, there ARE enough items, or at least some items. Let's
-                // try to validate up to the max. We may not have enough but
-                // let's validate as far as we can.
-                trace!(
-                    "Proceeding to validate list items: available={}, min={}, max={:?}",
-                    input_list_items_at_level.len(),
-                    min_items,
-                    max_items
+            }
+
+            // If we didn't make it to the end of the input list, there
+            // might be more items but that correspond to another matcher.
+            //
+            // For example, with a schema like:
+            //
+            // ```md
+            // - `testA:/test\d/`{2,2}
+            // - `testB:/line2test\d/`{2,2}
+            // ```
+            //
+            // And input like:
+            //
+            // ```md
+            // - test1
+            // - test2
+            // - line2test1
+            // - line2test2
+            // ```
+            //
+            // We want to validate the first two, pushing them into our
+            // list, and then the second two.
+            //
+            // { "testA": ["test1", "test2"],
+            //   "testB": ["line2test1", "line2test2"] }
+            //
+            // In these cases we are looking at an schema tree that looks like:
+            //
+            // (tight_list)
+            // ├── (list_item) <-- where we are now
+            // │   ├── (list_marker)
+            // │   └── (paragraph)
+            // │       ├── (code_span)
+            // │       │   └── (text)
+            // │       └── (text)
+            // └── (list_item) <-- where we are after .goto_next_sibling() when it returns true
+            //     ├── (list_marker)
+            //     └── (paragraph)
+            //         ├── (code_span)
+            //         │   └── (text)
+            //         └── (text)
+            //
+            // If there are more items to validate AT THE SAME LEVEL, recurse to
+            // validate them. We now use the *next* schema node too.
+            if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
+                let next_result = validate_list_vs_list(
+                    &input_cursor,
+                    &schema_cursor,
+                    schema_str,
+                    input_str,
+                    got_eof,
                 );
+                result.join_other_result(&next_result);
+            }
 
-                let mut values_at_level = Vec::with_capacity(max_items.unwrap_or(1));
-                let mut validate_so_far = 0;
+            trace!("Completed validation of all {} list items", validate_so_far);
 
-                for input_list_item in input_list_items_at_level {
-                    trace!("Validating list item #{}", validate_so_far + 1,);
+            trace!(
+                "Result so far (at level): \n{:?}\ninput_sexpr={}\nschema_sexpr={}",
+                values_at_level,
+                input_cursor.node().to_sexp(),
+                schema_cursor.node().to_sexp()
+            );
 
-                    // If we've already validated the max number of items, stop.
-                    if let Some(max_items) = max_items
-                        && validate_so_far >= max_items
-                    {
-                        trace!(
-                            "Reached max items limit ({}), stopping validation",
-                            max_items
-                        );
-                        break;
-                    }
+            // Now, if there's another pair, recurse and validate it
+            if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
+                while input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {}
 
-                    debug_assert_eq!(input_cursor.node().kind(), "list_item");
-                    debug_assert_eq!(schema_cursor.node().kind(), "list_item");
+                // There is a deeper list!
+                if is_list_node(&input_cursor.node()) && is_list_node(&schema_cursor.node()) {
+                    trace!(
+                        "Found next sibling pairs, recursing to validate next list elements; cursors are at {:?} and {:?}",
+                        input_cursor.node().kind(),
+                        schema_cursor.node().kind()
+                    );
 
-                    if schema_cursor.node().kind() == "tight_list" {
-                        panic!("Schema cursor is not a tight list");
-                    }
-
-                    // TODO: for now we only ever validate the item as text to save on overhead of node_vs_node
-                    // Explore whether this is a bad assumption
-                    let new_matches = validate_text_vs_text(
+                    let next_result = validate_list_vs_list(
                         &input_cursor,
                         &schema_cursor,
                         schema_str,
                         input_str,
                         got_eof,
                     );
-
-                    validate_so_far += 1;
-                    values_at_level.push(new_matches.value);
-                    result.errors.extend(new_matches.errors);
-                    trace!(
-                        "Completed validation of list item #{}, moving to next",
-                        validate_so_far
-                    );
-
-                    // Move the cursor so that when we call
-                    // validate_node_vs_node in the next iteration it's at the
-                    // right spot.
-                    input_cursor.goto_next_sibling();
+                    // We need to be able to capture errors that happen in the recursive call
+                    result.errors.extend(next_result.errors);
+                    values_at_level.push(next_result.value);
                 }
-
-                // If we didn't make it to the end of the input list, there
-                // might be more items but that correspond to another matcher.
-
-                // If we didn't make it to the end of the input list, there
-                // might be more items but that correspond to another matcher.
-                //
-                // For example, with a schema like:
-                //
-                // ```md
-                // - `testA:/test\d/`{2,2}
-                // - `testB:/line2test\d/`{2,2}
-                // ```
-                //
-                // And input like:
-                //
-                // ```md
-                // - test1
-                // - test2
-                // - line2test1
-                // - line2test2
-                // ```
-                //
-                // We want to validate the first two, pushing them into our
-                // list, and then the second two.
-                //
-                // { "testA": ["test1", "test2"],
-                //   "testB": ["line2test1", "line2test2"] }
-                //
-                // In these cases we are looking at a tree that looks like:
-                //
-                // (tight_list)
-                // ├── (list_item)^
-                // │   ├── (list_marker)
-                // │   └── (paragraph)
-                // │       ├── (code_span)
-                // │       │   └── (text)
-                // │       └── (text)
-                // └── (list_item)
-                //     ├── (list_marker)
-                //     └── (paragraph)
-                //         ├── (code_span)
-                //         │   └── (text)
-                //         └── (text)
-
-                let more_items_are_left = input_list_items_at_level.len() > validate_so_far;
-                if more_items_are_left {
-                    debug_assert_eq!(schema_cursor.node().kind(), "list_item");
-
-                    // TODO: what if there is no next node in the schema? Make sure we're done validating everything?
-                    if schema_cursor.goto_next_sibling() {
-                        let next_result = validate_list_vs_list(
-                            &input_cursor,
-                            &schema_cursor,
-                            schema_str,
-                            input_str,
-                            got_eof,
-                        );
-                        result.join_other_result(&next_result);
-                    }
-                }
-
-                trace!("Completed validation of all {} list items", validate_so_far);
-
-                trace!(
-                    "Result so far (at level): \n{:?}\ninput_sexpr={}\nschema_sexpr={}",
-                    values_at_level,
-                    input_cursor.node().to_sexp(),
-                    schema_cursor.node().to_sexp()
-                );
-
-                // Now, if there's another pair, recurse and validate it
-                if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
-                    while input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {}
-
-                    // There is a deeper list!
-                    if input_cursor.node().kind() == "tight_list"
-                        && schema_cursor.node().kind() == "tight_list"
-                    {
-                        trace!(
-                            "Found next sibling pairs, recursing to validate next list elements; cursors are at {:?} and {:?}",
-                            input_cursor.node().kind(),
-                            schema_cursor.node().kind()
-                        );
-
-                        let next_result = validate_list_vs_list(
-                            &input_cursor,
-                            &schema_cursor,
-                            schema_str,
-                            input_str,
-                            got_eof,
-                        );
-                        // We need to be able to capture errors that happen in the recursive call
-                        result.errors.extend(next_result.errors);
-                        values_at_level.push(next_result.value);
-                    }
-                } else {
-                    trace!("No more sibling pairs found");
-                }
-
-                // Store the array that we just gathered
-                if let Some(matcher_id) = matcher.id() {
-                    trace!("Storing matches for matcher id: {}", matcher_id);
-
-                    result.set_match(
-                        matcher_id,
-                        json!(
-                            values_at_level
-                                .iter()
-                                .map(|value| {
-                                    // If we have a schema:
-                                    //
-                                    // ```md
-                                    // - `name:/test\d/`{2,2}
-                                    //   - `name:/test\d/`{1,1}
-                                    // ```
-                                    //
-                                    // Initially, we run this at the top level, gather something like
-                                    //
-                                    // matches_at_level = [{ "test": "test1" }, { "test": "test2" }]
-                                    //
-                                    // Then we might recurse, and end up with something like
-                                    //
-                                    // matches_at_level = [{ "test": "test1" }, { "test": "test2" }, { "deep": "test3" }]
-                                    //
-                                    // Then we iterate over the matches_at_level and unpack all the ones that have our
-                                    // id (we are top level), so "test," and get
-                                    //
-                                    // matches_at_level = ["test1", "test2", { "deep": "test3" }]
-                                    //
-                                    // Note that we don't unpack anything that is not our id (see below, where we
-                                    // "don't unpack!").
-
-                                    let mut matches_as_obj = value.as_object().unwrap().clone();
-
-                                    // TODO: can we avoid these clones?
-                                    if let Some(matcher_id) = matcher.id() {
-                                        let match_for_same_id = matches_as_obj.remove(matcher_id);
-
-                                        // Unwrap it to be loose in the array if we can
-                                        match match_for_same_id {
-                                            Some(match_for_same_id) => match_for_same_id,
-                                            None => value.clone(), // don't unpack!
-                                        }
-                                    } else {
-                                        value.clone()
-                                    }
-                                })
-                                .collect::<Vec<_>>()
-                        ),
-                    );
-                }
-
-                // Now we have validated as many as we could, let's add it to the result.
-                // Update the cursors to be as far as we got, and then join the results.
-                trace!("Returning validation result for repeated matcher");
-                return result;
+            } else {
+                trace!("No more sibling pairs found");
             }
+
+            // Store the array that we just gathered
+            if let Some(matcher_id) = matcher.id() {
+                trace!("Storing matches for matcher id: {}", matcher_id);
+
+                result.set_match(
+                    matcher_id,
+                    json!(
+                        values_at_level
+                            .iter()
+                            .map(|value| {
+                                // If we have a schema:
+                                //
+                                // ```md
+                                // - `name:/test\d/`{2,2}
+                                //   - `name:/test\d/`{1,1}
+                                // ```
+                                //
+                                // Initially, we run this at the top level, gather something like
+                                //
+                                // matches_at_level = [{ "test": "test1" }, { "test": "test2" }]
+                                //
+                                // Then we might recurse, and end up with something like
+                                //
+                                // matches_at_level = [{ "test": "test1" }, { "test": "test2" }, { "deep": "test3" }]
+                                //
+                                // Then we iterate over the matches_at_level and unpack all the ones that have our
+                                // id (we are top level), so "test," and get
+                                //
+                                // matches_at_level = ["test1", "test2", { "deep": "test3" }]
+                                //
+                                // Note that we don't unpack anything that is not our id (see below, where we
+                                // "don't unpack!").
+
+                                let mut matches_as_obj = value.as_object().unwrap().clone();
+
+                                // TODO: can we avoid these clones?
+                                if let Some(matcher_id) = matcher.id() {
+                                    let match_for_same_id = matches_as_obj.remove(matcher_id);
+
+                                    // Unwrap it to be loose in the array if we can
+                                    match match_for_same_id {
+                                        Some(match_for_same_id) => match_for_same_id,
+                                        None => value.clone(), // don't unpack!
+                                    }
+                                } else {
+                                    value.clone()
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                    ),
+                );
+            }
+
+            // Now we have validated as many as we could, let's add it to the result.
+            // Update the cursors to be as far as we got, and then join the results.
+            trace!("Returning validation result for repeated matcher");
+            return result;
         }
         // We were able to find a matcher in the schema list item, but it was invalid (we failed to parse it).
         Some(Err(e)) => {
@@ -463,7 +434,6 @@ mod tests {
             validate_list_vs_list,
         },
         ts_utils::parse_markdown,
-        utils::test_logging,
     };
 
     #[test]
@@ -630,7 +600,6 @@ mod tests {
 
     #[test]
     fn test_validate_list_vs_list_with_simple_matcher() {
-        test_logging();
         let schema_str = r#"- `test:/test\d/`{2,2}"#;
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
@@ -655,8 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_list_vs_list_with_stacked_matcherrr() {
-        test_logging();
+    fn test_validate_list_vs_list_with_stacked_matcher() {
         let schema_str = r#"
 - `testA:/test\d/`{2,2}
 - `testB:/line2test\d/`{2,2}
