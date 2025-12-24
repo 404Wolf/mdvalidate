@@ -135,7 +135,7 @@ pub fn validate_list_vs_list(
                 let mut validate_so_far = 0;
 
                 for input_list_item in input_list_items_at_level {
-                    trace!("Validating list item #{}", validate_so_far + 1);
+                    trace!("Validating list item #{}", validate_so_far + 1,);
 
                     // If we've already validated the max number of items, stop.
                     if let Some(max_items) = max_items
@@ -148,7 +148,15 @@ pub fn validate_list_vs_list(
                         break;
                     }
 
-                    debug_assert_eq!(input_list_item.kind(), "list_item");
+                    debug_assert_eq!(input_cursor.node().kind(), "list_item");
+                    debug_assert_eq!(schema_cursor.node().kind(), "list_item");
+
+                    debug_assert_eq!(input_list_item.id(), input_cursor.node().id());
+                    debug_assert_eq!(input_list_item.kind(), input_cursor.node().kind());
+
+                    if schema_cursor.node().kind() == "tight_list" {
+                        panic!("Schema cursor is not a tight list");
+                    }
 
                     // TODO: for now we only ever validate the item as text to save on overhead of node_vs_node
                     // Explore whether this is a bad assumption
@@ -344,7 +352,12 @@ pub fn validate_list_vs_list(
         }
         // We didn't find a repeating matcher. In this case, just use text_vs_text and move on.
         None => {
-            trace!("No repeated matcher found, using text_vs_text validation");
+            trace!(
+                "No repeated matcher found, using text_vs_text validation. Current node kinds: {:?} and {:?}",
+                input_cursor.node().kind(),
+                schema_cursor.node().kind()
+            );
+
             let list_item_match_result = validate_text_vs_text(
                 &input_cursor,
                 &schema_cursor,
@@ -454,6 +467,7 @@ mod tests {
             validate_list_vs_list,
         },
         ts_utils::parse_markdown,
+        utils::test_logging,
     };
 
     #[test]
@@ -781,6 +795,8 @@ mod tests {
 
     #[test]
     fn validate_list_vs_list_with_deep_nesting() {
+        test_logging();
+
         let schema_str = r#"
 - `test:/test\d/`{2,2}
     + `deep:/deep\d/`{1,1}

@@ -4,10 +4,12 @@ use std::process::exit;
 use tracing_subscriber::EnvFilter;
 
 pub mod cmd;
+pub mod env;
 pub mod mdschema;
 mod path_or_stdio;
 
 use crate::cmd::process_stdio;
+use crate::env::EnvConfig;
 use crate::path_or_stdio::PathOrStdio;
 use colored::Colorize;
 
@@ -45,6 +47,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = Args::parse();
 
+    // Load environment configuration
+    let env_config = EnvConfig::load();
+
     let schema_src = PathOrStdio::from(args.schema);
     let schema_src = schema_src.reader().or_else(|e| {
         Err(format!(
@@ -74,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         input.filepath(),
         args.fast_fail,
         args.quiet,
+        env_config.is_debug_mode(),
     ) {
         Err(err) => {
             println!("{}", format!("Error! {}", err).red());

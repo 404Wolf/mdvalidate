@@ -78,7 +78,7 @@ impl Validator {
 
         // If we already got EOF, do not accept more input
         if self.state.got_eof() {
-            return Err(ValidationError::ParserError(ParserError::ReadAfterGotEOF));
+            return Err(ValidationError::ParserError(ParserError::ReadAfterEOF));
         }
 
         self.state.set_got_eof(got_eof);

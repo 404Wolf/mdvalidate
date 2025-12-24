@@ -1,5 +1,5 @@
 use crate::mdschema::validator::{
-    errors::{pretty_print_error, ParserError, ValidationError, PrettyPrintError},
+    errors::{debug_print_error, pretty_print_error, ParserError, PrettyPrintError, ValidationError},
     validator::Validator,
 };
 use colored::Colorize;
@@ -123,6 +123,7 @@ pub fn process_stdio<R: Read, W: Write>(
     filename: &str,
     fast_fail: bool,
     quiet: bool,
+    debug_mode: bool,
 ) -> Result<((Vec<ValidationError>, Value), bool), ProcessingError> {
     let ((errors, matches), validator, _input_str) = process(schema_str, input, fast_fail)?;
 
@@ -142,8 +143,12 @@ pub fn process_stdio<R: Read, W: Write>(
         }
     } else {
         for error in &errors {
-            let pretty = pretty_print_error(error, &validator, filename)?;
-            eprintln!("{}", pretty);
+            let error_output = if debug_mode {
+                debug_print_error(error)
+            } else {
+                pretty_print_error(error, &validator, filename)?
+            };
+            eprintln!("{}", error_output);
             errored = true;
         }
     }
@@ -365,6 +370,7 @@ This is a test"#;
             &mut reader,
             &mut output_option,
             "test.md",
+            false,
             false,
             false,
         )

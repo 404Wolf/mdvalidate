@@ -6,7 +6,7 @@ use tree_sitter::{Node, TreeCursor};
 use crate::mdschema::validator::{
     errors::*,
     matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars},
-    node_walker::ValidationResult,
+    node_walker::{ValidationResult, node_vs_node::validate_node_vs_node},
     ts_utils::{
         compare_node_kinds, compare_text_contents, is_last_node, is_textual_node, waiting_at_end,
     },
@@ -40,6 +40,10 @@ pub fn validate_text_vs_text(
         schema_cursor.descendant_index(),
         input_cursor.descendant_index(),
     );
+
+    // Some invariants due to previous bugs
+    debug_assert_ne!(input_cursor.node().kind(), "tight_list");
+    debug_assert_ne!(schema_cursor.node().kind(), "tight_list");
 
     // Check if both nodes are textual nodes
     let input_node = input_cursor.node();
@@ -100,6 +104,8 @@ pub fn validate_text_vs_text(
             }
         }
         None => {
+            trace!("No schema node found; attempting to evaluate as text pair.");
+
             if is_textual_node(&input_node) && is_textual_node(&schema_node) {
                 // Both are textual nodes, validate them directly
                 return validate_textual_nodes(
@@ -281,7 +287,14 @@ fn validate_textual_container_children(
             }
         } else {
             // If not both textual, we need to recurse into them
-            let child_result = validate_text_vs_text(
+            trace!(
+                "Recursing into non-textual nodes of kind input={:?} and schema={:?}",
+                input_cursor.node().kind(),
+                schema_cursor.node().kind()
+            );
+
+            // They could be lists, or really anything
+            let child_result = validate_node_vs_node(
                 input_cursor,
                 schema_cursor,
                 schema_str,
