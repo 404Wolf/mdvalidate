@@ -17,7 +17,8 @@ We plan to eventually support converting a Markdown schema into a JSON schema de
 ## Some examples of what you can match 
 
 - **Literal Matching:** Regular Markdown stays literal — if it says `# Title`, it must match exactly.
-- **Matchers:** Use `` `label:/regex/` `` to define rules for dynamic content. - **Optional or Repeated Items:** Add `?` for optional things, `+` for one or more.
+- **Matchers:** Use `` `label:/regex/` `` to define rules for dynamic content.
+- **Optional or Repeated Items:** Add `?` for optional things, `+` for one or more.
 - **Lists & Sublists:** Validate nested lists with pattern control.
 - **Escaping:** Add `!` to disable regex interpretation — great for examples.
 
