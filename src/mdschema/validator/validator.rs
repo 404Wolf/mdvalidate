@@ -78,7 +78,7 @@ impl Validator {
 
         // If we already got EOF, do not accept more input
         if self.state.got_eof() {
-            return Err(ValidationError::ParserError(ParserError::ReadAfterGotEOF));
+            return Err(ValidationError::ParserError(ParserError::ReadAfterEOF));
         }
 
         self.state.set_got_eof(got_eof);
@@ -977,12 +977,18 @@ Content for section 3."#;
                 assert!(
                     indices_after.0 >= indices_before.0,
                     "Input descendant index regressed after reading chunk {}. Before: {:?}, After: {:?}, Chunk length: {}",
-                    i, indices_before, indices_after, chunk.len()
+                    i,
+                    indices_before,
+                    indices_after,
+                    chunk.len()
                 );
                 assert!(
                     indices_after.1 >= indices_before.1,
                     "Schema descendant index regressed after reading chunk {}. Before: {:?}, After: {:?}, Chunk length: {}",
-                    i, indices_before, indices_after, chunk.len()
+                    i,
+                    indices_before,
+                    indices_after,
+                    chunk.len()
                 );
             }
         }

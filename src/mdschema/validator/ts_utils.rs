@@ -81,18 +81,6 @@ pub fn find_node_by_index(root: Node, target_index: usize) -> Node {
     cursor.node()
 }
 
-/// Get all siblings of a given node.
-pub fn get_siblings<'a>(input_cursor: &TreeCursor<'a>) -> Vec<Node<'a>> {
-    let parent = input_cursor.node().parent();
-    match parent {
-        Some(p) => {
-            let mut walker = p.walk();
-            p.children(&mut walker).collect()
-        }
-        None => vec![],
-    }
-}
-
 /// Check if a node is a list.
 pub fn is_list_node(node: &Node) -> bool {
     match node.kind() {
@@ -194,6 +182,54 @@ pub fn compare_node_kinds(
     }
 }
 
+/// Compare node children lengths and return an error if they don't match
+///
+/// # Arguments
+/// * `schema_cursor` - The schema cursor, pointed at any node
+/// * `input_cursor` - The input cursor, pointed at any node
+/// * `got_eof` - Whether we have reached the end of file
+///
+/// # Returns
+/// An optional validation error if the children lengths don't match
+pub fn compare_node_children_lengths(
+    schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
+    got_eof: bool,
+) -> Option<ValidationError> {
+    use crate::mdschema::validator::errors::{ChildrenCount, SchemaViolationError};
+
+    // First, count the children to check for length mismatches
+    let input_child_count = input_cursor.node().child_count();
+    let schema_child_count = schema_cursor.node().child_count();
+
+    // Handle node mismatches
+    // If we have reached the EOF:
+    //   No difference in the number of children
+    // else:
+    //   We can have less input children
+    //
+    let children_len_mismatch_err =
+        ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
+            schema_index: schema_cursor.descendant_index(),
+            input_index: input_cursor.descendant_index(),
+            expected: ChildrenCount::from_specific(schema_child_count),
+            actual: input_child_count,
+        });
+    if got_eof {
+        // At EOF, children count must match exactly
+        if input_child_count != schema_child_count {
+            return Some(children_len_mismatch_err);
+        }
+    } else {
+        // Not at EOF: input can have fewer children, but not more
+        if input_child_count > schema_child_count {
+            return Some(children_len_mismatch_err);
+        }
+    }
+
+    None
+}
+
 /// Extract the list marker from a tight_list node
 ///
 /// TODO: Handle UTF8 errors properly instead of unwrapping
@@ -285,6 +321,26 @@ pub fn has_single_code_child(schema_cursor: &TreeCursor) -> bool {
     code_child_count == 1
 }
 
+/// Walk from a list_item node to its content paragraph.
+///
+/// Moves the cursor from a list_item through the list_marker to the paragraph node.
+///
+/// # Tree Structure
+/// ```text
+/// list_item
+/// ├── list_marker
+/// └── paragraph
+///     └── text
+/// ```
+pub fn walk_to_list_item_content(cursor: &mut TreeCursor) {
+    // list_item -> list_marker
+    cursor.goto_first_child();
+    debug_assert_eq!(cursor.node().kind(), "list_marker");
+    // list_marker -> paragraph
+    cursor.goto_next_sibling();
+    debug_assert_eq!(cursor.node().kind(), "paragraph");
+}
+
 #[allow(dead_code)]
 pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<ValidationError>) {
     use crate::mdschema::validator::validator_state::ValidatorState;
@@ -369,22 +425,6 @@ mod tests {
 
         let list_marker = extract_list_marker(&cursor, input);
         assert_eq!(list_marker, "-");
-    }
-
-    #[test]
-    fn test_get_siblings() {
-        let input = "- test1\n- test2\n- test3";
-        let mut parser = new_markdown_parser();
-        let tree = parser.parse(input, None).unwrap();
-        let root_node = tree.root_node();
-        let list_node = root_node.child(0).unwrap();
-        let list_item_node = list_node.child(1).unwrap(); // second list item
-        let cursor = list_item_node.walk();
-        let siblings = get_siblings(&cursor);
-        assert_eq!(siblings.len(), 3);
-        assert_eq!(siblings[0].kind(), "list_item");
-        assert_eq!(siblings[1].kind(), "list_item");
-        assert_eq!(siblings[2].kind(), "list_item");
     }
 
     #[test]
@@ -617,6 +657,27 @@ mod tests {
             !has_single_code_child(&schema_cursor),
             "Expected no code child for list item with code span"
         );
+    }
+
+    #[test]
+    fn test_walk_to_list_item_content() {
+        let input_str = "- test content";
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut cursor = input_tree.walk();
+
+        // Navigate to the list
+        cursor.goto_first_child();
+        assert_eq!(cursor.node().kind(), "tight_list");
+
+        // Navigate to the first list item
+        cursor.goto_first_child();
+        assert_eq!(cursor.node().kind(), "list_item");
+
+        // Now call walk_to_list_item_content
+        walk_to_list_item_content(&mut cursor);
+
+        // Should now be at the paragraph node
+        assert_eq!(cursor.node().kind(), "paragraph");
     }
 
     #[test]

@@ -47,6 +47,8 @@ impl ValidationResult {
         self.errors.push(error);
     }
 
+
+
     /// Add a match under an `id`.
     #[allow(dead_code)]
     pub fn set_match(&mut self, id: &str, value: Value) {

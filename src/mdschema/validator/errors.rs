@@ -7,113 +7,132 @@ use crate::mdschema::validator::ts_utils::find_node_by_index;
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ValidationError::SchemaViolation(e) => write!(f, "Schema violation: {:?}", e),
-            ValidationError::SchemaError(e) => write!(f, "Schema error: {:?}", e),
-            ValidationError::InternalInvariantViolated(msg) => {
-                write!(f, "Internal invariant violated: {}. This is a bug.", msg)
-            }
             ValidationError::IoError(e) => write!(f, "IO error: {}", e),
-            ValidationError::InvalidUTF8 => write!(f, "Invalid UTF-8"),
-            ValidationError::ParserError(e) => write!(f, "Parser error: {:?}", e),
-            ValidationError::ValidatorCreationFailed => write!(f, "Validator creation failed"),
+            ValidationError::InvalidUTF8 => write!(f, "Invalid UTF-8 encoding in input"),
+            ValidationError::SchemaViolation(e) => write!(f, "Schema violation: {}", e),
+            ValidationError::SchemaError(e) => write!(f, "Schema error: {}", e),
+            ValidationError::InternalInvariantViolated(msg) => {
+                write!(f, "Internal invariant violated: {} (this is a bug)", msg)
+            }
+            ValidationError::ParserError(e) => write!(f, "Parser error: {}", e),
+            ValidationError::ValidatorCreationFailed => write!(f, "Failed to create validator"),
         }
     }
 }
 
-/// Error that happens during input parsing or processing.
+/// Top-level error type for all validation operations.
+///
+/// This enum represents all possible errors that can occur during markdown validation,
+/// from IO issues to schema violations to parser errors.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum ValidationError {
-    /// Error when reading input.
+    /// IO error occurred while reading input.
     IoError(String),
 
-    /// When we attempt to read a byte from the input, but the input is not valid UTF-8.
+    /// Input contains invalid UTF-8 encoding.
     InvalidUTF8,
 
-    /// When we find a violation when validating the input against the schema.
+    /// Input violates the schema definition.
     SchemaViolation(SchemaViolationError),
 
-    /// When the actual schema is invalid.
+    /// Schema definition itself is invalid or malformed.
     SchemaError(SchemaError),
 
-    /// Some internal invariant was violated.
+    /// Internal invariant was violated (indicates a bug in the validator).
     InternalInvariantViolated(String),
 
-    /// Error that happens during input parsing or processing.
+    /// Parser failed to process input or schema.
     ParserError(ParserError),
 
-    /// Failed to create validator.
+    /// Failed to create or initialize the validator.
     ValidatorCreationFailed,
 }
 
-/// Error that happens during input parsing or processing.
+/// Errors that occur during parsing of input or schema.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum ParserError {
-    /// When we attempt to read again after we already reached EOF.
+    /// Attempted to read after already reaching end of file.
     ///
-    /// This is an internal error and should never happen.
-    ReadAfterGotEOF,
+    /// This is an internal error and should never happen in normal operation.
+    ReadAfterEOF,
 
-    /// Failed to read input.
-    ///
-    /// TODO: do we really need this?
+    /// Failed to read input data.
     ReadInputFailed(String),
 
-    /// Error given to us from the treesitter parser.
+    /// Tree-sitter parser encountered an error.
     TreesitterError,
 
-    /// Internal error when we fail to create a validator.
-    ///
-    /// TODO: add a nested enum so we get more context here.
+    /// Failed to create a validator instance.
     ValidatorCreationFailed,
 
-    /// Failed to pretty print the error message.
+    /// Failed to format error message for display.
     PrettyPrintFailed(String),
 }
 
+impl fmt::Display for ParserError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ParserError::ReadAfterEOF => write!(f, "Attempted to read after EOF"),
+            ParserError::ReadInputFailed(msg) => write!(f, "Failed to read input: {}", msg),
+            ParserError::TreesitterError => write!(f, "Tree-sitter parser error"),
+            ParserError::ValidatorCreationFailed => write!(f, "Failed to create validator"),
+            ParserError::PrettyPrintFailed(msg) => write!(f, "Failed to format error: {}", msg),
+        }
+    }
+}
+
+/// Errors in the schema definition itself.
+///
+/// These errors indicate problems with the schema document, not the input being validated.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SchemaError {
-    /// Missing a matcher in a matcher group
+    /// Matcher is missing from a matcher group.
     MissingMatcher {
         schema_index: usize,
         input_index: usize,
     },
-    /// When a node has multiple matchers in its children, which is not allowed.
+
+    /// Node has multiple matchers in its children (only one is allowed).
     MultipleMatchersInNodeChildren {
         schema_index: usize,
         input_index: usize,
-        /// Number of matchers received
+        /// Number of matchers found.
         received: usize,
     },
-    /// When you attempt to validate a list node, but the schema has a non
-    /// repeated matcher.
+
+    /// List node uses a non-repeating matcher.
+    ///
+    /// List nodes must use matchers with repetition syntax like `{1,}`.
     BadListMatcher {
         schema_index: usize,
         input_index: usize,
     },
-    /// When you attempt to make a matcher but the extras are
-    /// invalid. For example, `test:/1/`!{1,2}.
+
+    /// Matcher has invalid extras syntax.
+    ///
+    /// For example, `test:/1/`!{1,2} is invalid.
     InvalidMatcherExtras {
         schema_index: usize,
         input_index: usize,
         error: MatcherExtrasError,
     },
-    /// When you create a matcher and don't close it.
+
+    /// Matcher was not properly closed.
     UnclosedMatcher {
         schema_index: usize,
         input_index: usize,
     },
-    /// When we construct a matcher and encounter an error.
+
+    /// Error occurred while constructing a matcher.
     MatcherError {
         error: MatcherError,
         schema_index: usize,
         input_index: usize,
     },
-    /// When you have a repeating matcher, followed by another repeating
-    /// matcher, and the first repeating matcher is not bounded to a specific
-    /// number of nodes.
+    /// Unbounded repeating matcher is followed by another repeating matcher.
     ///
-    /// In cases where you have two or more repeating matchers in a row, the
-    /// first ones must have a specific number of nodes.
+    /// When multiple repeating matchers appear in sequence, all but the last
+    /// must have a specific upper bound.
     ///
     /// For example, this is fine:
     ///
@@ -155,11 +174,35 @@ pub enum SchemaError {
         schema_index: usize,
         input_index: usize,
     },
-    /// When the corresponding part of the schema text is not valid UTF-8.
+
+    /// Schema text contains invalid UTF-8 encoding.
     UTF8Error {
         schema_index: usize,
         input_index: usize,
     },
+}
+
+impl fmt::Display for SchemaError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SchemaError::MissingMatcher { .. } => write!(f, "Missing matcher in matcher group"),
+            SchemaError::MultipleMatchersInNodeChildren { received, .. } => {
+                write!(f, "Found {} matchers in node children (only 1 allowed)", received)
+            }
+            SchemaError::BadListMatcher { .. } => {
+                write!(f, "List node requires repeating matcher syntax")
+            }
+            SchemaError::InvalidMatcherExtras { error, .. } => {
+                write!(f, "Invalid matcher extras: {}", error)
+            }
+            SchemaError::UnclosedMatcher { .. } => write!(f, "Matcher not properly closed"),
+            SchemaError::MatcherError { error, .. } => write!(f, "Matcher error: {}", error),
+            SchemaError::RepeatingMatcherUnbounded { .. } => {
+                write!(f, "Unbounded repeating matcher must be last in sequence")
+            }
+            SchemaError::UTF8Error { .. } => write!(f, "Invalid UTF-8 in schema"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -181,67 +224,101 @@ impl fmt::Display for NodeContentMismatchKind {
     }
 }
 
+/// Violations where input doesn't match a valid schema.
+///
+/// These errors indicate that the input document doesn't conform to the schema definition.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SchemaViolationError {
-    /// Mismatch between schema definition and actual node.
+    /// Node type doesn't match expected type from schema.
     NodeTypeMismatch {
         schema_index: usize,
         input_index: usize,
-        /// The expected node type that doesn't validate
-        ///
-        /// TODO: Make this a enum value rather than the raw treesitter node
-        /// type string.
+        /// Expected node type from schema.
         expected: String,
-        /// Actual node type is obtainable from the input tree
-        ///
-        /// TODO: Make this a enum value rather than the raw treesitter node
-        /// type string.
+        /// Actual node type found in input.
         actual: String,
     },
-    /// Text content of node does not match expected value.
+
+    /// Node text content doesn't match expected pattern or literal.
     NodeContentMismatch {
         schema_index: usize,
         input_index: usize,
-        /// The expected text that doesn't validate
+        /// Expected text or pattern from schema.
         expected: String,
-        /// Actual content is obtainable from the input tree
+        /// Actual content found in input.
         actual: String,
-        /// The type of node content mismatch
+        /// Type of content mismatch (prefix, suffix, matcher, or literal).
         kind: NodeContentMismatchKind,
     },
-    /// When it looks like you meant to have a repeating list node, but there is
-    /// no {} to indicate repeating.
+
+    /// Matcher appears in list context without repetition syntax.
+    ///
+    /// List nodes require matchers to use `{min,max}` syntax.
     NonRepeatingMatcherInListContext {
         schema_index: usize,
         input_index: usize,
     },
-    /// Nodes have different numbers of children.
+
+    /// Number of children doesn't match expected count.
     ChildrenLengthMismatch {
         schema_index: usize,
         input_index: usize,
-        /// Expected number of children
+        /// Expected number of children from schema.
         expected: ChildrenCount,
-        /// Actual number of children
+        /// Actual number of children in input.
         actual: usize,
     },
-    /// Nested list exceeds the maximum allowed depth.
+
+    /// Nested list depth exceeds maximum allowed.
     NodeListTooDeep {
         schema_index: usize,
         input_index: usize,
-        /// Maximum depth allowed
+        /// Maximum allowed nesting depth.
         max_depth: usize,
     },
-    /// List item count is outside the expected range.
+
+    /// Number of list items is outside allowed range.
     WrongListCount {
         schema_index: usize,
         input_index: usize,
-        /// Minimum number of items (None means no limit)
+        /// Minimum number of items allowed (None means no minimum).
         min: Option<usize>,
-        /// Maximum number of items (None means no limit)
+        /// Maximum number of items allowed (None means no maximum).
         max: Option<usize>,
-        /// Actual number of items
+        /// Actual number of items in input.
         actual: usize,
     },
+}
+
+impl fmt::Display for SchemaViolationError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SchemaViolationError::NodeTypeMismatch { expected, actual, .. } => {
+                write!(f, "Expected node type '{}', found '{}'", expected, actual)
+            }
+            SchemaViolationError::NodeContentMismatch { expected, actual, kind, .. } => {
+                write!(f, "Expected {} '{}', found '{}'", kind, expected, actual)
+            }
+            SchemaViolationError::NonRepeatingMatcherInListContext { .. } => {
+                write!(f, "Non-repeating matcher used in list context")
+            }
+            SchemaViolationError::ChildrenLengthMismatch { expected, actual, .. } => {
+                write!(f, "Expected {} children, found {}", expected, actual)
+            }
+            SchemaViolationError::NodeListTooDeep { max_depth, .. } => {
+                write!(f, "List nesting exceeds maximum depth of {}", max_depth)
+            }
+            SchemaViolationError::WrongListCount { min, max, actual, .. } => {
+                let range_desc = match (min, max) {
+                    (Some(min_val), Some(max_val)) => format!("{}-{}", min_val, max_val),
+                    (Some(min_val), None) => format!("at least {}", min_val),
+                    (None, Some(max_val)) => format!("at most {}", max_val),
+                    (None, None) => "any number of".to_string(),
+                };
+                write!(f, "Expected {} items, found {}", range_desc, actual)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -272,18 +349,25 @@ impl ChildrenCount {
     }
 }
 
+/// Errors that occur during pretty-printing of validation errors.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub enum NodeContentMismatchError {
-    /// A node's text content doesn't match expected literal text
-    Text(String),
-    /// A matcher's pattern doesn't match
-    Matcher(usize),
+pub enum PrettyPrintError {
+    /// Failed to format error message for display.
+    FailedToPrettyPrint(String),
+
+    /// UTF-8 encoding error while formatting.
+    UTF8Error(String),
 }
 
-#[derive(Debug)]
-pub enum PrettyPrintError {
-    FailedToPrettyPrint(String),
-    UTF8Error(String),
+impl fmt::Display for PrettyPrintError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PrettyPrintError::FailedToPrettyPrint(msg) => {
+                write!(f, "Failed to format error: {}", msg)
+            }
+            PrettyPrintError::UTF8Error(msg) => write!(f, "UTF-8 error during formatting: {}", msg),
+        }
+    }
 }
 
 impl From<std::str::Utf8Error> for PrettyPrintError {
@@ -315,6 +399,16 @@ pub fn pretty_print_error(
     Ok(String::from_utf8_lossy(&buffer).to_string())
 }
 
+/// Prints error using simple Debug formatting without pretty-printing.
+///
+/// This is for debugging and development when you want to see the raw error
+/// structure without ariadne formatting.
+pub fn debug_print_error(error: &ValidationError) -> String {
+    format!("{:#?}", error)
+}
+
+/// Convert validation errors to an ariadne report, and then print them to a
+/// buffer.
 fn validation_error_to_ariadne(
     error: &ValidationError,
     validator: &Validator,
@@ -402,6 +496,8 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 let parent = find_node_by_index(tree.root_node(), *input_index);
                 let schema_content =
                     node_content_by_index(tree.root_node(), *schema_index, source_content)?;
+                let input_content =
+                    node_content_by_index(tree.root_node(), *input_index, source_content)?;
                 let parent_range = parent.start_byte()..parent.end_byte();
 
                 let mut report = Report::build(ReportKind::Error, (filename, parent_range.clone()))
@@ -409,8 +505,8 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     .with_label(
                         Label::new((filename, parent_range))
                             .with_message(format!(
-                                "Expected {} children but found {}. Schema: '{}'",
-                                expected, actual, schema_content
+                                "Expected {} children but found {}. Input: '{}', Schema: '{}'",
+                                expected, actual, input_content, schema_content
                             ))
                             .with_color(Color::Red),
                     );
