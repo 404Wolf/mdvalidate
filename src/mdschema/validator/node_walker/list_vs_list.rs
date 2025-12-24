@@ -8,9 +8,10 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError},
     node_walker::{ValidationResult, text_vs_text::validate_text_vs_text},
     ts_utils::{
-        compare_node_kinds, get_node_and_next_node, has_single_code_child, has_subsequent_node_of_kind, is_list_node,
-        walk_to_list_item_content,
+        count_siblings, get_node_and_next_node, has_single_code_child, has_subsequent_node_of_kind,
+        is_list_node, walk_to_list_item_content,
     },
+    utils::{compare_node_children_lengths, compare_node_kinds},
 };
 
 /// Validate a list node against a schema list node.
@@ -260,13 +261,6 @@ pub fn validate_list_vs_list(
 
             trace!("Completed validation of all {} list items", validate_so_far);
 
-            trace!(
-                "Result so far (at level): \n{:?}\ninput_sexpr={}\nschema_sexpr={}",
-                values_at_level,
-                input_cursor.node().to_sexp(),
-                schema_cursor.node().to_sexp()
-            );
-
             // Now, if there's another pair, recurse and validate it
             if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
                 while input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {}
@@ -369,6 +363,25 @@ pub fn validate_list_vs_list(
                 schema_cursor.node().kind()
             );
 
+            // In this case we want to make sure that the children have the
+            // exact same length, since they are both literal lists. Dynamic
+            // lengths aren't allowed for literal lists.
+            let remaining_schema_nodes = count_siblings(&schema_cursor);
+            let remaining_input_nodes = count_siblings(&input_cursor);
+
+            if remaining_schema_nodes != remaining_input_nodes {
+                result.add_error(ValidationError::SchemaViolation(
+                    SchemaViolationError::ChildrenLengthMismatch {
+                        schema_index: schema_cursor.descendant_index(),
+                        input_index: input_cursor.descendant_index(),
+                        // +1 to account for the current node
+                        expected: ChildrenCount::from_specific(remaining_schema_nodes + 1),
+                        actual: remaining_input_nodes + 1,
+                    },
+                ));
+                return result;
+            }
+
             let list_item_match_result = validate_text_vs_text(
                 &input_cursor,
                 &schema_cursor,
@@ -404,7 +417,10 @@ pub fn validate_list_vs_list(
 /// This will attempt to grab the current node the cursor is pointing at,
 /// which must be a code node, and the following one, which will be counted
 /// as extras if it is a text node.
-fn try_from_code_and_text_node_cursor(cursor: &TreeCursor, schema_str: &str) -> Result<Matcher, MatcherError> {
+fn try_from_code_and_text_node_cursor(
+    cursor: &TreeCursor,
+    schema_str: &str,
+) -> Result<Matcher, MatcherError> {
     let (node, next_node) = get_node_and_next_node(cursor).ok_or_else(|| {
         MatcherError::InvariantViolation(
             "Cursor has no current node to extract matcher from".to_string(),
@@ -584,8 +600,8 @@ mod tests {
     #[test]
     fn test_try_from_code_and_text_node_cursor() {
         // Test successful matcher creation from cursor
-        use crate::mdschema::validator::ts_utils::new_markdown_parser;
         use super::try_from_code_and_text_node_cursor;
+        use crate::mdschema::validator::ts_utils::new_markdown_parser;
 
         let schema_str = "`word:/\\w+/`{,} suffix";
         let mut parser = new_markdown_parser();
@@ -713,6 +729,141 @@ mod tests {
                 ..
             }) => {}
             _ => panic!("Unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_validate_list_vs_list_literal_list_items_with_matcher() {
+        let schema_str = r#"
+- test1
+- `id:/test\d/`
+- test3
+
+Footer: test (footer isn't validated with_list_vs_list)
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- test1
+- test2
+- test3
+
+Footer: test (footer isn't validated with_list_vs_list)
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
+        assert_eq!(result.value, json!({"id": "test2"}));
+    }
+
+    #[test]
+    fn test_validate_list_vs_list_literal_items_length_mismatch() {
+        // Test case 1: Input is shorter than schema
+        let schema_str = r#"
+- test1
+- `id:/test\d/`
+- test3
+- test4
+- test5
+- test6
+
+Footer: test (footer isn't validated with_list_vs_list)
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- test1
+- test2
+- test3
+
+Footer: test (footer isn't validated with_list_vs_list)
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(!result.errors.is_empty());
+        assert_eq!(result.value, json!({})); // we stop early. TODO: capture as much as we can
+
+        match result.errors.first().unwrap() {
+            ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
+                expected,
+                actual,
+                ..
+            }) => {
+                assert_eq!(*expected, ChildrenCount::from_specific(6));
+                assert_eq!(*actual, 3);
+            }
+            _ => panic!("Unexpected error"),
+        }
+
+        // Test case 2: Input is longer than schema
+        let schema_str = r#"
+- test1
+- `id:/test\d/`
+- test3
+
+Footer: test (footer isn't validated with_list_vs_list)
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- test1
+- test2
+- test3
+- test4
+- test5
+- test6
+
+Footer: test (footer isn't validated with_list_vs_list)
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert!(!result.errors.is_empty());
+        assert_eq!(result.value, json!({})); // we stop early. TODO: capture as much as we can
+
+        match result.errors.first().unwrap() {
+            ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
+                expected,
+                actual,
+                ..
+            }) => {
+                assert_eq!(*expected, ChildrenCount::from_specific(3));
+                assert_eq!(*actual, 6);
+            }
+            _ => panic!("Unexpected error"),
         }
     }
 
