@@ -13,10 +13,11 @@ use crate::mdschema::validator::{
 
 /// Validate two arbitrary nodes against each other.
 ///
-/// 1) If both nodes are textual nodes (schema is text, input is text), validate using `textual_vs_textual`.
-/// 2) If both nodes are codeblock nodes, validate using `codeblock_vs_codeblock`.
-/// 3) If both nodes are list nodes, validate using `matcher_vs_list`.
-/// 4) If both nodes are heading nodes or document nodes, for each child of each, validate recursively using `validate_node_vs_node`.
+/// Dispatches to the appropriate validator based on node types:
+/// - Textual nodes -> `validate_text_vs_text`
+/// - Code blocks -> `validate_code_vs_code`
+/// - Lists -> `validate_list_vs_list`
+/// - Headings/documents -> recursively validate children
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "trace", fields(
     input = %input_cursor.node().kind(),
     schema = %schema_cursor.node().kind()
@@ -57,13 +58,7 @@ pub fn validate_node_vs_node(
     if both_are_codeblocks(&input_node, &schema_node) {
         trace!("Both are container nodes, validating container vs container");
 
-        return validate_code_vs_code(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
+        return validate_code_vs_code(&input_cursor, &schema_cursor, schema_str, input_str);
     }
 
     // 3) Both are textual containers - check for matcher usage

@@ -15,35 +15,59 @@ use crate::mdschema::validator::{
 
 /// Validate a list node against a schema list node.
 ///
-/// For each element in the schema list, if it is a literal, match it against
-/// the corresponding input list element and move on.
+/// Matches list items in order, supporting both literal comparison and pattern
+/// matching (including recursively).
 ///
-/// ```md
-/// - test1^
-/// - test2
-/// ```
+/// Schema list items can be:
+/// - Literals: matched exactly against corresponding input items
+/// - Matchers: patterns like `id:/test\d/`{2,2} that match multiple items
+/// - Recursively: nested lists can be matched against nested lists, where the
+///   nested lists' nodes are Literals or Matchers
 ///
-/// ```md
-/// - test1^
-/// - test2
-/// ```
+/// # Example: Literal matching
 ///
-/// If the cursor is at a matcher in the schema list, check what its range of
-/// allowed number of matching input nodes is. Only the last schema matcher node
-/// in a list of them can have an unbounded range.
+/// When the schema contains literal items, they must match exactly:
 ///
-/// Then move on to the next element in the schema list, and repeat.
-///
+/// **Schema:**
 /// ```md
 /// - test1
-/// - test2^ can't match this one anymore!
-/// - footest2
+/// - test2
 /// ```
 ///
+/// **Input:**
 /// ```md
-/// - `id:/test\d/`{2,2}^
-/// - `id:/footest\d/`{,2}
+/// - test1
+/// - test2
 /// ```
+///
+/// This validates successfully because each input item matches its corresponding schema item.
+///
+/// # Example: Matcher with bounded range
+///
+/// Matchers consume multiple input items according to their quantity constraints.
+/// When a matcher reaches its maximum, the next schema matcher begins consuming items:
+///
+/// **Schema:**
+/// ```md
+/// - `id:/test\d/`{2,2}
+/// - `id:/footest\d/`{1,2}
+/// ```
+///
+/// **Input:**
+/// ```md
+/// - test1
+/// - test2
+/// - footest1
+/// ```
+///
+/// The first matcher consumes `test1` and `test2` (reaching its max of 2).
+/// Then the second matcher begins and consumes `footest1`.
+///
+/// Note that `test2` cannot be matched by the second matcher—once a matcher
+/// reaches its limit, the cursor has moved past those items.
+///
+/// Note that a limitation here is that you cannot have a variable-length list
+/// that is not the final list in your schema.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     input = %input_cursor.node().kind(),
     schema = %schema_cursor.node().kind()
@@ -562,7 +586,7 @@ mod tests {
         // Test successful matcher creation from cursor
         use crate::mdschema::validator::ts_utils::new_markdown_parser;
         use super::try_from_code_and_text_node_cursor;
-        
+
         let schema_str = "`word:/\\w+/`{,} suffix";
         let mut parser = new_markdown_parser();
         let tree = parser.parse(schema_str, None).unwrap();

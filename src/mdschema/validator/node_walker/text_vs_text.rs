@@ -15,14 +15,9 @@ use crate::mdschema::validator::{
 
 /// Validate a textual region of input against a textual region of schema.
 ///
-/// Both the input cursor and schema cursor should either:
-/// - Both point to textual nodes, like "emphasis", "text", or similar.
-/// - Both point to textual containers, like "heading_content", "paragraph", or similar.
-///
-/// If the schema cursor points to a text node, followed by a code node, maybe
-/// followed by a text node, those three nodes are delegated as a "matcher"
-/// group, and for that chunk of three text nodes, `matcher_vs_text` will be
-/// used for validation.
+/// Handles text nodes (emphasis, strong, text) and textual containers (paragraphs, headings).
+/// When the schema contains a text-code-text pattern, those nodes form a "matcher group"
+/// and are validated using `validate_matcher_vs_text` instead of literal comparison.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     input = %input_cursor.node().kind(),
     schema = %schema_cursor.node().kind()
@@ -322,29 +317,13 @@ fn try_from_code_and_text_node(
 /// node that is a code node that is a matcher.
 ///
 /// The schema cursor should point at:
-/// - A text node, followed by a code node, maybe followed by a text node
-/// - A code node, maybe followed by a text node
-/// - A code node only
+/// Validate text using a matcher pattern from the schema.
 ///
-/// You should not call this function directly. Instead, use the
-/// `validate_text_vs_text` function with the cursors pointing to two text
-/// nodes, and that may end up using this to do the matcher validation.
+/// Called by `validate_text_vs_text` when a matcher group is detected in the schema.
+/// A matcher group consists of text-code-text nodes where the code contains a pattern.
 ///
-/// # Arguments
-///
-/// * `input_cursor` - The cursor pointing to the input text node.
-/// * `schema_cursor` - The cursor pointing to the schema text node.
-/// * `schema_str` - The string representation of the schema text node.
-/// * `input_str` - The string representation of the input text node.
-/// * `got_eof` - Whether the input text node has reached the end of the file.
-/// * `matcher_group` - The optional prefix, matcher, and suffix nodes. This is
-///   obtained by calling `get_matcher_group` on the schema cursor. We do this
-///   ahead of time so we don't need to call it multiple times. If that function
-///   returns `None` that means that we are not dealing with a matcher group.
-///
-/// # Returns
-///
-/// A `ValidationResult` indicating the result of the validation.
+/// The matcher can match against input text and optionally capture the matched value.
+/// Supports prefix/suffix matching and various pattern types (regex, literal, etc.).
 pub fn validate_matcher_vs_text<'a>(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,

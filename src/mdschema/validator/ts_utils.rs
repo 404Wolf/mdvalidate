@@ -330,6 +330,20 @@ pub fn has_single_code_child(schema_cursor: &TreeCursor) -> bool {
 }
 
 /// Extract the language and body of a codeblock.
+///
+/// # Arguments
+///
+/// * `cursor`: The cursor pointing to the codeblock node.
+/// * `src`: The source text of the document.
+///
+/// # Returns
+///
+/// An `Option` containing:
+/// - The optional language tuple: `(language_string, descendant_index)` if the language text is present
+/// - The body tuple: `(body_string, descendant_index)` of the code content
+/// Where `descendant_index` is the index of the descendant node that contains the language or body text.
+///
+/// Returns `None` if the codeblock is invalid or it isn't a codeblock to begin with.
 pub fn extract_codeblock_contents(
     cursor: &TreeCursor,
     src: &str,
@@ -380,12 +394,12 @@ pub fn extract_codeblock_contents(
     // Get the full text from code_fence_content node itself, not just the first child
     let code_fence_node = cursor.node();
     let text = code_fence_node.utf8_text(src.as_bytes()).ok()?;
-    
+
     // Navigate to first text child to get its descendant_index
     if !cursor.goto_first_child() || cursor.node().kind() != "text" {
         return None;
     }
-    
+
     let body = (text.to_string(), cursor.descendant_index());
 
     Some((language, body))
