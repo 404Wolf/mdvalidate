@@ -131,14 +131,31 @@ pub fn validate_list_vs_list(
                     validate_so_far
                 );
 
-                // If we've now validated the max number of items, stop.
+                // If we've now validated the max number of items, check if there are more
                 if let Some(max_items) = max_items
                     && validate_so_far == max_items
                 {
                     trace!(
-                        "Reached max items limit ({}), stopping validation",
+                        "Reached max items limit ({}), checking if there are more items",
                         max_items
                     );
+
+                    // Check if there are more items beyond the max
+                    if input_cursor.clone().goto_next_sibling() && got_eof {
+                        trace!(
+                            "Error: More items than max allowed ({} > {})",
+                            "at least one more",
+                            max_items
+                        );
+                        result.add_error(ValidationError::SchemaViolation(
+                            SchemaViolationError::ChildrenLengthMismatch {
+                                schema_index: schema_cursor.descendant_index(),
+                                input_index: input_cursor.descendant_index(),
+                                expected: ChildrenCount::from_range(min_items, Some(max_items)),
+                                actual: validate_so_far + 1, // At least one more
+                            },
+                        ));
+                    }
                     break;
                 }
 
@@ -432,7 +449,7 @@ mod tests {
     use serde_json::json;
 
     use crate::mdschema::validator::{
-        errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
+        errors::{ChildrenCount, NodeContentMismatchKind, SchemaViolationError, ValidationError},
         matcher::matcher::MatcherType,
         node_walker::list_vs_list::{
             ensure_at_first_list_item, extract_repeated_matcher_from_list_item,
@@ -815,6 +832,80 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_list_vs_list_with_deep_nesting_and_stacking() {
+        let schema_str = r#"
+- `test:/test\d/`{2,2}
+- `barbar:/barbar\d/`{2,2}
+    + `deep:/deep\d/`{1,1}
+        - `deeper:/deeper\d/`{2,2}
+        - `deepest:/deepest\d/`{2,}
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- test1
+- test2
+- barbar1
+- barbar2
+    + deep1
+        - deeper1
+        - deeper2
+        - deepest1
+        - deepest2
+        - deepest3
+        - deepest4
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
+
+        assert_eq!(
+            result.value,
+            json!({
+                "barbar": [
+                    "barbar1",
+                    "barbar2",
+                    {
+                        "deep": [
+                            "deep1",
+                            {
+                                "deeper": [
+                                    "deeper1",
+                                    "deeper2"
+                                ],
+                                "deepest": [
+                                    "deepest1",
+                                    "deepest2",
+                                    "deepest3",
+                                    "deepest4"
+                                ]
+                            }
+                        ]
+                    }
+                ],
+                "test": [
+                    "test1",
+                    "test2"
+                ]
+            })
+        );
+    }
+
+    #[test]
     fn test_validate_list_vs_list_with_mismatched_list_kind() {
         let schema_str = r#"
 - `test:/test\d/`{1,1}
@@ -842,6 +933,47 @@ mod tests {
         assert!(
             !result.errors.is_empty(),
             "Expected errors due to mismatched list kinds at second level"
+        );
+    }
+
+    #[test]
+    fn test_validate_list_vs_list_with_max_in_deep_list() {
+        // Test case: nested list with max constraint that is exceeded
+        let schema_str = r#"
+- `test:/test\d/`{1,1}
+    - `deep:/deep\d/`{,3}
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- test1
+    - deep1
+    - deep2
+    - deep3
+    - deep4
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        // Should stop at max (3) and not validate the 4th item
+        assert!(
+            result.errors.is_empty(),
+            "Should not error when max is reached, just stop validating"
+        );
+
+        // Should only capture 3 items even though 4 were provided
+        assert_eq!(
+            result.value,
+            json!({"test": ["test1", {"deep": ["deep1", "deep2", "deep3"]}]})
         );
     }
 
@@ -959,9 +1091,31 @@ mod tests {
 
         assert!(
             result.errors.is_empty(),
-            "Should not error, just stop at max"
+            "Should not error when got_eof is false, just stop at max"
         );
         assert_eq!(result.value, json!({"test": ["test1", "test2"]}));
+
+        // Negative case with EOF: should error when exceeding max
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert!(
+            !result.errors.is_empty(),
+            "Expected error when list exceeds maximum with EOF"
+        );
+
+        // Check the error details
+        match &result.errors[0] {
+            ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
+                expected,
+                actual,
+                ..
+            }) => {
+                assert_eq!(*expected, ChildrenCount::from_range(0, Some(2)));
+                assert_eq!(*actual, 3); // We validated 2 and found at least 1 more
+            }
+            _ => panic!("Expected ChildrenLengthMismatch error"),
+        }
     }
 
     #[test]
