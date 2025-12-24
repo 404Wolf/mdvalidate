@@ -6,9 +6,10 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::{
     errors::{ChildrenCount, SchemaError, SchemaViolationError, ValidationError},
     matcher::matcher::{Matcher, MatcherError},
-    node_walker::{ValidationResult, node_vs_node::validate_node_vs_node, text_vs_text::validate_text_vs_text},
+    node_walker::{ValidationResult, text_vs_text::validate_text_vs_text},
     ts_utils::{
         compare_node_kinds, has_single_code_child, has_subsequent_node_of_kind, is_list_node,
+        walk_to_list_item_content,
     },
 };
 
@@ -358,20 +359,6 @@ pub fn validate_list_vs_list(
 }
 
 /// Walk from a list item node to the actual content, which is a paragraph node.
-fn walk_to_list_item_content(cursor: &mut TreeCursor) {
-    // list_item
-    // ├── list_marker
-    // └── paragraph
-    //     └── text
-    //
-    // list_item -> list_marker
-    cursor.goto_first_child();
-    debug_assert_eq!(cursor.node().kind(), "list_marker");
-    // list_marker -> paragraph
-    cursor.goto_next_sibling();
-    debug_assert_eq!(cursor.node().kind(), "paragraph");
-}
-
 /// Extract a repeated matcher from a list item node.
 ///
 /// Returns a matcher if the list item contains a repeated matcher pattern like:
