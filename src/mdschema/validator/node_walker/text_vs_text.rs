@@ -8,9 +8,8 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars},
     node_walker::{ValidationResult, node_vs_node::validate_node_vs_node},
     ts_utils::{
-        compare_node_children_lengths, compare_node_kinds, compare_text_contents, is_last_node,
-        is_textual_node, waiting_at_end,
-    },
+        is_last_node, is_textual_node, waiting_at_end
+    }, utils::{compare_node_children_lengths, compare_node_kinds, compare_text_contents},
 };
 
 /// Validate a textual region of input against a textual region of schema.
@@ -622,7 +621,7 @@ mod tests {
         got_eof: bool,
     ) -> ValidationResult {
         use super::try_from_code_and_text_node;
-        
+
         match extract_matcher_nodes(&schema_cursor) {
             Some((prefix_node, matcher_node, suffix_node)) => {
                 let matcher = try_from_code_and_text_node(matcher_node, suffix_node, schema_str)
@@ -1006,7 +1005,7 @@ mod tests {
         // Test successful matcher creation from nodes
         use crate::mdschema::validator::ts_utils::new_markdown_parser;
         use super::try_from_code_and_text_node;
-        
+
         let schema_str = "`word:/\\w+/` suffix";
         let mut parser = new_markdown_parser();
         let tree = parser.parse(schema_str, None).unwrap();

@@ -785,7 +785,7 @@ Version: `ver:/[\d]+/`
     }
 
     #[test]
-    fn test_complex_document_with_wrong_list_shape() {
+    fn test_literal_list_in_complex_document() {
         let schema = r#"# Document Title
 
 This is a paragraph with some content.

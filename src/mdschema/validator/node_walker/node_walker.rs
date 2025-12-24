@@ -91,7 +91,7 @@ mod tests {
     fn test_nested_repeater_list() {
         let schema = r#"
 - `item1:/\w+/`{1,1}
-    - `item2:/\w+/`{1,1}
+    - `item2:/\w+/`{2,2}
 "#;
         let input = r#"
 - apple
