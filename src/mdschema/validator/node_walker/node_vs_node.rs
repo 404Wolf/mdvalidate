@@ -5,16 +5,18 @@ use tree_sitter::{Node, TreeCursor};
 use crate::mdschema::validator::{
     errors::{ChildrenCount, SchemaViolationError, ValidationError},
     node_walker::{
-        ValidationResult, list_vs_list::validate_list_vs_list, text_vs_text::validate_text_vs_text,
+        ValidationResult, code_vs_code::validate_code_vs_code, list_vs_list::validate_list_vs_list,
+        text_vs_text::validate_text_vs_text,
     },
-    ts_utils::{is_list_node, is_textual_container, is_textual_node},
+    ts_utils::{is_codeblock, is_list_node, is_textual_container, is_textual_node},
 };
 
 /// Validate two arbitrary nodes against each other.
 ///
 /// 1) If both nodes are textual nodes (schema is text, input is text), validate using `textual_vs_textual`.
-/// 2) If both nodes are list nodes, validate using `matcher_vs_list`.
-/// 3) If both nodes are heading nodes or document nodes, for each child of each, validate recursively using `validate_node_vs_node`.
+/// 2) If both nodes are codeblock nodes, validate using `codeblock_vs_codeblock`.
+/// 3) If both nodes are list nodes, validate using `matcher_vs_list`.
+/// 4) If both nodes are heading nodes or document nodes, for each child of each, validate recursively using `validate_node_vs_node`.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "trace", fields(
     input = %input_cursor.node().kind(),
     schema = %schema_cursor.node().kind()
@@ -51,7 +53,20 @@ pub fn validate_node_vs_node(
         );
     }
 
-    // 2) Both are textual containers - check for matcher usage
+    // 2) Both are container nodes - use container_vs_container directly
+    if both_are_codeblocks(&input_node, &schema_node) {
+        trace!("Both are container nodes, validating container vs container");
+
+        return validate_code_vs_code(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            got_eof,
+        );
+    }
+
+    // 3) Both are textual containers - check for matcher usage
     if both_are_textual_containers(&input_node, &schema_node) {
         trace!("Both are textual containers, validating text vs text");
 
@@ -64,7 +79,7 @@ pub fn validate_node_vs_node(
         );
     }
 
-    // 3) Both are list nodes
+    // 4) Both are list nodes
     if both_are_list_nodes(&input_node, &schema_node) {
         trace!("Both are list nodes, validating list vs list");
 
@@ -77,7 +92,7 @@ pub fn validate_node_vs_node(
         );
     }
 
-    // 4) Both are heading nodes or document nodes
+    // 5) Both are heading nodes or document nodes
     //
     // Crawl down one layer to get to the actual children
     if both_are_matching_top_level_nodes(&input_node, &schema_node)
@@ -197,6 +212,11 @@ fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) -> b
         "atx_heading" => true,
         _ => false,
     }
+}
+
+/// Check if both nodes are codeblocks.
+fn both_are_codeblocks(input_node: &Node, schema_node: &Node) -> bool {
+    is_codeblock(&input_node) && is_codeblock(&schema_node)
 }
 
 #[cfg(test)]
@@ -394,5 +414,27 @@ mod tests {
             }
             None => panic!("Expected error"),
         }
+    }
+
+    #[test]
+    fn test_with_heading_and_codeblock() {
+        let schema_str = "## Heading\n```\nCode\n```";
+        let input_str = "## Heading\n```\nCode\n```";
+
+        let schema = parse_markdown(schema_str).unwrap();
+        let input = parse_markdown(input_str).unwrap();
+
+        let schema_cursor = schema.walk();
+        let input_cursor = input.walk();
+
+        let result =
+            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
+        assert_eq!(result.value, json!({}));
     }
 }

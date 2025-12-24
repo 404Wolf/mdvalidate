@@ -47,18 +47,22 @@ mod tests {
 
     #[test]
     fn test_heading_and_list() {
-        let schema = "# Title\n\n- `item:/\\w+/`\n";
-        let input = "# Title\n\n- hello\n";
+        let schema = r#"
+# Title
+
+- `item:/\w+/`
+"#;
+
+        let input = r#"
+# Title
+
+- hello
+"#;
 
         let (matches, errors) = validate_str(schema, input);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
-        assert_eq!(
-            matches,
-            json!({
-                "item": ["hello"]
-            }),
-        );
+        assert_eq!(matches, json!({ "item": "hello" }));
     }
 
     #[test]

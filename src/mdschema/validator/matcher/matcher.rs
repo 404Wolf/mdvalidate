@@ -284,47 +284,9 @@ impl Matcher {
         Self::new(id, HashSet::new(), pattern, extras, original_str_len)
     }
 
-    /// Creates a new matcher from a tree-sitter cursor pointing at code node in
-    /// the Markdown schema's tree.
-    ///
-    /// This will attempt to grab the current node the cursor is pointing at,
-    /// which must be a code node, and the following one, which will be counted
-    /// as extras if it is a text node.
-    pub fn try_from_cursor(cursor: &TreeCursor, schema_str: &str) -> Result<Matcher, MatcherError> {
-        let (node, next_node) = get_node_and_next_node(cursor).ok_or_else(|| {
-            MatcherError::InvariantViolation(
-                "Cursor has no current node to extract matcher from".to_string(),
-            )
-        })?;
 
-        if node.kind() != "code_span" {
-            return Err(MatcherError::InvariantViolation(
-                "Cursor is not pointing at a code_span node".to_string(),
-            ));
-        }
 
-        Self::try_from_nodes(node, next_node, schema_str)
-    }
 
-    /// Create a new Matcher from two tree-sitter nodes and a schema string.
-    ///
-    /// - The first node should be a code_span node containing the matcher pattern.
-    /// - The second node (optional) should be a text node containing extras.
-    pub fn try_from_nodes(
-        matcher_node: tree_sitter::Node,
-        suffix_node: Option<tree_sitter::Node>,
-        schema_str: &str,
-    ) -> Result<Matcher, MatcherError> {
-        let matcher_text = matcher_node.utf8_text(schema_str.as_bytes()).map_err(|_| {
-            MatcherError::MatcherInteriorRegexInvalid("Invalid UTF-8 in matcher node".to_string())
-        })?;
-
-        let suffix_text = suffix_node
-            .map(|node| node.utf8_text(schema_str.as_bytes()).ok())
-            .flatten();
-
-        Self::try_from_pattern_and_suffix_str(matcher_text, suffix_text)
-    }
 
     /// Create a new Matcher given the text in a matcher codeblock and the text node's contents
     /// immediately proceeding the matcher.
@@ -545,88 +507,12 @@ mod tests {
         assert_eq!(matcher.match_str("!@#$"), None);
     }
 
-    #[test]
-    fn test_try_from_nodes() {
-        // Test successful matcher creation from nodes
-        let schema_str = "`word:/\\w+/` suffix";
-        let mut parser = new_markdown_parser();
-        let tree = parser.parse(schema_str, None).unwrap();
-        let root = tree.root_node();
-        let paragraph = root.child(0).unwrap();
 
-        let mut cursor = paragraph.walk();
-        cursor.goto_first_child(); // go to first child (text or code_span)
 
-        // Find the code_span node
-        let mut matcher_node = None;
-        let mut suffix_node = None;
 
-        for child in paragraph.children(&mut cursor) {
-            if child.kind() == "code_span" {
-                matcher_node = Some(child);
-            } else if child.kind() == "text" && matcher_node.is_some() {
-                suffix_node = Some(child);
-            }
-        }
-
-        let matcher_node = matcher_node.expect("Should find code_span node");
-        let matcher = Matcher::try_from_nodes(matcher_node, suffix_node, schema_str).unwrap();
-
-        assert_eq!(matcher.id(), Some("word"));
-        assert_eq!(matcher.match_str("hello"), Some("hello"));
-        assert_eq!(matcher.match_str("123"), Some("123"));
-        assert_eq!(matcher.match_str("!@#"), None);
-    }
-
-    #[test]
-    fn test_try_from_cursor() {
-        // Test successful matcher creation from cursor
-        let schema_str = "`word:/\\w+/`{,} suffix";
-        let mut parser = new_markdown_parser();
-        let tree = parser.parse(schema_str, None).unwrap();
-        let root = tree.root_node();
-        let paragraph = root.child(0).unwrap();
-
-        let mut cursor = paragraph.walk();
-        cursor.goto_first_child(); // go to first child (text or code_span)
-
-        // Move cursor to the code_span node
-        while cursor.node().kind() != "code_span" {
-            if !cursor.goto_next_sibling() {
-                panic!("No code_span node found");
-            }
-        }
-
-        let matcher = Matcher::try_from_cursor(&cursor, schema_str).unwrap();
-
-        assert_eq!(matcher.id(), Some("word"));
-        assert_eq!(matcher.match_str("hello"), Some("hello"));
-        assert_eq!(matcher.match_str("123"), Some("123"));
-        assert_eq!(matcher.match_str("!@#"), None);
-        assert!(matcher.is_repeated());
-    }
 
     #[test]
     fn test_matcher_invalid_pattern() {
-        // Test error handling for invalid regex using try_from_nodes
-        let schema_str = "`invalid:[regex/` some text comes after"; // Invalid regex
-        let mut parser = new_markdown_parser();
-        let tree = parser.parse(schema_str, None).unwrap();
-        let root = tree.root_node();
-        let paragraph = root.child(0).unwrap();
-
-        let matcher_node = paragraph.child(0).unwrap(); // Should be the code_span
-
-        let result = Matcher::try_from_nodes(matcher_node, None, schema_str);
-        assert!(result.is_err());
-
-        match result.unwrap_err() {
-            MatcherError::MatcherInteriorRegexInvalid(_) => {
-                // Expected error type
-            }
-            _ => panic!("Expected MatcherRegexInvalid error"),
-        }
-
         // Test error handling for invalid pattern using try_from_pattern_and_suffix_str
         let result = Matcher::try_from_pattern_and_suffix_str("`invalid_pattern`", None);
         assert!(result.is_err());

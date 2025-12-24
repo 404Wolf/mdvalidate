@@ -53,7 +53,7 @@ pub fn validate_text_vs_text(
     match extract_matcher_nodes(&schema_cursor) {
         Some((prefix_node, matcher_node, suffix_node)) => {
             // Try to create a matcher from the nodes
-            match Matcher::try_from_nodes(matcher_node, suffix_node, schema_str) {
+            match try_from_code_and_text_node(matcher_node, suffix_node, schema_str) {
                 // We got a matcher!
                 Ok(matcher) => validate_matcher_vs_text(
                     &input_cursor,
@@ -295,6 +295,26 @@ fn validate_textual_container_children(
     }
 
     result
+}
+
+/// Create a new Matcher from two tree-sitter nodes and a schema string.
+///
+/// - The first node should be a code_span node containing the matcher pattern.
+/// - The second node (optional) should be a text node containing extras.
+fn try_from_code_and_text_node(
+    matcher_node: tree_sitter::Node,
+    suffix_node: Option<tree_sitter::Node>,
+    schema_str: &str,
+) -> Result<Matcher, MatcherError> {
+    let matcher_text = matcher_node.utf8_text(schema_str.as_bytes()).map_err(|_| {
+        MatcherError::MatcherInteriorRegexInvalid("Invalid UTF-8 in matcher node".to_string())
+    })?;
+
+    let suffix_text = suffix_node
+        .map(|node| node.utf8_text(schema_str.as_bytes()).ok())
+        .flatten();
+
+    Matcher::try_from_pattern_and_suffix_str(matcher_text, suffix_text)
 }
 
 /// Validate a sequence of nodes that includes a matcher node against a text
@@ -607,7 +627,7 @@ mod tests {
 
     use crate::mdschema::validator::{
         errors::*,
-        matcher::matcher::{Matcher, MatcherError},
+        matcher::matcher::MatcherError,
         node_walker::{
             ValidationResult,
             text_vs_text::{extract_matcher_nodes, validate_text_vs_text},
@@ -622,9 +642,11 @@ mod tests {
         input_str: &str,
         got_eof: bool,
     ) -> ValidationResult {
+        use super::try_from_code_and_text_node;
+        
         match extract_matcher_nodes(&schema_cursor) {
             Some((prefix_node, matcher_node, suffix_node)) => {
-                let matcher = Matcher::try_from_nodes(matcher_node, suffix_node, schema_str)
+                let matcher = try_from_code_and_text_node(matcher_node, suffix_node, schema_str)
                     .expect("test utility expects valid matcher");
                 validate_matcher_vs_text_original(
                     input_cursor,
@@ -998,6 +1020,42 @@ mod tests {
 
         let result = extract_matcher_nodes(&schema_cursor);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_try_from_code_and_text_node() {
+        // Test successful matcher creation from nodes
+        use crate::mdschema::validator::ts_utils::new_markdown_parser;
+        use super::try_from_code_and_text_node;
+        
+        let schema_str = "`word:/\\w+/` suffix";
+        let mut parser = new_markdown_parser();
+        let tree = parser.parse(schema_str, None).unwrap();
+        let root = tree.root_node();
+        let paragraph = root.child(0).unwrap();
+
+        let mut cursor = paragraph.walk();
+        cursor.goto_first_child(); // go to first child (text or code_span)
+
+        // Find the code_span node
+        let mut matcher_node = None;
+        let mut suffix_node = None;
+
+        for child in paragraph.children(&mut cursor) {
+            if child.kind() == "code_span" {
+                matcher_node = Some(child);
+            } else if child.kind() == "text" && matcher_node.is_some() {
+                suffix_node = Some(child);
+            }
+        }
+
+        let matcher_node = matcher_node.expect("Should find code_span node");
+        let matcher = try_from_code_and_text_node(matcher_node, suffix_node, schema_str).unwrap();
+
+        assert_eq!(matcher.id(), Some("word"));
+        assert_eq!(matcher.match_str("hello"), Some("hello"));
+        assert_eq!(matcher.match_str("123"), Some("123"));
+        assert_eq!(matcher.match_str("!@#"), None);
     }
 
     #[test]
