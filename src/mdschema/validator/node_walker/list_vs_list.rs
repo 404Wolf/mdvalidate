@@ -11,7 +11,7 @@ use crate::mdschema::validator::{
         count_siblings, get_node_and_next_node, has_single_code_child, has_subsequent_node_of_kind,
         is_list_node, walk_to_list_item_content,
     },
-    utils::{compare_node_children_lengths, compare_node_kinds},
+    utils::compare_node_kinds,
 };
 
 /// Validate a list node against a schema list node.
