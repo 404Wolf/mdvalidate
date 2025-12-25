@@ -76,10 +76,22 @@ pub fn validate_text_vs_text(
                     trace!(
                         "Matcher parsing returned WasLiteralCode, treating as literal code span"
                     );
+                    // The shape is either:
+                    //
+                    // (paragraph)
+                    // ├── (text)
+                    // ├── (code_span)
+                    // │   └── (text)
+                    // └── (text)
+                    //
+                    // or
+                    //
                     // (paragraph)
                     // ├── (code_span)
                     // │   └── (text)
                     // └── (text)
+                    //
+                    // Depending on whether we have a suffix.
                     //
                     // If it's a regex error, treat it as regular textual content.
                     // So it's just another textual node, and we compare it
@@ -92,20 +104,27 @@ pub fn validate_text_vs_text(
                     input_cursor.goto_first_child();
                     schema_cursor.goto_first_child();
 
+                    if input_cursor.node().kind() == "text" && schema_cursor.node().kind() == "text"
+                    {
+                        let intermediate_result = validate_textual_nodes(
+                            &input_cursor,
+                            &schema_cursor,
+                            schema_str,
+                            input_str,
+                            got_eof,
+                            false,
+                        );
+                        result.join_other_result(&intermediate_result);
+
+                        input_cursor.goto_next_sibling();
+                        schema_cursor.goto_next_sibling();
+                    }
+
                     debug_assert_eq!(input_cursor.node().kind(), "code_span");
                     debug_assert_eq!(schema_cursor.node().kind(), "code_span");
 
                     // Validate the code span's text
                     {
-                        let mut input_cursor = schema_cursor.clone();
-                        let mut schema_cursor = schema_cursor.clone();
-
-                        input_cursor.goto_first_child();
-                        schema_cursor.goto_first_child();
-
-                        debug_assert_eq!(input_cursor.node().kind(), "text");
-                        debug_assert_eq!(schema_cursor.node().kind(), "text");
-
                         let intermediate_result = validate_textual_nodes(
                             &input_cursor,
                             &schema_cursor,
@@ -121,17 +140,18 @@ pub fn validate_text_vs_text(
                     input_cursor.goto_next_sibling();
                     schema_cursor.goto_next_sibling();
 
-                    debug_assert_eq!(input_cursor.node().kind(), "text");
-                    debug_assert_eq!(schema_cursor.node().kind(), "text");
-
-                    validate_textual_nodes(
+                    let intermediate_result = validate_textual_nodes(
                         &input_cursor,
                         &schema_cursor,
                         schema_str,
                         input_str,
                         got_eof,
                         true,
-                    )
+                    );
+
+                    result.join_other_result(&intermediate_result);
+
+                    result
                 }
                 // We got a matcher that's definitely a matcher, and is wrong
                 Err(error @ MatcherError::MatcherInteriorRegexInvalid(_)) => {
