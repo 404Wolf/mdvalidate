@@ -308,10 +308,23 @@ mod tests {
 
     #[test]
     fn test_when_different_node_counts_and_got_eof_reports_error() {
-        let schema = "# Test\n\nfooobar\n\ntest\n";
-        let input = "# Test\n\nfooobar\n";
+        let schema = r#"
+# Test
+
+fooobar
+
+test
+"#;
+
+        let input = r#"
+# Test
+
+fooobar
+"#;
 
         let (errors, _) = do_validate(schema, input, true);
+        assert_eq!(errors.len(), 1);
+
         match &errors[0] {
             ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
                 schema_index,
@@ -319,9 +332,9 @@ mod tests {
                 expected,
                 actual,
             }) => {
-                assert_eq!(*expected, ChildrenCount::from_specific(2));
-                assert_eq!(*actual, 3);
-                assert_eq!(*schema_index, 9); // TODO: is this right?
+                assert_eq!(*expected, ChildrenCount::from_specific(3));
+                assert_eq!(*actual, 2);
+                assert_eq!(*schema_index, 0);
             }
             _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),
         }
@@ -333,6 +346,8 @@ mod tests {
         let input = "- Item 1\n- Item X\n";
 
         let (errors, _) = do_validate(schema, input, true);
+        assert_eq!(errors.len(), 1);
+
         match &errors[0] {
             ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
                 ..
@@ -434,11 +449,16 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
 
     #[test]
     fn test_matcher_with_prefix_and_suffix_and_number_with_prefix() {
-        let schema = r"Hello `name:/\w+/` there!
+        let schema = r"
+Hello `name:/\w+/` there!
 
 Version: `ver:/[\d]+/`
 ";
-        let input = "Hello Wolf there!\n\nVersion: 1\n";
+        let input = r#"
+Hello Wolf there!
+
+Version: 1
+"#;
 
         let (errors, matches) = do_validate(schema, input, true);
         assert!(
@@ -618,8 +638,8 @@ Version: `ver:/[\d]+/`
     }
 
     #[test]
-    fn test_paragraph_with_inline_code() {
-        let schema = "This is a `code` example.\n";
+    fn test_paragraph_with_literal_inline_code() {
+        let schema = "This is a `code`! example.\n";
         let input = "This is a `code` example.\n";
 
         let (errors, _) = do_validate(schema, input, true);
@@ -631,7 +651,7 @@ Version: `ver:/[\d]+/`
     }
     #[test]
     fn test_only_whitespace() {
-        let schema = "\n\n\n";
+        let schema = "\n\n";
         let input = "\n\n\n";
 
         let (errors, _) = do_validate(schema, input, true);
@@ -668,22 +688,32 @@ Version: `ver:/[\d]+/`
 
     #[test]
     fn test_incremental_reading_multiple_steps() {
-        let schema = "# Title\n\nParagraph text\n";
+        let schema = r#"
+# Title
+
+Paragraph text
+"#;
 
         let mut validator =
             Validator::new(schema, "# ", false).expect("Failed to create validator");
         validator.validate();
-        assert!(validator.errors_so_far().count() == 0);
+        assert!(
+            validator.errors_so_far().count() == 0,
+            "Expected no errors but found {:?}",
+            validator.errors_so_far()
+        );
 
-        validator
-            .read_input("# Title\n", false)
-            .expect("Failed to read");
+        validator.read_input("# Title\n", false).unwrap();
         validator.validate();
-        assert!(validator.errors_so_far().count() == 0);
+        assert!(
+            validator.errors_so_far().count() == 0,
+            "Expected no errors but found {:?}",
+            validator.errors_so_far()
+        );
 
         validator
             .read_input("# Title\n\nParagraph text\n", true)
-            .expect("Failed to read");
+            .unwrap();
         validator.validate();
         let errors: Vec<_> = validator.errors_so_far().collect();
         assert!(

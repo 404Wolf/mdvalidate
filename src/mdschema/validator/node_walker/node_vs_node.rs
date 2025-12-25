@@ -9,6 +9,7 @@ use crate::mdschema::validator::{
         text_vs_text::validate_text_vs_text,
     },
     ts_utils::{is_codeblock, is_list_node, is_textual_container, is_textual_node},
+    utils::compare_node_children_lengths,
 };
 
 /// Validate two arbitrary nodes against each other.
@@ -91,10 +92,20 @@ pub fn validate_node_vs_node(
     //
     // Crawl down one layer to get to the actual children
     if both_are_matching_top_level_nodes(&input_node, &schema_node)
-        && input_cursor.goto_first_child()
-        && schema_cursor.goto_first_child()
+        && input_cursor.clone().goto_first_child() // don't actually do the walking down just yet
+        && schema_cursor.clone().goto_first_child()
     {
         trace!("Both are heading nodes or document nodes, validating heading vs heading");
+
+        // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
+        if let Some(error) = compare_node_children_lengths(&schema_cursor, &input_cursor, got_eof) {
+            result.add_error(error);
+            return result;
+        }
+
+        // Now actually go down to the children
+        input_cursor.goto_first_child();
+        schema_cursor.goto_first_child();
 
         let new_result = validate_node_vs_node(
             &input_cursor,
@@ -154,6 +165,10 @@ pub fn validate_node_vs_node(
             input_node.to_sexp(),
             schema_node.to_sexp()
         );
+
+        if !got_eof {
+            return result;
+        };
 
         let schema_child_count = schema_cursor.node().child_count();
         let input_child_count = input_cursor.node().child_count();

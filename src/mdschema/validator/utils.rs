@@ -1,13 +1,14 @@
 #[cfg(test)]
 use crate::mdschema::validator::ts_utils::new_markdown_parser;
-use tree_sitter::{Node, TreeCursor};
 use serde_json::Value;
 #[cfg(test)]
 use tree_sitter::Tree;
+use tree_sitter::{Node, TreeCursor};
 
-use crate::mdschema::validator::{errors::{
-    NodeContentMismatchKind, SchemaViolationError, ValidationError,
-}, ts_utils::{extract_list_marker, is_ordered_list_marker, is_unordered_list_marker}};
+use crate::mdschema::validator::{
+    errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
+    ts_utils::{extract_list_marker, is_ordered_list_marker, is_unordered_list_marker},
+};
 
 /// Join two values together in-place.
 pub fn join_values(a: &mut Value, b: Value) {
@@ -126,6 +127,7 @@ pub fn compare_node_children_lengths(
             expected: ChildrenCount::from_specific(schema_child_count),
             actual: input_child_count,
         });
+
     if got_eof {
         // At EOF, children count must match exactly
         if input_child_count != schema_child_count {
@@ -151,6 +153,9 @@ pub fn compare_node_children_lengths(
 /// * `schema_cursor` - The schema cursor, pointed at any node that has text contents
 /// * `input_cursor` - The input cursor, pointed at any node that has text contents
 /// * `is_partial_match` - Whether the match is partial
+/// * `strip_extras` - Whether to strip matcher extras from the start of the
+///   input string. For example, if the input string is "{1,2}! test", when
+///   comparing, strip away until after the first space, only comparing "test".
 ///
 /// # Returns
 /// An optional validation error if the text contents don't match
@@ -162,14 +167,24 @@ pub fn compare_text_contents(
     schema_cursor: &TreeCursor,
     input_cursor: &TreeCursor,
     is_partial_match: bool,
+    strip_extras: bool,
 ) -> Option<ValidationError> {
-    let (mut schema_text, input_text) = match (
+    let (schema_text, input_text) = match (
         schema_node.utf8_text(schema_str.as_bytes()),
         input_node.utf8_text(input_str.as_bytes()),
     ) {
         (Ok(schema), Ok(input)) => (schema, input),
         (Err(_), _) | (_, Err(_)) => return None, // Can't compare invalid UTF-8
     };
+    let schema_text = if strip_extras {
+        schema_text
+            .split_once(" ")
+            .map(|(_extras, rest)| format!(" {}", rest))
+            .unwrap_or(schema_text.to_string())
+    } else {
+        schema_text.to_string()
+    };
+    let mut schema_text = schema_text.as_str();
 
     // If we're doing a partial match (not at EOF), adjust schema text length
     if is_partial_match {
@@ -235,6 +250,37 @@ mod tests {
     use crate::mdschema::validator::ts_utils::{extract_codeblock_contents, parse_markdown};
 
     use super::*;
+
+    #[test]
+    fn test_compare_text_contents() {
+        let schema_str = "test";
+        let schema_tree = parse_markdown_and_get_tree(schema_str);
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child();
+        let schema_node = schema_cursor.node();
+
+        let input_str = "! test";
+        let input_tree = parse_markdown_and_get_tree(input_str);
+        let mut input_cursor = input_tree.walk();
+        input_cursor.goto_first_child();
+        let input_node = input_cursor.node();
+
+        let is_partial_match = false;
+        let strip_extras = true; // should shave off the !
+
+        let result = compare_text_contents(
+            &schema_node,
+            &input_node,
+            schema_str,
+            input_str,
+            &schema_cursor,
+            &input_cursor,
+            is_partial_match,
+            strip_extras,
+        );
+
+        assert!(result.is_none(), "Expected None, got {:?}", result);
+    }
 
     #[test]
     fn test_extract_codeblock_contents() {
