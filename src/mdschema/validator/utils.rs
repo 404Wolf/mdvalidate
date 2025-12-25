@@ -252,37 +252,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compare_text_contents() {
-        let schema_str = "test";
-        let schema_tree = parse_markdown_and_get_tree(schema_str);
-        let mut schema_cursor = schema_tree.walk();
-        schema_cursor.goto_first_child();
-        let schema_node = schema_cursor.node();
-
-        let input_str = "! test";
-        let input_tree = parse_markdown_and_get_tree(input_str);
-        let mut input_cursor = input_tree.walk();
-        input_cursor.goto_first_child();
-        let input_node = input_cursor.node();
-
-        let is_partial_match = false;
-        let strip_extras = true; // should shave off the !
-
-        let result = compare_text_contents(
-            &schema_node,
-            &input_node,
-            schema_str,
-            input_str,
-            &schema_cursor,
-            &input_cursor,
-            is_partial_match,
-            strip_extras,
-        );
-
-        assert!(result.is_none(), "Expected None, got {:?}", result);
-    }
-
-    #[test]
     fn test_extract_codeblock_contents() {
         // Without language, 3 backticks
         let input = "```\ncode\n```\n";

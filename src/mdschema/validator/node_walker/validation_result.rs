@@ -47,7 +47,10 @@ impl ValidationResult {
         self.errors.push(error);
     }
 
-
+    /// Whether there are any errors in the `ValidationResult`.
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
 
     /// Add a match under an `id`.
     #[allow(dead_code)]

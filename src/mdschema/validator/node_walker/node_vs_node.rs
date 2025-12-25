@@ -116,9 +116,6 @@ pub fn validate_node_vs_node(
         );
         result.join_other_result(&new_result);
 
-        result.schema_descendant_index = new_result.schema_descendant_index;
-        result.input_descendant_index = new_result.input_descendant_index;
-
         loop {
             // TODO: handle case where one has more children than the other
             let input_had_sibling = input_cursor.goto_next_sibling();
@@ -142,19 +139,7 @@ pub fn validate_node_vs_node(
                     got_eof,
                 );
 
-                result.errors.extend(new_result.errors);
-                // This is a merge for the JSON values.
-                if let Some(new_obj) = new_result.value.as_object() {
-                    if let Some(current_obj) = result.value.as_object_mut() {
-                        for (key, value) in new_obj {
-                            current_obj.insert(key.clone(), value.clone());
-                        }
-                    } else {
-                        result.value = new_result.value;
-                    }
-                }
-                result.schema_descendant_index = new_result.schema_descendant_index;
-                result.input_descendant_index = new_result.input_descendant_index;
+                result.join_other_result(&new_result);
             } else {
                 break;
             }
@@ -167,6 +152,9 @@ pub fn validate_node_vs_node(
         );
 
         if !got_eof {
+            result.schema_descendant_index = schema_cursor.descendant_index();
+            result.input_descendant_index = input_cursor.descendant_index();
+
             return result;
         };
 

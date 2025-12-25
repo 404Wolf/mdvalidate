@@ -7,7 +7,7 @@ use crate::mdschema::validator::{
     errors::*,
     matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars},
     node_walker::{ValidationResult, node_vs_node::validate_node_vs_node},
-    ts_utils::{is_last_node, is_textual_node, waiting_at_end},
+    ts_utils::{get_node_and_next_node, is_last_node, is_textual_node, waiting_at_end},
     utils::{compare_node_children_lengths, compare_node_kinds, compare_text_contents},
 };
 
@@ -53,6 +53,18 @@ pub fn validate_text_vs_text(
     // Check if both nodes are textual nodes
     let input_node = input_cursor.node();
     let schema_node = schema_cursor.node();
+
+    let matcher_count = matcher_count_in_children(&schema_cursor, schema_str);
+    if matcher_count > 1 {
+        result.add_error(ValidationError::SchemaError(
+            SchemaError::MultipleMatchersInNodeChildren {
+                schema_index: schema_cursor.descendant_index(),
+                input_index: input_cursor.descendant_index(),
+                received: matcher_count,
+            },
+        ));
+        return result;
+    }
 
     match extract_matcher_nodes(&schema_cursor) {
         Some((prefix_node, matcher_node, suffix_node)) => {
@@ -114,7 +126,12 @@ pub fn validate_text_vs_text(
                             got_eof,
                             false,
                         );
+
                         result.join_other_result(&intermediate_result);
+
+                        if intermediate_result.has_errors() {
+                            return result;
+                        }
 
                         input_cursor.goto_next_sibling();
                         schema_cursor.goto_next_sibling();
@@ -133,7 +150,12 @@ pub fn validate_text_vs_text(
                             got_eof,
                             false,
                         );
+
                         result.join_other_result(&intermediate_result);
+
+                        if intermediate_result.has_errors() {
+                            return result;
+                        }
                     }
 
                     // Now move to the text after the code span, and validate the rest
@@ -150,6 +172,18 @@ pub fn validate_text_vs_text(
                     );
 
                     result.join_other_result(&intermediate_result);
+
+                    if intermediate_result.has_errors() {
+                        return result;
+                    }
+
+                    // Move to the next node along
+                    input_cursor.goto_next_sibling();
+                    schema_cursor.goto_next_sibling();
+
+                    // Move along!
+                    result.input_descendant_index = input_cursor.descendant_index();
+                    result.schema_descendant_index = schema_cursor.descendant_index();
 
                     result
                 }
@@ -249,6 +283,47 @@ pub fn validate_text_vs_text(
             result
         }
     }
+}
+
+/// Check if there are too many matchers in the schema.
+///
+/// # Arguments
+/// * `cursor` - The cursor pointing to a textual node container, like a paragraph.
+///
+/// Returns the number of matchers if there are more than one, otherwise None.
+fn matcher_count_in_children(schema_cursor: &TreeCursor, schema_str: &str) -> usize {
+    let mut schema_cursor = schema_cursor.clone();
+    schema_cursor.goto_first_child();
+
+    let mut matcher_count = 0;
+
+    loop {
+        let schema_cursor_kind = schema_cursor.node().kind();
+        if schema_cursor_kind != "code_span" {
+            if !schema_cursor.goto_next_sibling() {
+                break;
+            }
+            continue;
+        }
+
+        let Some((matcher_node, suffix_node)) = get_node_and_next_node(&schema_cursor) else {
+            if !schema_cursor.goto_next_sibling() {
+                break;
+            }
+            continue;
+        };
+
+        let matcher = try_from_code_and_text_node(matcher_node, suffix_node, schema_str);
+        if matcher.is_ok() {
+            matcher_count += 1;
+        }
+
+        if !schema_cursor.goto_next_sibling() {
+            break;
+        }
+    }
+
+    matcher_count
 }
 
 /// Actually perform textual node comparison. Used by `validate_text_vs_text` to
@@ -593,6 +668,29 @@ pub fn validate_matcher_vs_text<'a>(
         }
     }
 
+    // Don't validate after the prefix if there isn't enough content
+    if input_byte_offset >= input_str.len() {
+        if got_eof {
+            let schema_prefix_str = schema_prefix_node
+                .map(|node| &schema_str[node.byte_range()])
+                .unwrap_or("");
+
+            let best_prefix_input_we_can_do = &input_str[input_cursor.node().byte_range().start..];
+
+            result.add_error(ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    schema_index: schema_cursor_at_prefix.descendant_index(),
+                    input_index: input_node_descendant_index,
+                    expected: schema_prefix_str.into(),
+                    actual: best_prefix_input_we_can_do.into(),
+                    kind: NodeContentMismatchKind::Prefix,
+                },
+            ));
+        }
+
+        return result;
+    }
+
     // All input that comes after the expected prefix
     let input_after_prefix =
         input_str[input_byte_offset..input_cursor.node().byte_range().end].to_string();
@@ -786,10 +884,11 @@ mod tests {
         matcher::matcher::MatcherError,
         node_walker::{
             ValidationResult,
-            text_vs_text::{extract_matcher_nodes, validate_text_vs_text},
+            text_vs_text::{
+                extract_matcher_nodes, matcher_count_in_children, validate_text_vs_text,
+            },
         },
         ts_utils::parse_markdown,
-        utils::test_logging,
     };
 
     fn validate_matcher_vs_text<'a>(
@@ -818,6 +917,21 @@ mod tests {
                 "this test utility is designed only for matchers and blows up for non matcher groups"
             ),
         }
+    }
+
+    #[test]
+    fn test_sibling_matchers_count() {
+        let schema_str = "Some *Literal* **Other**";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+
+        let mut schema_cursor = schema_tree.walk();
+        let mut input_cursor = schema_tree.walk();
+
+        schema_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // document -> paragraph
+
+        let result = matcher_count_in_children(&schema_cursor, schema_str);
+        assert_eq!(result, 0);
     }
 
     #[test]
@@ -1284,7 +1398,6 @@ mod tests {
 
     #[test]
     fn test_validate_text_vs_text_with_literal_simple() {
-        test_logging();
         let schema_str = "`hi there`! test";
         let schema_tree = parse_markdown(schema_str).unwrap();
 
@@ -1311,14 +1424,14 @@ mod tests {
     #[test]
     fn test_validate_text_vs_text_with_literal_multi_line() {
         let schema_str = r#"
-`hi there`! test
+`hi there`! test *test*
 
 # Test
 "#;
         let schema_tree = parse_markdown(schema_str).unwrap();
 
         let input_str = r#"
-`hi there` test
+`hi there` test *test*
 
 # Test"#;
         let input_tree = parse_markdown(input_str).unwrap();
@@ -1339,6 +1452,7 @@ mod tests {
 
         let (new_input_node_descendant_index, new_schema_node_descendant_index) =
             result.descendant_index_pair();
+        // TODO: ensure these indexes are correct
         assert_eq!(
             new_input_node_descendant_index,
             // document -> paragraph -> code_span -> text -> heading
@@ -1347,7 +1461,7 @@ mod tests {
         assert_eq!(
             new_schema_node_descendant_index,
             // document -> paragraph -> text -> heading
-            4
+            5
         );
         assert!(
             result.errors.is_empty(),
@@ -1697,6 +1811,41 @@ mod tests {
                 assert_eq!(*kind, NodeContentMismatchKind::Matcher);
             }
             e => panic!("Expected a NodeContentMismatch error! Got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_validate_text_vs_text_multiple_matchers() {
+        // The schema becomes a paragraph with multiple code nodes
+        let schema_str = "`id:/test/` `id:/example/`";
+        let input_str = "test example";
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let input_tree = parse_markdown(input_str).unwrap();
+
+        let mut schema_cursor = schema_tree.walk();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // document -> paragraph
+
+        let result =
+            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert!(!result.errors.is_empty());
+        match result.errors.first().unwrap() {
+            ValidationError::SchemaError(SchemaError::MultipleMatchersInNodeChildren {
+                received,
+                input_index,
+                ..
+            }) => {
+                assert_eq!(*received, 2);
+                assert_eq!(*input_index, 1);
+            }
+            _ => panic!(
+                "Expected MultipleMatchersInNodeChildren error but got: {:?}",
+                result.errors.first().unwrap()
+            ),
         }
     }
 }
