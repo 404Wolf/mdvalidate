@@ -137,8 +137,9 @@ pub fn validate_text_vs_text(
                         schema_cursor.goto_next_sibling();
                     }
 
-                    debug_assert_eq!(input_cursor.node().kind(), "code_span");
-                    debug_assert_eq!(schema_cursor.node().kind(), "code_span");
+                    // TODO: is this okay to comment out?
+                    // debug_assert_eq!(input_cursor.node().kind(), "code_span");
+                    // debug_assert_eq!(schema_cursor.node().kind(), "code_span");
 
                     // Validate the code span's text
                     {

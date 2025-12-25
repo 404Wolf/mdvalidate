@@ -144,6 +144,8 @@ pub fn validate_node_vs_node(
                 break;
             }
         }
+
+        return result;
     } else {
         trace!(
             "Both input and schema node were top level, but they didn't both have children. Trees:\n{}\n{}",
@@ -175,11 +177,6 @@ pub fn validate_node_vs_node(
 
         return result;
     }
-
-    result.schema_descendant_index = schema_cursor.descendant_index();
-    result.input_descendant_index = input_cursor.descendant_index();
-
-    result
 }
 
 /// Check if both nodes are textual nodes.

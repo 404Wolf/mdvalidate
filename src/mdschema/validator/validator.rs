@@ -154,7 +154,7 @@ impl Validator {
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::{errors::{ChildrenCount, SchemaError, SchemaViolationError}, utils::test_logging};
+    use crate::mdschema::validator::{errors::{ChildrenCount, SchemaError, SchemaViolationError}};
 
     use super::*;
 
@@ -765,7 +765,7 @@ Paragraph text
 
     #[test]
     fn test_mixed_formatting() {
-        let schema = "This is **bold** and *italic* and `code`.\n";
+        let schema = "This is **bold** and *italic* and `code`! .\n";
         let input = "This is **bold** and *italic* and `code`.\n";
 
         let (errors, _) = do_validate(schema, input, true);
@@ -946,7 +946,6 @@ Footer: goodbye
 
     #[test]
     fn test_incremental_validation_preserves_work_when_appending() {
-        test_logging();
         // This test verifies that when we incrementally add content,
         // we don't re-validate already-validated nodes (which would be wasteful)
         let schema = r#"# Title
