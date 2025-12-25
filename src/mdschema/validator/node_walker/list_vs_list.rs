@@ -489,7 +489,7 @@ fn extract_repeated_matcher_from_list_item(
     }
 
     if list_item_cursor.node().kind() != "paragraph" {
-        warn!(
+        trace!(
             "List item does not contain a paragraph, got {}",
             list_item_cursor.node().kind()
         );
@@ -497,7 +497,7 @@ fn extract_repeated_matcher_from_list_item(
     }
 
     if !has_single_code_child(&list_item_cursor) {
-        warn!("List item does not contain a single code child");
+        trace!("List item does not contain a single code child");
         return None;
     }
     // list_item -> code_span (first item in list_item)
@@ -509,7 +509,7 @@ fn extract_repeated_matcher_from_list_item(
         Ok(_) => None,
         Err(e @ MatcherError::MatcherInteriorRegexInvalid(_)) => Some(Err(e)),
         Err(e) => {
-            warn!("Failed to extract repeated matcher from list item: {}", e);
+            trace!("Failed to extract repeated matcher from list item: {}", e);
             None
         }
     }
