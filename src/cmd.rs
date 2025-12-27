@@ -4,6 +4,7 @@ use crate::mdschema::validator::{
     },
     validator::Validator,
 };
+use crate::helpers::node_print::PrettyPrint;
 use colored::Colorize;
 use serde_json::Value;
 use std::io::{Read, Write};
@@ -127,7 +128,24 @@ pub fn process_stdio<R: Read, W: Write>(
     quiet: bool,
     debug_mode: bool,
 ) -> Result<((Vec<ValidationError>, Value), bool), ProcessingError> {
-    let ((errors, matches), validator, _input_str) = process(schema_str, input, fast_fail)?;
+    let ((errors, matches), validator, input_str) = process(schema_str, input, fast_fail)?;
+
+    if debug_mode {
+        eprintln!("\n{}", "=== Debug Information ===");
+
+        eprintln!("\n{}", "Schema String:");
+        eprintln!("```\n{}\n```", schema_str.dimmed());
+
+        eprintln!("\n{}", "Input String:");
+        eprintln!("```\n{}\n```", input_str.dimmed());
+
+        eprintln!("\n{}", "Schema S-Expression:");
+        eprintln!("{}", validator.schema_tree.root_node().pretty_print().dimmed());
+
+        eprintln!("\n{}", "Input S-Expression:");
+        eprintln!("{}", validator.input_tree.root_node().pretty_print().dimmed());
+        eprintln!();
+    }
 
     let mut errored = false;
     if errors.is_empty() {
@@ -146,7 +164,7 @@ pub fn process_stdio<R: Read, W: Write>(
     } else {
         for error in &errors {
             let error_output = if debug_mode {
-                debug_print_error(error)
+                format!("{}\n{}", "Error Enum:", debug_print_error(error).dimmed())
             } else {
                 pretty_print_error(error, &validator, filename)?
             };
