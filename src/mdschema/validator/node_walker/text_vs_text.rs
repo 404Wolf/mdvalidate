@@ -728,11 +728,15 @@ pub fn validate_matcher_vs_text<'a>(
         }
     }
 
-    trace!(
-        "Attempting to match the input \"{}\"'s prefix, which is {}",
-        input_cursor.node().utf8_text(input_str.as_bytes()).unwrap(),
-        input_after_prefix
-    );
+    if !got_eof && input_after_prefix.contains("`") {
+        return result;
+    } else {
+        trace!(
+            "xAttempting to match the input \"{}\"'s prefix, which is {}",
+            input_cursor.node().utf8_text(input_str.as_bytes()).unwrap(),
+            input_after_prefix
+        );
+    }
 
     // Actually perform the match for the matcher
     match matcher.match_str(&input_after_prefix) {
@@ -890,6 +894,7 @@ mod tests {
             },
         },
         ts_utils::parse_markdown,
+        utils::test_logging,
     };
 
     fn validate_matcher_vs_text<'a>(
@@ -1536,14 +1541,40 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_text_vs_text_with_incomplete_matcher() {
+        test_logging();
+
+        let schema_str = "prefix `test:/test/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "prefix `test:/te";
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        let result = validate_text_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            false, // we are allowed to have a broken matcher if it is the last com
+        );
+
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+
+        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(value, json!({}));
+    }
+
+    #[test]
     fn test_validate_matcher_vs_text_with_input_prefix_not_long_enough() {
         let schema_str = "prefix that is longer than input `test:/test/`";
         let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
 
         let input_str = "prefix";
         let input_tree = parse_markdown(input_str).unwrap();
-
-        let mut schema_cursor = schema_tree.walk();
         let mut input_cursor = input_tree.walk();
 
         schema_cursor.goto_first_child(); // document -> paragraph
