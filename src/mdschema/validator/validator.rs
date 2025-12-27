@@ -16,8 +16,6 @@ pub struct Validator {
     pub input_tree: Tree,
     /// The schema tree, which does not change after initialization.
     pub schema_tree: Tree,
-    /// The farthest reached descendant index pair (input_index, schema_index) we validated up to. In preorder.
-    farthest_reached_descendant_index_pair: (usize, usize),
     state: ValidatorState,
 }
 
@@ -31,14 +29,13 @@ impl Validator {
         let input_tree = input_parser.parse(input_str, None)?;
 
         let mut initial_state =
-            ValidatorState::new(schema_str.to_string(), input_str.to_string(), got_eof);
+            ValidatorState::from_beginning(schema_str.to_string(), input_str.to_string(), got_eof);
         initial_state.set_got_eof(got_eof);
 
         Some(Validator {
             input_tree,
             schema_tree,
             state: initial_state,
-            farthest_reached_descendant_index_pair: (0, 0),
         })
     }
 
@@ -137,16 +134,16 @@ impl Validator {
     /// Validates the input markdown against the schema by traversing both trees
     /// in parallel to the ends, starting from where we last left off.
     pub fn validate(&mut self) {
-        let mut input_cursor = self.input_tree.walk();
-        input_cursor.goto_descendant(self.farthest_reached_descendant_index_pair.0);
+        let mut node_validator = NodeWalker::new(
+            &mut self.state,
+            self.input_tree.walk(),
+            self.schema_tree.walk(),
+        );
+        node_validator.validate();
+    }
 
-        let mut schema_cursor = self.schema_tree.walk();
-        schema_cursor.goto_descendant(self.farthest_reached_descendant_index_pair.1);
-
-        let mut node_validator = NodeWalker::new(&mut self.state, input_cursor, schema_cursor);
-        let validation_result = node_validator.validate();
-
-        self.farthest_reached_descendant_index_pair = validation_result.descendant_index_pair();
+    pub fn state(&self) -> &ValidatorState {
+        &self.state
     }
 }
 
@@ -154,7 +151,7 @@ impl Validator {
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::{errors::{ChildrenCount, SchemaError, SchemaViolationError}};
+    use crate::mdschema::validator::errors::{ChildrenCount, SchemaError, SchemaViolationError};
 
     use super::*;
 
@@ -163,6 +160,7 @@ mod tests {
     fn do_validate(schema: &str, input: &str, eof: bool) -> (Vec<ValidationError>, Value) {
         let mut validator = Validator::new(schema, input, eof).expect("Failed to create validator");
         validator.validate();
+
         (
             validator.errors_so_far().cloned().collect(),
             validator.state.matches_so_far().clone(),
@@ -993,14 +991,14 @@ Content for section 3."#;
         for (i, chunk) in chunks.iter().enumerate() {
             let is_eof = i == chunks.len() - 1;
 
-            let indices_before = validator.farthest_reached_descendant_index_pair;
+            let indices_before = validator.state().farthest_reached_descendant_index_pair();
 
             validator
                 .read_input(chunk, is_eof)
                 .expect("Failed to read input");
             validator.validate();
 
-            let indices_after = validator.farthest_reached_descendant_index_pair;
+            let indices_after = validator.state().farthest_reached_descendant_index_pair();
 
             // Indices should advance (or stay the same if nothing new to validate)
             // They should NOT reset to 0

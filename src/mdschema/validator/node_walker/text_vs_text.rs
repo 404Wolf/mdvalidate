@@ -17,8 +17,8 @@ use crate::mdschema::validator::{
 /// When the schema contains a text-code-text pattern, those nodes form a "matcher group"
 /// and are validated using `validate_matcher_vs_text` instead of literal comparison.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
-    input = %input_cursor.node().kind(),
-    schema = %schema_cursor.node().kind()
+    i = %input_cursor.descendant_index(),
+    s = %schema_cursor.descendant_index()
 ), ret)]
 pub fn validate_text_vs_text(
     input_cursor: &TreeCursor,
@@ -183,8 +183,7 @@ pub fn validate_text_vs_text(
                     schema_cursor.goto_next_sibling();
 
                     // Move along!
-                    result.input_descendant_index = input_cursor.descendant_index();
-                    result.schema_descendant_index = schema_cursor.descendant_index();
+                    result.update_descendant_offsets(&input_cursor, &schema_cursor);
 
                     result
                 }
@@ -250,8 +249,8 @@ pub fn validate_text_vs_text(
             if !input_cursor.goto_first_child() || !schema_cursor.goto_first_child() {
                 trace!("No children to validate");
                 // No children to validate
-                result.schema_descendant_index = schema_cursor.descendant_index();
-                result.input_descendant_index = input_cursor.descendant_index();
+                result.update_descendant_offsets(&input_cursor, &schema_cursor);
+
                 return result;
             }
 
@@ -278,9 +277,8 @@ pub fn validate_text_vs_text(
                 input_cursor.goto_next_sibling();
                 schema_cursor.goto_next_sibling();
             }
+            result.update_descendant_offsets(&input_cursor, &schema_cursor);
 
-            result.schema_descendant_index = schema_cursor.descendant_index();
-            result.input_descendant_index = input_cursor.descendant_index();
             result
         }
     }
@@ -390,8 +388,8 @@ fn validate_textual_nodes(
         // Otherwise tick the cursors forward if successful!
         schema_cursor.goto_next_sibling();
         input_cursor.goto_next_sibling();
-        result.schema_descendant_index = schema_cursor.descendant_index();
-        result.input_descendant_index = input_cursor.descendant_index();
+
+        result.update_descendant_offsets(&input_cursor, &schema_cursor);
     }
 
     result
@@ -616,8 +614,8 @@ pub fn validate_matcher_vs_text<'a>(
 
                 // If prefix validation fails don't try to validate further.
                 // TODO: In the future we could attempt to validate further anyway!
-                result.schema_descendant_index = schema_cursor.descendant_index();
-                result.input_descendant_index = input_cursor.descendant_index();
+                result.update_descendant_offsets(&input_cursor, &schema_cursor);
+
                 return result;
             }
 
@@ -663,8 +661,7 @@ pub fn validate_matcher_vs_text<'a>(
                 ));
             }
 
-            result.schema_descendant_index = schema_cursor.descendant_index();
-            result.input_descendant_index = input_cursor.descendant_index();
+            result.update_descendant_offsets(&input_cursor, &schema_cursor);
             return result;
         }
     }
@@ -714,15 +711,14 @@ pub fn validate_matcher_vs_text<'a>(
                     actual: input_cursor.node().kind().into(),
                 },
             ));
-            result.schema_descendant_index = schema_cursor.descendant_index();
-            result.input_descendant_index = input_cursor.descendant_index();
+
+            result.update_descendant_offsets(&input_cursor, &schema_cursor);
 
             return result;
         } else {
             trace!("Ruler validated successfully");
             // It's a ruler, no further validation needed
-            result.schema_descendant_index = schema_cursor.descendant_index();
-            result.input_descendant_index = input_cursor.descendant_index();
+            result.update_descendant_offsets(&input_cursor, &schema_cursor);
 
             return result;
         }
@@ -774,8 +770,8 @@ pub fn validate_matcher_vs_text<'a>(
             ));
 
             // TODO: should we validate further when we fail to match the matcher?
-            result.schema_descendant_index = schema_cursor.descendant_index();
-            result.input_descendant_index = input_cursor.descendant_index();
+            result.update_descendant_offsets(&input_cursor, &schema_cursor);
+
             return result;
         }
     }
@@ -819,8 +815,8 @@ pub fn validate_matcher_vs_text<'a>(
         trace!("No suffix to validate");
     }
 
-    result.schema_descendant_index = schema_cursor.descendant_index();
-    result.input_descendant_index = input_cursor.descendant_index();
+    result.update_descendant_offsets(&input_cursor, &schema_cursor);
+
     result
 }
 
@@ -894,7 +890,6 @@ mod tests {
             },
         },
         ts_utils::parse_markdown,
-        utils::test_logging,
     };
 
     fn validate_matcher_vs_text<'a>(
@@ -1541,9 +1536,41 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_text_vs_text_with_incomplete_matcher() {
-        test_logging();
+    fn test_validate_text_vs_text_header_content() {
+        let schema_str = "# Test `name:/[a-zA-Z]+/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
 
+        let input_str = "# Test Wolf";
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        input_cursor.goto_first_child();
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        schema_cursor.goto_first_child();
+        input_cursor.goto_next_sibling();
+        schema_cursor.goto_next_sibling();
+        assert_eq!(input_cursor.node().kind(), "heading_content");
+        assert_eq!(schema_cursor.node().kind(), "heading_content");
+
+        let result = validate_text_vs_text(
+            &mut input_cursor,
+            &mut schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
+
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+
+        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(value, json!({"name": "Wolf"}));
+    }
+
+    #[test]
+    fn test_validate_text_vs_text_with_incomplete_matcher() {
         let schema_str = "prefix `test:/test/`";
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();

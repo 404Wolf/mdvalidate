@@ -18,11 +18,23 @@ impl<'a> NodeWalker<'a> {
         input_cursor: TreeCursor<'a>,
         schema_cursor: TreeCursor<'a>,
     ) -> Self {
-        Self {
+        let mut node_walker = Self {
             state,
             input_cursor,
             schema_cursor,
-        }
+        };
+
+        node_walker.walk_cursors_to_position();
+
+        node_walker
+    }
+
+    /// Walks the cursors to the position of the farthest reached descendant in state.
+    fn walk_cursors_to_position(&mut self) {
+        let (input_descendant_index, schema_descendant_index) =
+            self.state.farthest_reached_descendant_index_pair();
+        self.input_cursor.goto_descendant(input_descendant_index);
+        self.schema_cursor.goto_descendant(schema_descendant_index);
     }
 
     pub fn validate(&mut self) -> ValidationResult {
@@ -59,7 +71,7 @@ mod tests {
 - hello
 "#;
 
-        let (matches, errors) = validate_str(schema, input);
+        let (matches, errors, _) = validate_str(schema, input);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
         assert_eq!(matches, json!({ "item": "hello" }));
@@ -70,7 +82,7 @@ mod tests {
         let schema = "Hello `name:/\\w+/`\n";
         let input = "Hello Wolf\n";
 
-        let (matches, errors) = validate_str(schema, input);
+        let (matches, errors, _) = validate_str(schema, input);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
         assert_eq!(matches, json!({"name": "Wolf"}));
@@ -81,10 +93,12 @@ mod tests {
         let schema = "# Hello `name:/\\w+/`\n";
         let input = "# Hello Wolf\n";
 
-        let (matches, errors) = validate_str(schema, input);
+        let (matches, errors, final_state) = validate_str(schema, input);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
         assert_eq!(matches, json!({"name": "Wolf"}));
+        dbg!(final_state);
+        panic!()
     }
 
     #[test]
@@ -99,7 +113,7 @@ mod tests {
     - cherry
 "#;
 
-        let (matches, errors) = validate_str(schema, input);
+        let (matches, errors, _) = validate_str(schema, input);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
         assert_eq!(
@@ -115,7 +129,7 @@ mod tests {
         let schema = "- `item:/\\w+/`";
         let input = "- hello";
 
-        let (matches, errors) = validate_str(schema, input);
+        let (matches, errors, _) = validate_str(schema, input);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
         assert_eq!(matches, json!({"item": "hello"}));

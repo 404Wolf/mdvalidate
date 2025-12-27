@@ -1,7 +1,10 @@
 use serde_json::{Map, Value};
 
-use crate::mdschema::validator::{errors::ValidationError, node_walker::ValidationResult, utils::join_values};
+use crate::mdschema::validator::{
+    errors::ValidationError, node_walker::ValidationResult, utils::join_values,
+};
 
+#[derive(Clone, Debug)]
 pub struct ValidatorState {
     /// The full input string as last read. Not used internally but useful for
     /// debugging or reporting.
@@ -15,17 +18,29 @@ pub struct ValidatorState {
     matches_so_far: Value,
     /// Any errors encountered during validation.
     errors_so_far: Vec<ValidationError>,
+    /// The farthest reached descendant index pair (input_index, schema_index) we validated up to. In preorder.
+    farthest_reached_descendant_index_pair: (usize, usize),
 }
 
 impl ValidatorState {
-    pub fn new(schema_str: String, last_input_str: String, got_eof: bool) -> Self {
+    pub fn new(
+        schema_str: String,
+        last_input_str: String,
+        got_eof: bool,
+        farthest_reached_descendant_index_pair: (usize, usize),
+    ) -> Self {
         Self {
             last_input_str,
             schema_str,
             got_eof,
             matches_so_far: Value::Object(Map::new()),
             errors_so_far: Vec::new(),
+            farthest_reached_descendant_index_pair,
         }
+    }
+
+    pub fn from_beginning(schema_str: String, last_input_str: String, got_eof: bool) -> Self {
+        Self::new(schema_str, last_input_str, got_eof, (0, 0))
     }
 
     pub fn got_eof(&self) -> bool {
@@ -64,8 +79,21 @@ impl ValidatorState {
 
     /// Unpacks a ValidationResult and adds its matches and errors to the state.
     pub fn push_validation_result(&mut self, result: ValidationResult) {
+        let result_descendant_index_pair = result.descendant_index_pair();
         self.join_new_matches(result.value);
         self.errors_so_far.extend(result.errors);
+        self.set_farthest_reached_descendant_index_pair(result_descendant_index_pair);
+    }
+
+    pub fn farthest_reached_descendant_index_pair(&self) -> (usize, usize) {
+        self.farthest_reached_descendant_index_pair
+    }
+
+    pub fn set_farthest_reached_descendant_index_pair(
+        &mut self,
+        farthest_reached_descendant_index_pair: (usize, usize),
+    ) {
+        self.farthest_reached_descendant_index_pair = farthest_reached_descendant_index_pair;
     }
 }
 
@@ -75,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_join_new_matches_objects() {
-        let mut state = ValidatorState::new("{}".to_string(), "".to_string(), false);
+        let mut state = ValidatorState::from_beginning("{}".to_string(), "".to_string(), false);
 
         let initial_matches = serde_json::json!({ "key1": "value1" });
         state.join_new_matches(initial_matches);
@@ -98,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_join_new_matches_arrays() {
-        let mut state = ValidatorState::new("{}".to_string(), "".to_string(), false);
+        let mut state = ValidatorState::from_beginning("{}".to_string(), "".to_string(), false);
         state.matches_so_far = Value::Array(vec![Value::String("value1".to_string())]);
 
         let new_matches = Value::Array(vec![

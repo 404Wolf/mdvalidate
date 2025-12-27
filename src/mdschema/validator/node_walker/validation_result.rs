@@ -1,4 +1,5 @@
 use serde_json::{Value, json};
+use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::utils::join_values;
@@ -12,9 +13,9 @@ pub struct ValidationResult {
     /// Vector of all validation errors encountered
     pub errors: Vec<ValidationError>,
     /// The descendant index in the schema after validation
-    pub schema_descendant_index: usize,
+    schema_descendant_index: usize,
     /// The descendant index in the input after validation
-    pub input_descendant_index: usize,
+    input_descendant_index: usize,
 }
 
 impl ValidationResult {
@@ -77,9 +78,37 @@ impl ValidationResult {
             .max(other.input_descendant_index);
     }
 
+    /// Update tree cursors to that of the result.
+    pub fn move_cursors_to_position(
+        &self,
+        input_cursor: &mut TreeCursor,
+        schema_cursor: &mut TreeCursor,
+    ) {
+        input_cursor.goto_descendant(self.input_descendant_index);
+        schema_cursor.goto_descendant(self.schema_descendant_index);
+    }
+
+    /// Update the input and schema descendant offsets to that of given cursors.
+    pub fn update_descendant_offsets(
+        &mut self,
+        input_cursor: &TreeCursor,
+        schema_cursor: &TreeCursor,
+    ) {
+        self.input_descendant_index = input_cursor.descendant_index();
+        self.schema_descendant_index = schema_cursor.descendant_index();
+    }
+
     /// Get the descendant index pair (schema, input)
     pub fn descendant_index_pair(&self) -> (usize, usize) {
         (self.schema_descendant_index, self.input_descendant_index)
+    }
+
+    pub fn input_descendant_index(&self) -> usize {
+        self.input_descendant_index
+    }
+
+    pub fn schema_descendant_index(&self) -> usize {
+        self.schema_descendant_index
     }
 }
 

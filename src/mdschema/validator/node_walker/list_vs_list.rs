@@ -1,6 +1,6 @@
 use log::trace;
 use serde_json::json;
-use tracing::{instrument, warn};
+use tracing::{instrument};
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
@@ -70,8 +70,8 @@ use crate::mdschema::validator::{
 /// Note that a limitation here is that you cannot have a variable-length list
 /// that is not the final list in your schema.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
-    input = %input_cursor.node().kind(),
-    schema = %schema_cursor.node().kind()
+    i = %input_cursor.descendant_index(),
+    s = %schema_cursor.descendant_index()
 ), ret)]
 pub fn validate_list_vs_list(
     input_cursor: &TreeCursor,

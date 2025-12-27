@@ -20,8 +20,8 @@ use crate::mdschema::validator::{
 /// - Lists -> `validate_list_vs_list`
 /// - Headings/documents -> recursively validate children
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "trace", fields(
-    input = %input_cursor.node().kind(),
-    schema = %schema_cursor.node().kind()
+    i = %input_cursor.descendant_index(),
+    s = %schema_cursor.descendant_index()
 ), ret)]
 pub fn validate_node_vs_node(
     input_cursor: &TreeCursor,
@@ -120,17 +120,10 @@ pub fn validate_node_vs_node(
             // TODO: handle case where one has more children than the other
             let input_had_sibling = input_cursor.goto_next_sibling();
             let schema_had_sibling = schema_cursor.goto_next_sibling();
-            trace!(
-                "input_cursor: {}, schema_cursor: {}",
-                input_cursor.node().to_sexp(),
-                schema_cursor.node().to_sexp()
-            );
-            trace!(
-                "input_had_sibling: {}, schema_had_sibling: {}",
-                input_had_sibling, schema_had_sibling
-            );
 
             if input_had_sibling && schema_had_sibling {
+                trace!("Both input and schema node have siblings");
+
                 let new_result = validate_node_vs_node(
                     &input_cursor,
                     &schema_cursor,
@@ -141,21 +134,18 @@ pub fn validate_node_vs_node(
 
                 result.join_other_result(&new_result);
             } else {
+                trace!("One of input or schema node does not have siblings");
+
                 break;
             }
         }
 
         return result;
     } else {
-        trace!(
-            "Both input and schema node were top level, but they didn't both have children. Trees:\n{}\n{}",
-            input_node.to_sexp(),
-            schema_node.to_sexp()
-        );
+        trace!("Both input and schema node were top level, but they didn't both have children.");
 
         if !got_eof {
-            result.schema_descendant_index = schema_cursor.descendant_index();
-            result.input_descendant_index = input_cursor.descendant_index();
+            result.update_descendant_offsets(&input_cursor, &schema_cursor);
 
             return result;
         };

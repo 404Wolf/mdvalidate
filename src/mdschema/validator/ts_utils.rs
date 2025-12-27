@@ -260,7 +260,7 @@ pub fn count_siblings(cursor: &TreeCursor) -> usize {
 pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<ValidationError>) {
     use crate::mdschema::validator::validator_state::ValidatorState;
 
-    let mut state = ValidatorState::new(schema.to_string(), input.to_string(), true);
+    let mut state = ValidatorState::from_beginning(schema.to_string(), input.to_string(), true);
 
     let mut parser = new_markdown_parser();
     let schema_tree = parser.parse(schema, None).unwrap();
