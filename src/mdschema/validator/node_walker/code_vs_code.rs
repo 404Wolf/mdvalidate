@@ -45,8 +45,8 @@ use crate::mdschema::validator::{
 /// Note you cannot yet enforce regex on the actual code content.
 /// ```
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str), level = "debug", fields(
-    input = %input_cursor.node().kind(),
-    schema = %schema_cursor.node().kind()
+    i = %input_cursor.descendant_index(),
+    s = %schema_cursor.descendant_index(),
 ), ret)]
 pub fn validate_code_vs_code(
     input_cursor: &TreeCursor,
@@ -54,10 +54,7 @@ pub fn validate_code_vs_code(
     schema_str: &str,
     input_str: &str,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(
-        input_cursor.descendant_index(),
-        input_cursor.descendant_index(),
-    );
+    let mut result = ValidationResult::from_cursors(input_cursor, input_cursor);
 
     let input_cursor = input_cursor.clone();
     let schema_cursor = schema_cursor.clone();

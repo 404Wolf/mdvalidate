@@ -59,7 +59,6 @@ impl std::fmt::Display for MatcherError {
             MatcherError::InvariantViolation(err) => {
                 write!(f, "Invariant violation: {}", err)
             }
-
         }
     }
 }
@@ -284,10 +283,6 @@ impl Matcher {
         Self::new(id, HashSet::new(), pattern, extras, original_str_len)
     }
 
-
-
-
-
     /// Create a new Matcher given the text in a matcher codeblock and the text node's contents
     /// immediately proceeding the matcher.
     ///
@@ -306,6 +301,12 @@ impl Matcher {
         let extras =
             MatcherExtras::try_new(extras_str).map_err(|e| MatcherError::MatcherExtrasError(e))?;
 
+        // We are allowed to have an invalid matcher interior if it is literal
+        // code, so throw this error before trying to create the matcher
+        if extras.is_literal_code {
+            return Err(MatcherError::WasLiteralCode);
+        }
+
         let (id, pattern) = match captures {
             Some(caps) => extract_id_and_pattern(&caps, &pattern_str)?,
             None => {
@@ -315,10 +316,6 @@ impl Matcher {
                 )));
             }
         };
-
-        if extras.is_literal_code {
-            return Err(MatcherError::WasLiteralCode);
-        }
 
         let original_str_len = pattern_str.len() + extras_str.map_or(0, |s| s.len());
 
@@ -411,13 +408,13 @@ fn extract_id_and_pattern(
             return Err(MatcherError::MatcherInteriorRegexInvalid(format!(
                 "Matcher cannot be both regex and special type: {}",
                 pattern
-            )))
+            )));
         }
         (None, None) => {
             return Err(MatcherError::MatcherInteriorRegexInvalid(format!(
                 "Matcher must be either regex or special type: {}",
                 pattern
-            )))
+            )));
         }
     };
     Ok((id, matcher))
@@ -492,8 +489,8 @@ pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, E
 mod tests {
     use crate::mdschema::validator::{
         matcher::matcher::{
-            extract_text_matcher, Matcher, MatcherError, MatcherExtras, MatcherExtrasError,
-            MATCHERS_EXTRA_PATTERN,
+            MATCHERS_EXTRA_PATTERN, Matcher, MatcherError, MatcherExtras, MatcherExtrasError,
+            extract_text_matcher,
         },
         ts_utils::new_markdown_parser,
     };
@@ -506,10 +503,6 @@ mod tests {
         assert_eq!(matcher.match_str("1234"), Some("1234"));
         assert_eq!(matcher.match_str("!@#$"), None);
     }
-
-
-
-
 
     #[test]
     fn test_matcher_invalid_pattern() {
@@ -696,6 +689,19 @@ mod tests {
     fn test_simple_literal_exclamation() {
         // Test that a single ! makes it literal code
         let result = Matcher::try_from_pattern_and_suffix_str("`test:/\\w+/`", Some("!"));
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MatcherError::WasLiteralCode => {
+                // Expected
+            }
+            _ => panic!("Expected WasLiteralCode error"),
+        }
+    }
+
+    #[test]
+    fn test_invalid_matcher_with_exclamation() {
+        // Test that a single ! makes it literal code even though the matcher isn't valid
+        let result = Matcher::try_from_pattern_and_suffix_str("`testing!!!`", Some("!"));
         assert!(result.is_err());
         match result.unwrap_err() {
             MatcherError::WasLiteralCode => {

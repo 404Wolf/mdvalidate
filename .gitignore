@@ -343,3 +343,4 @@ TSWLatexianTemp*
 /target
 
 **/*.quarto_ipynb
+.zed

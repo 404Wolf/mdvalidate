@@ -86,12 +86,6 @@ impl fmt::Display for ParserError {
 /// These errors indicate problems with the schema document, not the input being validated.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub enum SchemaError {
-    /// Matcher is missing from a matcher group.
-    MissingMatcher {
-        schema_index: usize,
-        input_index: usize,
-    },
-
     /// Node has multiple matchers in its children (only one is allowed).
     MultipleMatchersInNodeChildren {
         schema_index: usize,
@@ -185,7 +179,6 @@ pub enum SchemaError {
 impl fmt::Display for SchemaError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SchemaError::MissingMatcher { .. } => write!(f, "Missing matcher in matcher group"),
             SchemaError::MultipleMatchersInNodeChildren { received, .. } => {
                 write!(
                     f,
@@ -487,16 +480,25 @@ fn validation_error_to_ariadne(
                 input_index,
             } => {
                 let input_node = find_node_by_index(tree.root_node(), *input_index);
+                let schema_node = find_node_by_index(tree.root_node(), *schema_index);
                 let schema_content =
                     node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let input_range = input_node.start_byte()..input_node.end_byte();
+                let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, input_range.clone()))
                     .with_message("Non-repeating matcher in repeating context")
                     .with_label(
                         Label::new((filename, input_range))
+                            .with_message(
+                                "This input corresponds to a list node in the schema"
+                            )
+                            .with_color(Color::Blue),
+                    )
+                    .with_label(
+                        Label::new((filename, schema_range))
                             .with_message(format!(
-                                "This matcher is in a list context but is not marked as repeating. Schema: '{}'",
+                                "This matcher is in a list context but is not marked as repeating: '{}'",
                                 schema_content
                             ))
                             .with_color(Color::Red),
@@ -508,16 +510,12 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     .finish()
             }
             SchemaViolationError::ChildrenLengthMismatch {
-                schema_index,
+                schema_index: _,
                 input_index,
                 expected,
                 actual,
             } => {
                 let parent = find_node_by_index(tree.root_node(), *input_index);
-                let schema_content =
-                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                let input_content =
-                    node_content_by_index(tree.root_node(), *input_index, source_content)?;
                 let parent_range = parent.start_byte()..parent.end_byte();
 
                 let mut report = Report::build(ReportKind::Error, (filename, parent_range.clone()))
@@ -525,8 +523,8 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     .with_label(
                         Label::new((filename, parent_range))
                             .with_message(format!(
-                                "Expected {} children but found {}. Input: '{}', Schema: '{}'",
-                                expected, actual, input_content, schema_content
+                                "Expected {} children but found {}.",
+                                expected, actual
                             ))
                             .with_color(Color::Red),
                     );
@@ -541,13 +539,11 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 report.finish()
             }
             SchemaViolationError::NodeListTooDeep {
-                schema_index,
+                schema_index: _,
                 input_index,
                 max_depth,
             } => {
                 let node = find_node_by_index(tree.root_node(), *input_index);
-                let schema_content =
-                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
                 let node_range = node.start_byte()..node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, node_range.clone()))
@@ -555,8 +551,8 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     .with_label(
                         Label::new((filename, node_range))
                             .with_message(format!(
-                                "List nesting exceeds maximum depth of {} level(s). Schema: '{}'",
-                                max_depth, schema_content
+                                "List nesting exceeds maximum depth of {} level(s).",
+                                max_depth,
                             ))
                             .with_color(Color::Red),
                     )
@@ -613,185 +609,183 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     .finish()
             }
         },
-        ValidationError::SchemaError(schema_err) => match schema_err {
-            SchemaError::MultipleMatchersInNodeChildren {
-                schema_index: _,
-                input_index,
-                received: received_count,
-            } => {
-                let input_node = find_node_by_index(tree.root_node(), *input_index);
-                let input_range = input_node.start_byte()..input_node.end_byte();
+        ValidationError::SchemaError(schema_err) => {
+            match schema_err {
+                SchemaError::MultipleMatchersInNodeChildren {
+                    schema_index: _,
+                    input_index,
+                    received: received_count,
+                } => {
+                    let input_node = find_node_by_index(tree.root_node(), *input_index);
+                    let input_range = input_node.start_byte()..input_node.end_byte();
 
-                Report::build(ReportKind::Error, (filename, input_range.clone()))
-                    .with_message("Multiple matchers in node children")
-                    .with_label(
-                        Label::new((filename, input_range))
-                            .with_message(format!(
-                                "{} matchers found in node children",
-                                received_count
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .with_help("Only one matcher is allowed per node's children.")
-                    .finish()
-            }
-            SchemaError::BadListMatcher {
-                schema_index,
-                input_index,
-            } => {
-                let schema_node = find_node_by_index(tree.root_node(), *schema_index);
-                let schema_content =
-                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                let input_node = find_node_by_index(tree.root_node(), *input_index);
-                let input_range = input_node.start_byte()..input_node.end_byte();
+                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                        .with_message("Multiple matchers in node children")
+                        .with_label(
+                            Label::new((filename, input_range))
+                                .with_message(format!(
+                                    "{} matchers found in node children",
+                                    received_count
+                                ))
+                                .with_color(Color::Red),
+                        )
+                        .with_help("Only one matcher is allowed per node's children.")
+                        .finish()
+                }
+                SchemaError::BadListMatcher {
+                    schema_index,
+                    input_index,
+                } => {
+                    let schema_node = find_node_by_index(tree.root_node(), *schema_index);
+                    let schema_content =
+                        node_content_by_index(tree.root_node(), *schema_index, source_content)?;
+                    let input_node = find_node_by_index(tree.root_node(), *input_index);
+                    let input_range = input_node.start_byte()..input_node.end_byte();
+                    let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    Report::build(ReportKind::Error, (filename, input_range.clone()))
                         .with_message("Bad list matcher")
                         .with_label(
                             Label::new((filename, input_range))
+                                .with_message("This input corresponds to a list node in the schema")
+                                .with_color(Color::Blue),
+                        )
+                        .with_label(
+                            Label::new((filename, schema_range))
                                 .with_message(format!(
-                                    "No matchers found in children of list node (node kind: '{}'). Schema: '{}'",
-                                    schema_node.kind(),
+                                    "No matchers found in children of list node: '{}'",
                                     schema_content
                                 ))
                                 .with_color(Color::Red),
                         )
                         .finish()
-            }
-            SchemaError::UnclosedMatcher {
-                schema_index,
-                input_index,
-            } => {
-                let schema_content =
-                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                let input_node = find_node_by_index(tree.root_node(), *input_index);
-                let input_range = input_node.start_byte()..input_node.end_byte();
+                }
+                SchemaError::UnclosedMatcher {
+                    schema_index,
+                    input_index,
+                } => {
+                    let schema_node = find_node_by_index(tree.root_node(), *schema_index);
+                    let input_node = find_node_by_index(tree.root_node(), *input_index);
+                    let schema_range = schema_node.start_byte()..schema_node.end_byte();
+                    let input_range = input_node.start_byte()..input_node.end_byte();
 
-                Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    Report::build(ReportKind::Error, (filename, input_range.clone()))
                     .with_message("Unclosed matcher")
                     .with_label(
                         Label::new((filename, input_range))
-                            .with_message(format!("Unclosed matcher. Schema: '{}'", schema_content))
-                            .with_color(Color::Red),
+                            .with_message("This input corresponds to a schema node with an unclosed matcher")
+                            .with_color(Color::Blue),
                     )
-                    .finish()
-            }
-            SchemaError::MatcherError {
-                error,
-                schema_index,
-                input_index,
-            } => {
-                let input_node = find_node_by_index(tree.root_node(), *input_index);
-                let input_range = input_node.start_byte()..input_node.end_byte();
-                let schema_content =
-                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-
-                Report::build(ReportKind::Error, (filename, input_range.clone()))
-                    .with_message("Matcher error")
                     .with_label(
-                        Label::new((filename, input_range))
-                            .with_message(format!(
-                                "Matcher error: {}. Schema: '{}'",
-                                error, schema_content
-                            ))
+                        Label::new((filename, schema_range))
+                            .with_message("Matcher is not properly closed")
                             .with_color(Color::Red),
                     )
+                    .with_help("Matchers must be properly closed with a backtick, e.g., `label:/pattern/`")
                     .finish()
-            }
-            SchemaError::UTF8Error {
-                schema_index,
-                input_index,
-            } => {
-                let schema_content =
-                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                let input_node = find_node_by_index(tree.root_node(), *input_index);
-                let input_range = input_node.start_byte()..input_node.end_byte();
+                }
+                SchemaError::MatcherError {
+                    error,
+                    schema_index,
+                    input_index,
+                } => {
+                    let input_node = find_node_by_index(tree.root_node(), *input_index);
+                    let schema_node = find_node_by_index(tree.root_node(), *schema_index);
+                    let input_range = input_node.start_byte()..input_node.end_byte();
+                    let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                Report::build(ReportKind::Error, (filename, input_range.clone()))
-                    .with_message("UTF-8 error in schema")
-                    .with_label(
-                        Label::new((filename, input_range))
-                            .with_message(format!(
-                                "Schema text at this position is not valid UTF-8. Schema: '{}'",
-                                schema_content
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .finish()
-            }
-            SchemaError::MissingMatcher {
-                schema_index,
-                input_index,
-            } => {
-                let input_node = find_node_by_index(tree.root_node(), *input_index);
-                let input_range = input_node.start_byte()..input_node.end_byte();
-                let schema_content =
-                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
+                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                        .with_message("Matcher error")
+                        .with_label(
+                            Label::new((filename, input_range))
+                                .with_message(
+                                    "This input corresponds to a schema node with a matcher error",
+                                )
+                                .with_color(Color::Blue),
+                        )
+                        .with_label(
+                            Label::new((filename, schema_range))
+                                .with_message(format!("Matcher error: {}", error))
+                                .with_color(Color::Red),
+                        )
+                        .finish()
+                }
+                SchemaError::UTF8Error {
+                    schema_index,
+                    input_index,
+                } => {
+                    let schema_node = find_node_by_index(tree.root_node(), *schema_index);
+                    let input_node = find_node_by_index(tree.root_node(), *input_index);
+                    let input_range = input_node.start_byte()..input_node.end_byte();
+                    let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                Report::build(ReportKind::Error, (filename, input_range.clone()))
-                    .with_message("Missing matcher")
-                    .with_label(
-                        Label::new((filename, input_range))
-                            .with_message(format!(
-                                "Missing matcher in matcher group. Schema: '{}'",
-                                schema_content
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .finish()
-            }
-            SchemaError::InvalidMatcherExtras {
-                schema_index,
-                input_index,
-                error,
-            } => {
-                let schema_content =
-                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                let input_node = find_node_by_index(tree.root_node(), *input_index);
-                let input_range = input_node.start_byte()..input_node.end_byte();
+                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                        .with_message("UTF-8 error in schema")
+                        .with_label(
+                            Label::new((filename, input_range))
+                                .with_message(
+                                    "This input corresponds to a schema node with invalid UTF-8",
+                                )
+                                .with_color(Color::Blue),
+                        )
+                        .with_label(
+                            Label::new((filename, schema_range))
+                                .with_message("Schema text at this position is not valid UTF-8")
+                                .with_color(Color::Red),
+                        )
+                        .finish()
+                }
+                SchemaError::InvalidMatcherExtras {
+                    schema_index,
+                    input_index,
+                    error,
+                } => {
+                    let schema_node = find_node_by_index(tree.root_node(), *schema_index);
+                    let input_node = find_node_by_index(tree.root_node(), *input_index);
+                    let input_range = input_node.start_byte()..input_node.end_byte();
+                    let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                Report::build(ReportKind::Error, (filename, input_range.clone()))
-                    .with_message("Invalid matcher extras")
-                    .with_label(
-                        Label::new((filename, input_range))
-                            .with_message(format!(
-                                "Invalid matcher extras: {}. Schema: '{}'",
-                                error, schema_content
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .finish()
-            }
-            SchemaError::RepeatingMatcherUnbounded {
-                schema_index,
-                input_index,
-            } => {
-                let schema_content =
-                    node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                let input_node = find_node_by_index(tree.root_node(), *input_index);
-                let input_range = input_node.start_byte()..input_node.end_byte();
+                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                        .with_message("Invalid matcher extras")
+                        .with_label(
+                            Label::new((filename, input_range))
+                                .with_message("This input corresponds to a schema node with invalid matcher extras")
+                                .with_color(Color::Blue),
+                        )
+                        .with_label(
+                            Label::new((filename, schema_range))
+                                .with_message(format!("Invalid matcher extras: {}", error))
+                                .with_color(Color::Red),
+                        )
+                        .finish()
+                }
+                SchemaError::RepeatingMatcherUnbounded {
+                    schema_index: _,
+                    input_index,
+                } => {
+                    let input_node = find_node_by_index(tree.root_node(), *input_index);
+                    let input_range = input_node.start_byte()..input_node.end_byte();
 
-                Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    Report::build(ReportKind::Error, (filename, input_range.clone()))
                         .with_message("Unbounded repeating matcher must be last")
                         .with_label(
                             Label::new((filename, input_range))
-                                .with_message(format!(
-                                    "This unbounded repeating matcher is followed by other repeating matchers. Schema: '{}'",
-                                    schema_content
-                                ))
+                                .with_message(
+                                    "This unbounded repeating matcher is followed by other repeating matchers.",
+                               )
                                 .with_color(Color::Red),
                         )
                         .with_help(
-                            "When you have multiple repeating matchers in a row, all but the last one \
-                         must have a specific upper bound. For example:\n\
-                         - `name1:/test/`{{1,3}}\n\
-                         - `name2:/bar/`{{,}}\n\
-                         \n\
-                         The first matcher has a specific upper bound (3), while the last one can be unbounded.",
+                            r#"When you have multiple repeating matchers in a row, all but the last one must have a specific upper bound. For example:
+- `name1:/test/`{1,3}
+- `name2:/bar/`{,}
+
+The first matcher has a specific upper bound (3), while the last one can be unbounded."#
                         )
                         .finish()
+                }
             }
-        },
+        }
         ValidationError::InternalInvariantViolated(msg) => {
             let root_range = 0..source_content.len();
             Report::build(ReportKind::Error, (filename, root_range.clone()))

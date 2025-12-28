@@ -9,6 +9,7 @@ use crate::mdschema::validator::{
         text_vs_text::validate_text_vs_text,
     },
     ts_utils::{is_codeblock, is_list_node, is_textual_container, is_textual_node},
+    utils::compare_node_children_lengths,
 };
 
 /// Validate two arbitrary nodes against each other.
@@ -19,8 +20,8 @@ use crate::mdschema::validator::{
 /// - Lists -> `validate_list_vs_list`
 /// - Headings/documents -> recursively validate children
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "trace", fields(
-    input = %input_cursor.node().kind(),
-    schema = %schema_cursor.node().kind()
+    i = %input_cursor.descendant_index(),
+    s = %schema_cursor.descendant_index(),
 ), ret)]
 pub fn validate_node_vs_node(
     input_cursor: &TreeCursor,
@@ -29,10 +30,7 @@ pub fn validate_node_vs_node(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(
-        input_cursor.descendant_index(),
-        schema_cursor.descendant_index(),
-    );
+    let mut result = ValidationResult::from_cursors(input_cursor, schema_cursor);
 
     let input_node = input_cursor.node();
     let schema_node = schema_cursor.node();
@@ -91,10 +89,21 @@ pub fn validate_node_vs_node(
     //
     // Crawl down one layer to get to the actual children
     if both_are_matching_top_level_nodes(&input_node, &schema_node)
-        && input_cursor.goto_first_child()
-        && schema_cursor.goto_first_child()
+        && input_cursor.clone().goto_first_child() // don't actually do the walking down just yet
+        && schema_cursor.clone().goto_first_child()
     {
         trace!("Both are heading nodes or document nodes, validating heading vs heading");
+
+        // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
+        if let Some(error) = compare_node_children_lengths(&schema_cursor, &input_cursor, got_eof) {
+            result.add_error(error);
+
+            return result;
+        }
+
+        // Now actually go down to the children
+        input_cursor.goto_first_child();
+        schema_cursor.goto_first_child();
 
         let new_result = validate_node_vs_node(
             &input_cursor,
@@ -104,25 +113,16 @@ pub fn validate_node_vs_node(
             got_eof,
         );
         result.join_other_result(&new_result);
-
-        result.schema_descendant_index = new_result.schema_descendant_index;
-        result.input_descendant_index = new_result.input_descendant_index;
+        result.sync_cursor_pos(&schema_cursor, &input_cursor);
 
         loop {
             // TODO: handle case where one has more children than the other
             let input_had_sibling = input_cursor.goto_next_sibling();
             let schema_had_sibling = schema_cursor.goto_next_sibling();
-            trace!(
-                "input_cursor: {}, schema_cursor: {}",
-                input_cursor.node().to_sexp(),
-                schema_cursor.node().to_sexp()
-            );
-            trace!(
-                "input_had_sibling: {}, schema_had_sibling: {}",
-                input_had_sibling, schema_had_sibling
-            );
 
             if input_had_sibling && schema_had_sibling {
+                trace!("Both input and schema node have siblings");
+
                 let new_result = validate_node_vs_node(
                     &input_cursor,
                     &schema_cursor,
@@ -130,30 +130,20 @@ pub fn validate_node_vs_node(
                     input_str,
                     got_eof,
                 );
-
-                result.errors.extend(new_result.errors);
-                // This is a merge for the JSON values.
-                if let Some(new_obj) = new_result.value.as_object() {
-                    if let Some(current_obj) = result.value.as_object_mut() {
-                        for (key, value) in new_obj {
-                            current_obj.insert(key.clone(), value.clone());
-                        }
-                    } else {
-                        result.value = new_result.value;
-                    }
-                }
-                result.schema_descendant_index = new_result.schema_descendant_index;
-                result.input_descendant_index = new_result.input_descendant_index;
+                result.join_other_result(&new_result);
+                result.sync_cursor_pos(&schema_cursor, &input_cursor);
             } else {
-                break;
+                trace!("One of input or schema node does not have siblings");
+
+                return result;
             }
         }
     } else {
-        trace!(
-            "Both input and schema node were top level, but they didn't both have children. Trees:\n{}\n{}",
-            input_node.to_sexp(),
-            schema_node.to_sexp()
-        );
+        trace!("TODO: should not get here");
+
+        if !got_eof {
+            return result;
+        };
 
         let schema_child_count = schema_cursor.node().child_count();
         let input_child_count = input_cursor.node().child_count();
@@ -172,11 +162,6 @@ pub fn validate_node_vs_node(
 
         return result;
     }
-
-    result.schema_descendant_index = schema_cursor.descendant_index();
-    result.input_descendant_index = input_cursor.descendant_index();
-
-    result
 }
 
 /// Check if both nodes are textual nodes.

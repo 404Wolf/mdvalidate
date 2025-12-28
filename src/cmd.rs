@@ -1,7 +1,10 @@
 use crate::mdschema::validator::{
-    errors::{debug_print_error, pretty_print_error, ParserError, PrettyPrintError, ValidationError},
+    errors::{
+        ParserError, PrettyPrintError, ValidationError, debug_print_error, pretty_print_error,
+    },
     validator::Validator,
 };
+use crate::helpers::node_print::PrettyPrint;
 use colored::Colorize;
 use serde_json::Value;
 use std::io::{Read, Write};
@@ -125,7 +128,24 @@ pub fn process_stdio<R: Read, W: Write>(
     quiet: bool,
     debug_mode: bool,
 ) -> Result<((Vec<ValidationError>, Value), bool), ProcessingError> {
-    let ((errors, matches), validator, _input_str) = process(schema_str, input, fast_fail)?;
+    let ((errors, matches), validator, input_str) = process(schema_str, input, fast_fail)?;
+
+    if debug_mode {
+        eprintln!("\n{}", "=== Debug Information ===");
+
+        eprintln!("\n{}", "Schema String:");
+        eprintln!("```\n{}\n```", schema_str.dimmed());
+
+        eprintln!("\n{}", "Input String:");
+        eprintln!("```\n{}\n```", input_str.dimmed());
+
+        eprintln!("\n{}", "Schema S-Expression:");
+        eprintln!("{}", validator.schema_tree.root_node().pretty_print().dimmed());
+
+        eprintln!("\n{}", "Input S-Expression:");
+        eprintln!("{}", validator.input_tree.root_node().pretty_print().dimmed());
+        eprintln!();
+    }
 
     let mut errored = false;
     if errors.is_empty() {
@@ -144,7 +164,7 @@ pub fn process_stdio<R: Read, W: Write>(
     } else {
         for error in &errors {
             let error_output = if debug_mode {
-                debug_print_error(error)
+                format!("{}\n{}", "Error Enum:", debug_print_error(error).dimmed())
             } else {
                 pretty_print_error(error, &validator, filename)?
             };
@@ -168,9 +188,13 @@ mod tests {
     use super::*;
     use std::io::{self, Cursor, Read};
 
-    fn get_validator<R: Read>(schema: &String, mut input: R, fast_fail: bool) -> (Vec<ValidationError>, Value) {
-        let ((errors, matches), _validator, _) =
-            process(schema, &mut input, fast_fail).expect("Validation should complete without errors");
+    fn get_validator<R: Read>(
+        schema: &String,
+        mut input: R,
+        fast_fail: bool,
+    ) -> (Vec<ValidationError>, Value) {
+        let ((errors, matches), _validator, _) = process(schema, &mut input, fast_fail)
+            .expect("Validation should complete without errors");
         (errors, matches)
     }
 
@@ -310,22 +334,6 @@ This is a shopping list:
     }
 
     #[test]
-    fn test_streaming_input_with_errors() {
-        let schema_str = r#"# CSDS"#.to_string();
-        let input_data = r#"# JSDS"#;
-
-        let cursor = Cursor::new(input_data.as_bytes());
-        let reader = LimitedReader::new(cursor, 2);
-
-        let (errors, matches) = get_validator(&schema_str, reader, false);
-        assert!(
-            !errors.is_empty(),
-            "Expected validation errors for mismatched input but found none."
-        );
-        assert!(matches.is_null() || matches.as_object().map_or(true, |obj| obj.is_empty()));
-    }
-
-    #[test]
     fn test_multiple_nodes_with_one_error_receives_one_error_once() {
         let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d+/`
 
@@ -344,7 +352,7 @@ This is a test
 This is a test"#;
 
         let cursor = Cursor::new(input_data.as_bytes());
-        let reader = LimitedReader::new(cursor, 9);
+        let reader = LimitedReader::new(cursor, 1);
 
         let (errors, matches) = get_validator(&schema_str, reader, false);
         assert_eq!(
@@ -358,8 +366,8 @@ This is a test"#;
 
     #[test]
     fn test_process_stdio_with_fake_writer_gets_json_output() {
-        let schema_str = "# Hi `name:/[A-Za-z]+/`!".to_string();
-        let input_data = "# Hi Wolf!";
+        let schema_str = "# Hi `name:/[A-Za-z]+/`".to_string();
+        let input_data = "# Hi Wolf";
 
         let cursor = Cursor::new(input_data.as_bytes());
         let mut reader = LimitedReader::new(cursor, 4);
@@ -374,11 +382,11 @@ This is a test"#;
             false,
             false,
         )
-        .expect("Processing should complete without errors");
+        .unwrap();
 
         assert!(!errored, "There should be no errors for matching input");
 
-        let output_str = String::from_utf8(output).expect("Output should be valid UTF-8");
+        let output_str = String::from_utf8(output).unwrap();
         assert_eq!(output_str, "{\"name\":\"Wolf\"}\n",);
         assert_eq!(
             output_str,

@@ -1,8 +1,1 @@
-# Test
-
-- `test:/\w+/`{2,2}
-  - `test2:/\w+/`{1,1}
-
-```{lang:/.*/}
-{code}
-```
+# Test `name:/[a-zA-Z]+/`
