@@ -4,6 +4,7 @@ use tracing::instrument;
 use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
+    cursor_pair::NodeCursorPair,
     errors::*,
     matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars},
     node_walker::{ValidationResult, node_vs_node::validate_node_vs_node},
@@ -16,21 +17,19 @@ use crate::mdschema::validator::{
 /// Handles text nodes (emphasis, strong, text) and textual containers (paragraphs, headings).
 /// When the schema contains a text-code-text pattern, those nodes form a "matcher group"
 /// and are validated using `validate_matcher_vs_text` instead of literal comparison.
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
+#[instrument(skip(cursor_pair, got_eof), level = "debug", fields(
+    i = %cursor_pair.input_cursor.descendant_index(),
+    s = %cursor_pair.schema_cursor.descendant_index(),
 ), ret)]
 pub fn validate_text_vs_text(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
+    cursor_pair: &NodeCursorPair,
     got_eof: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+    let mut result =
+        ValidationResult::from_cursors(&cursor_pair.schema_cursor, &cursor_pair.input_cursor);
 
-    let mut input_cursor = input_cursor.clone();
-    let mut schema_cursor = schema_cursor.clone();
+    let mut input_cursor = cursor_pair.input_cursor.clone();
+    let mut schema_cursor = cursor_pair.schema_cursor.clone();
 
     // Some invariants due to previous bugs
     debug_assert_ne!(input_cursor.node().kind(), "tight_list");
@@ -51,7 +50,7 @@ pub fn validate_text_vs_text(
     let input_node = input_cursor.node();
     let schema_node = schema_cursor.node();
 
-    let matcher_count = matcher_count_in_children(&schema_cursor, schema_str);
+    let matcher_count = matcher_count_in_children(&schema_cursor, cursor_pair.schema_str);
     if matcher_count > 1 {
         result.add_error(ValidationError::SchemaError(
             SchemaError::MultipleMatchersInNodeChildren {
@@ -67,15 +66,14 @@ pub fn validate_text_vs_text(
         Some((prefix_node, matcher_node, suffix_node)) => {
             trace!("Found potential matcher nodes in schema");
             // Try to create a matcher from the nodes
-            match try_from_code_and_text_node(matcher_node, suffix_node, schema_str) {
+            match try_from_code_and_text_node(matcher_node, suffix_node, cursor_pair.schema_str) {
                 // We got a matcher!
                 Ok(matcher) => {
                     trace!("Successfully created matcher, delegating to validate_matcher_vs_text");
+                    let child_pair =
+                        cursor_pair.with_cursors(input_cursor.clone(), schema_cursor.clone());
                     validate_matcher_vs_text(
-                        &input_cursor,
-                        &schema_cursor,
-                        schema_str,
-                        input_str,
+                        &child_pair,
                         got_eof,
                         (prefix_node, (matcher, matcher_node), suffix_node),
                     )
@@ -115,14 +113,10 @@ pub fn validate_text_vs_text(
 
                     if input_cursor.node().kind() == "text" && schema_cursor.node().kind() == "text"
                     {
-                        let intermediate_result = validate_textual_nodes(
-                            &input_cursor,
-                            &schema_cursor,
-                            schema_str,
-                            input_str,
-                            got_eof,
-                            false,
-                        );
+                        let child_pair =
+                            cursor_pair.with_cursors(input_cursor.clone(), schema_cursor.clone());
+                        let intermediate_result =
+                            validate_textual_nodes(&child_pair, got_eof, false);
 
                         result.join_other_result(&intermediate_result);
 
@@ -140,14 +134,10 @@ pub fn validate_text_vs_text(
 
                     // Validate the code span's text
                     {
-                        let intermediate_result = validate_textual_nodes(
-                            &input_cursor,
-                            &schema_cursor,
-                            schema_str,
-                            input_str,
-                            got_eof,
-                            false,
-                        );
+                        let child_pair =
+                            cursor_pair.with_cursors(input_cursor.clone(), schema_cursor.clone());
+                        let intermediate_result =
+                            validate_textual_nodes(&child_pair, got_eof, false);
 
                         result.join_other_result(&intermediate_result);
 
@@ -160,14 +150,9 @@ pub fn validate_text_vs_text(
                     input_cursor.goto_next_sibling();
                     schema_cursor.goto_next_sibling();
 
-                    let intermediate_result = validate_textual_nodes(
-                        &input_cursor,
-                        &schema_cursor,
-                        schema_str,
-                        input_str,
-                        got_eof,
-                        true,
-                    );
+                    let child_pair =
+                        cursor_pair.with_cursors(input_cursor.clone(), schema_cursor.clone());
+                    let intermediate_result = validate_textual_nodes(&child_pair, got_eof, true);
 
                     result.join_other_result(&intermediate_result);
 
@@ -224,14 +209,9 @@ pub fn validate_text_vs_text(
             if is_textual_node(&input_node) && is_textual_node(&schema_node) {
                 trace!("Both nodes are textual, validating directly");
                 // Both are textual nodes, validate them directly
-                return validate_textual_nodes(
-                    &input_cursor,
-                    &schema_cursor,
-                    schema_str,
-                    input_str,
-                    got_eof,
-                    false,
-                );
+                let child_pair =
+                    cursor_pair.with_cursors(input_cursor.clone(), schema_cursor.clone());
+                return validate_textual_nodes(&child_pair, got_eof, false);
             }
 
             if let Some(error) =
@@ -252,14 +232,12 @@ pub fn validate_text_vs_text(
             }
 
             // Recursively validate children. If they weren't textual, that means they're textual containers.
-            let child_result = validate_textual_container_children(
-                &mut input_cursor,
-                &mut schema_cursor,
-                schema_str,
-                input_str,
-                got_eof,
-                input_child_count,
-            );
+            let mut child_pair =
+                cursor_pair.with_cursors(input_cursor.clone(), schema_cursor.clone());
+            let child_result =
+                validate_textual_container_children(&mut child_pair, got_eof, input_child_count);
+            input_cursor = child_pair.input_cursor;
+            schema_cursor = child_pair.schema_cursor;
 
             result.join_other_result(&child_result);
 
@@ -326,29 +304,24 @@ fn matcher_count_in_children(schema_cursor: &TreeCursor, schema_str: &str) -> us
 /// ensure that two SPECIFIC text nodes are the same.
 ///
 /// # Arguments
-/// * `input_cursor` - The cursor pointing to the input node, which must be a text node.
-/// * `schema_cursor` - The cursor pointing to the schema node, which must be a text node.
-/// * `schema_str` - The string representation of the schema node.
-/// * `input_str` - The string representation of the input node.
+/// * `cursor_pair` - Input/schema cursors plus their full strings.
 /// * `got_eof` - Whether the end of file has been reached.
 /// * `strip_extras` - Whether to strip matcher extras from the start of the
 ///   input string. For example, if the input string is "{1,2}! test", when
 ///   comparing, strip away until after the first space, only comparing "test".
 fn validate_textual_nodes(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
+    cursor_pair: &NodeCursorPair,
     got_eof: bool,
     strip_extras: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+    let mut result =
+        ValidationResult::from_cursors(&cursor_pair.schema_cursor, &cursor_pair.input_cursor);
 
-    let schema_node = schema_cursor.node();
-    let input_node = input_cursor.node();
+    let schema_node = cursor_pair.schema_cursor.node();
+    let input_node = cursor_pair.input_cursor.node();
 
-    let mut schema_cursor = schema_cursor.clone();
-    let mut input_cursor = input_cursor.clone();
+    let mut schema_cursor = cursor_pair.schema_cursor.clone();
+    let mut input_cursor = cursor_pair.input_cursor.clone();
 
     trace!(
         "Validating textual nodes: input={:?}, schema={:?}, strip_extras={}",
@@ -358,7 +331,12 @@ fn validate_textual_nodes(
     );
 
     // Check node kind first
-    if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, schema_str, input_str) {
+    if let Some(error) = compare_node_kinds(
+        &schema_cursor,
+        &input_cursor,
+        cursor_pair.schema_str,
+        cursor_pair.input_str,
+    ) {
         trace!("Error: Node kind mismatch");
         result.add_error(error);
         return result;
@@ -368,8 +346,8 @@ fn validate_textual_nodes(
     if let Some(error) = compare_text_contents(
         &schema_node,
         &input_node,
-        schema_str,
-        input_str,
+        cursor_pair.schema_str,
+        cursor_pair.input_str,
         &schema_cursor,
         &input_cursor,
         got_eof,
@@ -396,19 +374,22 @@ fn validate_textual_nodes(
 /// node, and then the siblings are walked in lock step checking each textual
 /// node against the other.
 fn validate_textual_container_children(
-    input_cursor: &mut TreeCursor,
-    schema_cursor: &mut TreeCursor,
-    schema_str: &str,
-    input_str: &str,
+    cursor_pair: &mut NodeCursorPair,
     got_eof: bool,
     input_child_count: usize,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+    let mut result =
+        ValidationResult::from_cursors(&cursor_pair.schema_cursor, &cursor_pair.input_cursor);
 
     trace!(
         "Validating textual container children, child_count={}",
         input_child_count
     );
+
+    let input_str = cursor_pair.input_str;
+    let schema_str = cursor_pair.schema_str;
+    let input_cursor = &mut cursor_pair.input_cursor;
+    let schema_cursor = &mut cursor_pair.schema_cursor;
 
     let mut i = 0;
     loop {
@@ -429,7 +410,7 @@ fn validate_textual_container_children(
             trace!("Both children are textual nodes, comparing directly");
             // Both are textual, compare them directly
             if let Some(error) =
-                compare_node_kinds(&schema_cursor, &input_cursor, schema_str, input_str)
+                compare_node_kinds(schema_cursor, input_cursor, schema_str, input_str)
             {
                 trace!("Error: Node kind mismatch in textual children");
                 result.add_error(error);
@@ -459,13 +440,13 @@ fn validate_textual_container_children(
             );
 
             // They could be lists, or really anything
-            let child_result = validate_node_vs_node(
-                input_cursor,
-                schema_cursor,
-                schema_str,
+            let child_pair = NodeCursorPair::new(
+                input_cursor.clone(),
+                schema_cursor.clone(),
                 input_str,
-                got_eof && is_last_input_node,
+                schema_str,
             );
+            let child_result = validate_node_vs_node(&child_pair, got_eof && is_last_input_node);
             result.join_other_result(&child_result);
             if !result.errors.is_empty() {
                 trace!("Error: Validation failed during recursion");
@@ -528,18 +509,16 @@ fn try_from_code_and_text_node(
 /// The matcher can match against input text and optionally capture the matched value.
 /// Supports prefix/suffix matching and various pattern types (regex, literal, etc.).
 pub fn validate_matcher_vs_text<'a>(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
+    cursor_pair: &NodeCursorPair,
     got_eof: bool,
     matcher_group: (Option<Node<'a>>, (Matcher, Node<'a>), Option<Node<'a>>),
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+    let mut result =
+        ValidationResult::from_cursors(&cursor_pair.schema_cursor, &cursor_pair.input_cursor);
 
     // Mutable cursors that we can walk forward as we validate
-    let mut schema_cursor = schema_cursor.clone();
-    let mut input_cursor = input_cursor.clone();
+    let mut schema_cursor = cursor_pair.schema_cursor.clone();
+    let mut input_cursor = cursor_pair.input_cursor.clone();
 
     // Destructure to make it easier to work with
     let (schema_prefix_node, (matcher, _matcher_node), schema_suffix_node) = matcher_group;
@@ -577,9 +556,11 @@ pub fn validate_matcher_vs_text<'a>(
     if let Some(schema_prefix_node) = schema_prefix_node {
         trace!("Validating prefix before matcher");
 
-        let schema_prefix_str = &schema_str[schema_prefix_node.byte_range()];
+        let schema_prefix_str = &cursor_pair.schema_str[schema_prefix_node.byte_range()];
         let input_prefix_str =
-            input_str.get(input_byte_offset..input_byte_offset + schema_prefix_str.len());
+            cursor_pair
+                .input_str
+                .get(input_byte_offset..input_byte_offset + schema_prefix_str.len());
 
         // Check that the input extends enough that we can cover the full prefix.
         if let Some(input_prefix_str) = input_prefix_str {
@@ -608,13 +589,13 @@ pub fn validate_matcher_vs_text<'a>(
 
             trace!("Prefix matched successfully");
             input_byte_offset += schema_prefix_node.byte_range().len();
-        } else if is_last_node(input_str, &input_cursor.node()) {
+        } else if is_last_node(cursor_pair.input_str, &input_cursor.node()) {
             // If we're waiting at the end, we can't validate the prefix yet
-            let best_prefix_input_we_can_do = &input_str[input_byte_offset..];
+            let best_prefix_input_we_can_do = &cursor_pair.input_str[input_byte_offset..];
             let best_prefix_length = best_prefix_input_we_can_do.len();
             let schema_prefix_partial = &schema_prefix_str[..best_prefix_length];
 
-            if waiting_at_end(got_eof, input_str, &input_cursor) {
+            if waiting_at_end(got_eof, cursor_pair.input_str, &input_cursor) {
                 trace!("Input prefix not long enough, but waiting at end of input");
 
                 if schema_prefix_partial != best_prefix_input_we_can_do {
@@ -654,13 +635,14 @@ pub fn validate_matcher_vs_text<'a>(
     }
 
     // Don't validate after the prefix if there isn't enough content
-    if input_byte_offset >= input_str.len() {
+    if input_byte_offset >= cursor_pair.input_str.len() {
         if got_eof {
             let schema_prefix_str = schema_prefix_node
-                .map(|node| &schema_str[node.byte_range()])
+                .map(|node| &cursor_pair.schema_str[node.byte_range()])
                 .unwrap_or("");
 
-            let best_prefix_input_we_can_do = &input_str[input_cursor.node().byte_range().start..];
+            let best_prefix_input_we_can_do =
+                &cursor_pair.input_str[input_cursor.node().byte_range().start..];
 
             result.add_error(ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
@@ -677,15 +659,19 @@ pub fn validate_matcher_vs_text<'a>(
     }
 
     // All input that comes after the expected prefix
-    let input_after_prefix =
-        input_str[input_byte_offset..input_cursor.node().byte_range().end].to_string();
+    let input_after_prefix = cursor_pair.input_str
+        [input_byte_offset..input_cursor.node().byte_range().end]
+        .to_string();
 
     if !got_eof && input_after_prefix.contains("`") {
         return result;
     } else {
         trace!(
             "xAttempting to match the input \"{}\"'s prefix, which is {}",
-            input_cursor.node().utf8_text(input_str.as_bytes()).unwrap(),
+            input_cursor
+                .node()
+                .utf8_text(cursor_pair.input_str.as_bytes())
+                .unwrap(),
             input_after_prefix
         );
     }
@@ -741,13 +727,14 @@ pub fn validate_matcher_vs_text<'a>(
         // Everything that comes after the matcher
         let schema_suffix = {
             let text_node_after_code_node_str_contents =
-                &schema_str[schema_suffix_node.byte_range()];
+                &cursor_pair.schema_str[schema_suffix_node.byte_range()];
             // All text after the matcher node and maybe the text node right after it ("extras")
             get_everything_after_special_chars(text_node_after_code_node_str_contents).unwrap()
         };
 
         // Seek forward from the current input byte offset by the length of the suffix
-        let input_suffix = &input_str[input_byte_offset..input_byte_offset + schema_suffix.len()];
+        let input_suffix = &cursor_pair.input_str
+            [input_byte_offset..input_byte_offset + schema_suffix.len()];
 
         if schema_suffix != input_suffix {
             trace!(
@@ -837,6 +824,7 @@ mod tests {
     use tree_sitter::TreeCursor;
 
     use crate::mdschema::validator::{
+        cursor_pair::NodeCursorPair,
         errors::*,
         matcher::matcher::MatcherError,
         node_walker::{
@@ -848,24 +836,28 @@ mod tests {
         ts_utils::parse_markdown,
     };
 
+    fn make_pair<'a>(
+        input_cursor: &TreeCursor<'a>,
+        schema_cursor: &TreeCursor<'a>,
+        input_str: &'a str,
+        schema_str: &'a str,
+    ) -> NodeCursorPair<'a> {
+        NodeCursorPair::new(input_cursor.clone(), schema_cursor.clone(), input_str, schema_str)
+    }
+
     fn validate_matcher_vs_text<'a>(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
+        cursor_pair: &NodeCursorPair<'a>,
         got_eof: bool,
     ) -> ValidationResult {
         use super::try_from_code_and_text_node;
 
-        match extract_matcher_nodes(&schema_cursor) {
+        match extract_matcher_nodes(&cursor_pair.schema_cursor) {
             Some((prefix_node, matcher_node, suffix_node)) => {
-                let matcher = try_from_code_and_text_node(matcher_node, suffix_node, schema_str)
-                    .expect("test utility expects valid matcher");
+                let matcher =
+                    try_from_code_and_text_node(matcher_node, suffix_node, cursor_pair.schema_str)
+                        .expect("test utility expects valid matcher");
                 validate_matcher_vs_text_original(
-                    input_cursor,
-                    schema_cursor,
-                    schema_str,
-                    input_str,
+                    cursor_pair,
                     got_eof,
                     (prefix_node, (matcher, matcher_node), suffix_node),
                 )
@@ -905,13 +897,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true, // eof is true
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true); // eof is true
 
         // Expect a NodeContentMismatch error for "Literal" vs "Different"
         assert_eq!(result.errors.len(), 1);
@@ -943,13 +930,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true, // eof is true
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true); // eof is true
 
         assert_eq!(result.errors.len(), 1);
         match &result.errors[0] {
@@ -977,13 +959,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            false, // eof is false
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, false); // eof is false
 
         // Should not error because fewer nodes is okay when not at EOF
         assert!(
@@ -1004,13 +981,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            false, // eof is false
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, false); // eof is false
 
         // Should error because input has more nodes than schema
         assert_eq!(result.errors.len(), 1);
@@ -1038,8 +1010,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true);
 
         assert!(
             result.errors.is_empty(),
@@ -1061,8 +1033,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true);
 
         assert_eq!(result.errors.len(), 1);
         match &result.errors[0] {
@@ -1092,8 +1064,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true);
 
         assert_eq!(result.errors.len(), 1);
         match &result.errors[0] {
@@ -1123,8 +1095,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true);
 
         assert_eq!(result.errors.len(), 1);
         match &result.errors[0] {
@@ -1155,13 +1127,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true, // eof is true
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true); // eof is true
 
         // Should have no errors for identical content
         assert!(
@@ -1300,13 +1267,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result = validate_matcher_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_matcher_vs_text(&cursor_pair, true);
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -1330,13 +1292,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true, // eof is true
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true); // eof is true
 
         // Should have an error because the literal codeblocks don't match
         assert_eq!(result.errors.len(), 1);
@@ -1367,8 +1324,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true);
 
         assert!(
             result.errors.is_empty(),
@@ -1399,8 +1356,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true);
         assert!(
             result.errors.is_empty(),
             "Errors found: {:?}",
@@ -1448,13 +1405,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result = validate_matcher_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_matcher_vs_text(&cursor_pair, true);
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -1477,13 +1429,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result = validate_matcher_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_matcher_vs_text(&cursor_pair, true);
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -1511,13 +1458,8 @@ mod tests {
         assert_eq!(input_cursor.node().kind(), "heading_content");
         assert_eq!(schema_cursor.node().kind(), "heading_content");
 
-        let result = validate_text_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true);
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -1536,13 +1478,8 @@ mod tests {
         let input_tree = parse_markdown(input_str).unwrap();
         let mut input_cursor = input_tree.walk();
 
-        let result = validate_text_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            false, // we are allowed to have a broken matcher if it is the last com
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, false); // we are allowed to have a broken matcher if it is the last com
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -1565,13 +1502,8 @@ mod tests {
         input_cursor.goto_first_child(); // document -> paragraph
 
         // When EOF is not set, we're waiting for more input
-        let result = validate_matcher_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            false,
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_matcher_vs_text(&cursor_pair, false);
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -1601,13 +1533,8 @@ mod tests {
         input_cursor.goto_first_child(); // document -> paragraph
 
         // When EOF is not set, we're waiting for more input
-        let result = validate_matcher_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            false,
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_matcher_vs_text(&cursor_pair, false);
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -1636,13 +1563,8 @@ mod tests {
         input_cursor.goto_first_child(); // document -> paragraph
 
         // When EOF is not set, we're waiting for more input
-        let result = validate_matcher_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            false,
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_matcher_vs_text(&cursor_pair, false);
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -1672,13 +1594,8 @@ mod tests {
 
         // When EOF is not set and input is empty, we're waiting for more input
         // When EOF is not set, we're waiting for more input
-        let result = validate_matcher_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            false,
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_matcher_vs_text(&cursor_pair, false);
 
         // When waiting for more input without EOF, we shouldn't report errors yet
         assert!(
@@ -1706,8 +1623,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true);
 
         assert!(!result.errors.is_empty());
         match result.errors.first().unwrap() {
@@ -1771,13 +1688,8 @@ mod tests {
         schema_cursor.goto_next_sibling(); // list_marker -> paragraph
         input_cursor.goto_next_sibling(); // list_marker -> paragraph
 
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true, // eof is true
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true); // eof is true
 
         // The test should fail with a NodeContentMismatch error
         assert_eq!(
@@ -1816,8 +1728,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> paragraph
         input_cursor.goto_first_child(); // document -> paragraph
 
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_text_vs_text(&cursor_pair, true);
 
         assert!(!result.errors.is_empty());
         match result.errors.first().unwrap() {

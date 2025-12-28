@@ -3,9 +3,8 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::json;
 use tracing::instrument;
-use tree_sitter::TreeCursor;
-
 use crate::mdschema::validator::{
+    cursor_pair::NodeCursorPair,
     errors::{NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError},
     matcher::matcher::{Matcher, MatcherError},
     node_walker::ValidationResult,
@@ -44,26 +43,24 @@ use crate::mdschema::validator::{
 ///
 /// Note you cannot yet enforce regex on the actual code content.
 /// ```
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str), level = "debug", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
+#[instrument(skip(cursor_pair), level = "debug", fields(
+    i = %cursor_pair.input_cursor.descendant_index(),
+    s = %cursor_pair.schema_cursor.descendant_index(),
 ), ret)]
 pub fn validate_code_vs_code(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
+    cursor_pair: &NodeCursorPair,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(input_cursor, input_cursor);
+    let mut result =
+        ValidationResult::from_cursors(&cursor_pair.schema_cursor, &cursor_pair.input_cursor);
 
-    let input_cursor = input_cursor.clone();
-    let schema_cursor = schema_cursor.clone();
+    let input_cursor = cursor_pair.input_cursor.clone();
+    let schema_cursor = cursor_pair.schema_cursor.clone();
 
     debug_assert_eq!(input_cursor.node().kind(), "fenced_code_block");
     debug_assert_eq!(schema_cursor.node().kind(), "fenced_code_block");
 
-    let input_extracted = extract_codeblock_contents(&input_cursor, input_str);
-    let schema_extracted = extract_codeblock_contents(&schema_cursor, schema_str);
+    let input_extracted = extract_codeblock_contents(&input_cursor, cursor_pair.input_str);
+    let schema_extracted = extract_codeblock_contents(&schema_cursor, cursor_pair.schema_str);
 
     let (
         Some((input_lang, (input_code, input_code_descendant_index))),
@@ -202,10 +199,22 @@ fn extract_id_from_curly_braces(input: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use tree_sitter::TreeCursor;
 
-    use crate::mdschema::validator::{matcher::matcher::MatcherType, ts_utils::parse_markdown};
+    use crate::mdschema::validator::{
+        cursor_pair::NodeCursorPair, matcher::matcher::MatcherType, ts_utils::parse_markdown,
+    };
 
     use super::*;
+
+    fn make_pair<'a>(
+        input_cursor: &TreeCursor<'a>,
+        schema_cursor: &TreeCursor<'a>,
+        input_str: &'a str,
+        schema_str: &'a str,
+    ) -> NodeCursorPair<'a> {
+        NodeCursorPair::new(input_cursor.clone(), schema_cursor.clone(), input_str, schema_str)
+    }
 
     #[test]
     fn test_extract_id_from_curly_braces() {
@@ -251,12 +260,8 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
         assert!(schema_cursor.goto_first_child()); // move to fenced_code_block
 
-        let result = validate_code_vs_code(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str.into(),
-            input_str.into(),
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_code_vs_code(&cursor_pair);
         assert!(
             result.errors.is_empty(),
             "Expected no errors, got {:?}",
@@ -275,12 +280,9 @@ mod tests {
         let mut schema_cursor_again = schema_tree_again.walk();
         assert!(schema_cursor_again.goto_first_child()); // move to fenced_code_block
 
-        let result_negative = validate_code_vs_code(
-            &mut input_cursor_negative,
-            &mut schema_cursor_again,
-            schema_str.into(),
-            input_str_negative.into(),
-        );
+        let cursor_pair =
+            make_pair(&input_cursor_negative, &schema_cursor_again, input_str_negative, schema_str);
+        let result_negative = validate_code_vs_code(&cursor_pair);
 
         assert!(!result_negative.errors.is_empty());
     }
@@ -301,8 +303,8 @@ fn main() {}
         let mut input_cursor = input_tree.walk();
         assert!(input_cursor.goto_first_child()); // move to fenced_code_block
 
-        let result =
-            validate_code_vs_code(&mut input_cursor, &mut schema_cursor, schema_str, input_str);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_code_vs_code(&cursor_pair);
         assert!(result.errors.is_empty());
         assert_eq!(result.value, json!({ "lang": "rust" }))
     }
@@ -323,8 +325,8 @@ fn main() {}
         let mut input_cursor = input_tree.walk();
         assert!(input_cursor.goto_first_child()); // move to fenced_code_block
 
-        let result =
-            validate_code_vs_code(&mut input_cursor, &mut schema_cursor, schema_str, input_str);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_code_vs_code(&cursor_pair);
         assert!(result.errors.is_empty());
         assert_eq!(
             result.value,

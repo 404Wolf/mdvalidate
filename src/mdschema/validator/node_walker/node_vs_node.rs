@@ -1,13 +1,14 @@
 use log::trace;
 use tracing::instrument;
-use tree_sitter::{Node, TreeCursor};
+use tree_sitter::Node;
 
-use crate::mdschema::validator::ts_utils::{is_marker_node, is_ruler_node};
 use crate::mdschema::validator::{
+    cursor_pair::NodeCursorPair,
     node_walker::{
         ValidationResult, code_vs_code::validate_code_vs_code, list_vs_list::validate_list_vs_list,
         text_vs_text::validate_text_vs_text, ruler_vs_ruler::validate_ruler_vs_ruler,
     },
+    ts_utils::{is_marker_node, is_ruler_node},
     ts_utils::{is_codeblock, is_list_node, is_textual_container, is_textual_node},
     utils::compare_node_children_lengths,
 };
@@ -19,119 +20,93 @@ use crate::mdschema::validator::{
 /// - Code blocks -> `validate_code_vs_code`
 /// - Lists -> `validate_list_vs_list`
 /// - Headings/documents -> recursively validate children
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "trace", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
+#[instrument(skip(cursor_pair, got_eof), level = "trace", fields(
+    i = %cursor_pair.input_cursor.descendant_index(),
+    s = %cursor_pair.schema_cursor.descendant_index(),
 ), ret)]
 pub fn validate_node_vs_node(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
+    cursor_pair: &NodeCursorPair,
     got_eof: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(input_cursor, schema_cursor);
+    let mut result =
+        ValidationResult::from_cursors(&cursor_pair.schema_cursor, &cursor_pair.input_cursor);
 
-    let input_node = input_cursor.node();
-    let schema_node = schema_cursor.node();
+    let input_node = cursor_pair.input_cursor.node();
+    let schema_node = cursor_pair.schema_cursor.node();
 
     // Make mutable copies that we can walk
-    let mut input_cursor = input_cursor.clone();
-    let mut schema_cursor = schema_cursor.clone();
+    let mut input_cursor = cursor_pair.input_cursor.clone();
+    let mut schema_cursor = cursor_pair.schema_cursor.clone();
 
     // Both are textual nodes - use text_vs_text directly
     if both_are_textual_nodes(&input_node, &schema_node) {
         trace!("Both are textual nodes, validating text vs text");
 
-        return validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
+        let child_pair = cursor_pair.with_cursors(input_cursor, schema_cursor);
+        return validate_text_vs_text(&child_pair, got_eof);
     }
 
     // Both are container nodes - use container_vs_container directly
     if both_are_codeblocks(&input_node, &schema_node) {
         trace!("Both are container nodes, validating container vs container");
 
-        return validate_code_vs_code(&input_cursor, &schema_cursor, schema_str, input_str);
+        let child_pair = cursor_pair.with_cursors(input_cursor, schema_cursor);
+        return validate_code_vs_code(&child_pair);
     }
 
     // Both are textual containers - check for matcher usage
     if both_are_textual_containers(&input_node, &schema_node) {
         trace!("Both are textual containers, validating text vs text");
 
-        return validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
+        let child_pair = cursor_pair.with_cursors(input_cursor, schema_cursor);
+        return validate_text_vs_text(&child_pair, got_eof);
     }
 
     // Both are list nodes
     if both_are_list_nodes(&input_node, &schema_node) {
         trace!("Both are list nodes, validating list vs list");
 
-        return validate_list_vs_list(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
+        let child_pair = cursor_pair.with_cursors(input_cursor, schema_cursor);
+        return validate_list_vs_list(&child_pair, got_eof);
     }
 
-    // Both are heading nodes or document nodes
-    //
-    // Crawl down one layer to get to the actual children
-    if both_are_matching_top_level_nodes(&input_node, &schema_node)
-        && input_cursor.clone().goto_first_child() // don't actually do the walking down just yet
-        && schema_cursor.clone().goto_first_child()
-    {
-        trace!("Both are heading nodes or document nodes, validating heading vs heading");
-
-        // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
+    // Both are the same kind and have children - recurse through them.
+    if input_node.kind() == schema_node.kind() {
         if let Some(error) = compare_node_children_lengths(&schema_cursor, &input_cursor, got_eof) {
             result.add_error(error);
-
             return result;
         }
 
-        // Now actually go down to the children
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
+        let mut input_child_cursor = input_cursor.clone();
+        let mut schema_child_cursor = schema_cursor.clone();
 
-        let new_result = validate_node_vs_node(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
+        let input_has_child = input_child_cursor.goto_first_child();
+        let schema_has_child = schema_child_cursor.goto_first_child();
+
+        if !input_has_child || !schema_has_child {
+            return result;
+        }
+
+        let child_pair =
+            cursor_pair.with_cursors(input_child_cursor.clone(), schema_child_cursor.clone());
+        let new_result = validate_node_vs_node(&child_pair, got_eof);
         result.join_other_result(&new_result);
-        result.sync_cursor_pos(&schema_cursor, &input_cursor);
+        result.sync_cursor_pos(&schema_child_cursor, &input_child_cursor);
 
         loop {
-            // TODO: handle case where one has more children than the other
-            let input_had_sibling = input_cursor.goto_next_sibling();
-            let schema_had_sibling = schema_cursor.goto_next_sibling();
+            let input_had_sibling = input_child_cursor.goto_next_sibling();
+            let schema_had_sibling = schema_child_cursor.goto_next_sibling();
 
             if input_had_sibling && schema_had_sibling {
                 trace!("Both input and schema node have siblings");
 
-                let new_result = validate_node_vs_node(
-                    &input_cursor,
-                    &schema_cursor,
-                    schema_str,
-                    input_str,
-                    got_eof,
+                let child_pair = cursor_pair.with_cursors(
+                    input_child_cursor.clone(),
+                    schema_child_cursor.clone(),
                 );
+                let new_result = validate_node_vs_node(&child_pair, got_eof);
                 result.join_other_result(&new_result);
-                result.sync_cursor_pos(&schema_cursor, &input_cursor);
+                result.sync_cursor_pos(&schema_child_cursor, &input_child_cursor);
             } else {
                 trace!("One of input or schema node does not have siblings");
 
@@ -143,7 +118,8 @@ pub fn validate_node_vs_node(
     if both_are_rulers(&input_node, &schema_node) {
         trace!("Both are rulers, validating ruler vs ruler");
         
-        return validate_ruler_vs_ruler(&input_cursor, &schema_cursor);
+        let child_pair = cursor_pair.with_cursors(input_cursor, schema_cursor);
+        return validate_ruler_vs_ruler(&child_pair);
     }
 
     if both_are_markers(&input_node, &schema_node) {
@@ -192,19 +168,6 @@ fn both_are_list_nodes(input_node: &Node, schema_node: &Node) -> bool {
     is_list_node(&input_node) && is_list_node(&schema_node)
 }
 
-/// Check if both nodes are top-level nodes (document or heading).
-fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    if input_node.kind() != schema_node.kind() {
-        return false;
-    }
-
-    match input_node.kind() {
-        "document" => true,
-        "atx_heading" => true,
-        _ => false,
-    }
-}
-
 /// Check if both nodes are codeblocks.
 fn both_are_codeblocks(input_node: &Node, schema_node: &Node) -> bool {
     is_codeblock(&input_node) && is_codeblock(&schema_node)
@@ -213,12 +176,23 @@ fn both_are_codeblocks(input_node: &Node, schema_node: &Node) -> bool {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use tree_sitter::TreeCursor;
 
     use crate::mdschema::validator::{
+        cursor_pair::NodeCursorPair,
         errors::{ChildrenCount, SchemaViolationError, ValidationError},
         node_walker::node_vs_node::validate_node_vs_node,
         ts_utils::parse_markdown,
     };
+
+    fn make_pair<'a>(
+        input_cursor: &TreeCursor<'a>,
+        schema_cursor: &TreeCursor<'a>,
+        input_str: &'a str,
+        schema_str: &'a str,
+    ) -> NodeCursorPair<'a> {
+        NodeCursorPair::new(input_cursor.clone(), schema_cursor.clone(), input_str, schema_str)
+    }
 
     #[test]
     fn validate_list_vs_list_with_nesting() {
@@ -238,8 +212,8 @@ mod tests {
         let input_cursor = input_tree.walk();
         assert_eq!(input_cursor.node().kind(), "document");
 
-        let result =
-            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_node_vs_node(&cursor_pair, true);
 
         assert!(
             result.errors.is_empty(),
@@ -269,8 +243,8 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result =
-            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_node_vs_node(&cursor_pair, false);
 
         assert!(result.errors.is_empty());
         assert_eq!(result.value, json!({}));
@@ -283,13 +257,8 @@ mod tests {
         let schema_cursor = schema2.walk();
         let input_cursor = input2.walk();
 
-        let result = validate_node_vs_node(
-            &input_cursor,
-            &schema_cursor,
-            schema_str2,
-            input_str2,
-            false,
-        );
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str2, schema_str2);
+        let result = validate_node_vs_node(&cursor_pair, false);
 
         assert!(!result.errors.is_empty());
         assert_eq!(result.value, json!({}));
@@ -305,8 +274,8 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result =
-            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_node_vs_node(&cursor_pair, true);
 
         assert!(
             result.errors.is_empty(),
@@ -326,8 +295,8 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result =
-            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_node_vs_node(&cursor_pair, true);
 
         assert!(
             result.errors.is_empty(),
@@ -347,8 +316,8 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result =
-            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_node_vs_node(&cursor_pair, true);
 
         assert!(
             result.errors.is_empty(),
@@ -368,8 +337,8 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result =
-            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_node_vs_node(&cursor_pair, true);
 
         assert!(
             !result.errors.is_empty(),
@@ -418,8 +387,8 @@ mod tests {
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
 
-        let result =
-            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_node_vs_node(&cursor_pair, true);
 
         assert!(
             result.errors.is_empty(),

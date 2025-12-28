@@ -1,26 +1,25 @@
 use log::trace;
 use tracing::instrument;
-use tree_sitter::TreeCursor;
-
-use crate::mdschema::validator::ts_utils::is_ruler_node;
-use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::mdschema::validator::{
+    cursor_pair::NodeCursorPair, node_walker::ValidationResult, ts_utils::is_ruler_node,
+};
 
 /// Validate that both nodes are rulers (thematic breaks).
 ///
 /// This is a simple check - both nodes must be ruler nodes.
 /// Rulers have no children and no content to validate.
-#[instrument(skip(input_cursor, schema_cursor), level = "trace", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
+#[instrument(skip(cursor_pair), level = "trace", fields(
+    i = %cursor_pair.input_cursor.descendant_index(),
+    s = %cursor_pair.schema_cursor.descendant_index(),
 ), ret)]
 pub fn validate_ruler_vs_ruler(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
+    cursor_pair: &NodeCursorPair,
 ) -> ValidationResult {
-    let result = ValidationResult::from_cursors(input_cursor, schema_cursor);
+    let result =
+        ValidationResult::from_cursors(&cursor_pair.schema_cursor, &cursor_pair.input_cursor);
 
-    let input_node = input_cursor.node();
-    let schema_node = schema_cursor.node();
+    let input_node = cursor_pair.input_cursor.node();
+    let schema_node = cursor_pair.schema_cursor.node();
 
     // Both should be rulers - this is validated at the caller level in node_vs_node
     debug_assert!(is_ruler_node(&input_node), "Input node should be a ruler");
@@ -39,10 +38,20 @@ pub fn validate_ruler_vs_ruler(
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use tree_sitter::TreeCursor;
     use crate::mdschema::validator::{
+        cursor_pair::NodeCursorPair, node_walker::ruler_vs_ruler::validate_ruler_vs_ruler,
         ts_utils::parse_markdown,
-        node_walker::ruler_vs_ruler::validate_ruler_vs_ruler,
     };
+
+    fn make_pair<'a>(
+        input_cursor: &TreeCursor<'a>,
+        schema_cursor: &TreeCursor<'a>,
+        input_str: &'a str,
+        schema_str: &'a str,
+    ) -> NodeCursorPair<'a> {
+        NodeCursorPair::new(input_cursor.clone(), schema_cursor.clone(), input_str, schema_str)
+    }
 
     #[test]
     fn test_validate_ruler_vs_ruler() {
@@ -58,7 +67,8 @@ mod tests {
         schema_cursor.goto_first_child(); // document -> thematic_break
         input_cursor.goto_first_child(); // document -> thematic_break
 
-        let result = validate_ruler_vs_ruler(&input_cursor, &schema_cursor);
+        let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+        let result = validate_ruler_vs_ruler(&cursor_pair);
 
         assert!(
             result.errors.is_empty(),
@@ -90,7 +100,8 @@ mod tests {
             schema_cursor.goto_first_child();
             input_cursor.goto_first_child();
 
-            let result = validate_ruler_vs_ruler(&input_cursor, &schema_cursor);
+            let cursor_pair = make_pair(&input_cursor, &schema_cursor, input_str, schema_str);
+            let result = validate_ruler_vs_ruler(&cursor_pair);
 
             assert!(
                 result.errors.is_empty(),

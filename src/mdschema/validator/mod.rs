@@ -2,6 +2,7 @@ pub mod errors;
 pub mod matcher;
 pub(crate) mod node_walker;
 pub(crate) mod ts_utils;
+pub(crate) mod cursor_pair;
 mod utils;
 pub mod validator;
 pub(crate) mod validator_state;

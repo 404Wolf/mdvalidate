@@ -1,6 +1,7 @@
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
+    cursor_pair::NodeCursorPair,
     node_walker::{node_vs_node::validate_node_vs_node, validation_result::ValidationResult},
     validator_state::ValidatorState,
 };
@@ -44,13 +45,15 @@ impl<'a> NodeWalker<'a> {
                 &mut self.schema_cursor,
             );
 
-        let validation_result = validate_node_vs_node(
-            &mut self.input_cursor,
-            &mut self.schema_cursor,
-            self.state.schema_str(),
-            self.state.last_input_str(),
-            self.state.got_eof(),
-        );
+        let validation_result = {
+            let cursor_pair = NodeCursorPair::new(
+                self.input_cursor.clone(),
+                self.schema_cursor.clone(),
+                self.state.last_input_str(),
+                self.state.schema_str(),
+            );
+            validate_node_vs_node(&cursor_pair, self.state.got_eof())
+        };
 
         self.state.push_validation_result(validation_result.clone());
 

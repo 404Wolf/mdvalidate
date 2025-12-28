@@ -160,6 +160,12 @@ impl ValidatorState {
     pub fn set_farthest_reached_pos(&mut self, farthest_reached_pos: DescendantIndexPair) {
         self.farthest_reached_pos = farthest_reached_pos;
     }
+
+    pub fn reset_validation_results(&mut self) {
+        self.matches_so_far = Value::Object(Map::new());
+        self.errors_so_far.clear();
+        self.farthest_reached_pos = DescendantIndexPair::default();
+    }
 }
 
 #[cfg(test)]

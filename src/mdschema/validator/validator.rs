@@ -6,7 +6,7 @@ use crate::mdschema::validator::{
     errors::{ParserError, ValidationError},
     node_walker::NodeWalker,
     ts_utils::new_markdown_parser,
-    validator_state::{DescendantIndexPair, ValidatorState},
+    validator_state::ValidatorState,
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -138,8 +138,7 @@ impl Validator {
     /// in parallel to the ends, starting from where we last left off.
     pub fn validate(&mut self) {
         if self.state().got_eof() {
-            self.state
-                .set_farthest_reached_pos(DescendantIndexPair::default());
+            self.state.reset_validation_results();
         }
         let mut node_validator = NodeWalker::new(
             &mut self.state,
