@@ -18,7 +18,7 @@ use crate::mdschema::validator::{
 /// and are validated using `validate_matcher_vs_text` instead of literal comparison.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index()
+    s = %schema_cursor.descendant_index(),
 ), ret)]
 pub fn validate_text_vs_text(
     input_cursor: &TreeCursor,

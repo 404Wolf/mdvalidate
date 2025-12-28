@@ -71,7 +71,7 @@ use crate::mdschema::validator::{
 /// that is not the final list in your schema.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index()
+    s = %schema_cursor.descendant_index(),
 ), ret)]
 pub fn validate_list_vs_list(
     input_cursor: &TreeCursor,

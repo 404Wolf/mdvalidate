@@ -156,6 +156,10 @@ impl ValidatorState {
     pub fn farthest_reached_pos(&self) -> DescendantIndexPair {
         self.farthest_reached_pos
     }
+
+    pub fn set_farthest_reached_pos(&mut self, farthest_reached_pos: DescendantIndexPair) {
+        self.farthest_reached_pos = farthest_reached_pos;
+    }
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@ use crate::mdschema::validator::{
     errors::{ParserError, ValidationError},
     node_walker::NodeWalker,
     ts_utils::new_markdown_parser,
-    validator_state::ValidatorState,
+    validator_state::{DescendantIndexPair, ValidatorState},
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
@@ -69,7 +69,10 @@ impl Validator {
     /// Does not update the schema tree or change the descendant indices. You will still
     /// need to call `validate` to validate until the end of the current input
     /// (which this updates).
+    #[tracing::instrument(skip(self, input))]
     fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), ValidationError> {
+        dbg!(input);
+
         // Update internal state of the last input string
         self.state.set_last_input_str(input.to_string());
 
@@ -134,6 +137,10 @@ impl Validator {
     /// Validates the input markdown against the schema by traversing both trees
     /// in parallel to the ends, starting from where we last left off.
     pub fn validate(&mut self) {
+        if self.state().got_eof() {
+            self.state
+                .set_farthest_reached_pos(DescendantIndexPair::default());
+        }
         let mut node_validator = NodeWalker::new(
             &mut self.state,
             self.input_tree.walk(),

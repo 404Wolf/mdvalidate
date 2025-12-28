@@ -36,6 +36,14 @@ impl<'a> NodeWalker<'a> {
     }
 
     pub fn validate(&mut self) -> ValidationResult {
+        self
+            .state()
+            .farthest_reached_pos()
+            .walk_cursors_to_position(
+                &mut self.input_cursor,
+                &mut self.schema_cursor,
+            );
+
         let validation_result = validate_node_vs_node(
             &mut self.input_cursor,
             &mut self.schema_cursor,
@@ -95,12 +103,10 @@ mod tests {
         let schema = "# Hello `name:/\\w+/`\n";
         let input = "# Hello Wolf\n";
 
-        let (matches, errors, final_state) = validate_str(schema, input);
+        let (matches, errors, _) = validate_str(schema, input);
 
         assert!(errors.is_empty(), "Errors found: {:?}", errors);
         assert_eq!(matches, json!({"name": "Wolf"}));
-        dbg!(final_state);
-        panic!()
     }
 
     #[test]

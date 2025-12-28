@@ -21,7 +21,7 @@ use crate::mdschema::validator::{
 /// - Headings/documents -> recursively validate children
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "trace", fields(
     i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index()
+    s = %schema_cursor.descendant_index(),
 ), ret)]
 pub fn validate_node_vs_node(
     input_cursor: &TreeCursor,
@@ -97,6 +97,7 @@ pub fn validate_node_vs_node(
         // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
         if let Some(error) = compare_node_children_lengths(&schema_cursor, &input_cursor, got_eof) {
             result.add_error(error);
+
             return result;
         }
 
@@ -112,6 +113,7 @@ pub fn validate_node_vs_node(
             got_eof,
         );
         result.join_other_result(&new_result);
+        result.sync_cursor_pos(&schema_cursor, &input_cursor);
 
         loop {
             // TODO: handle case where one has more children than the other
@@ -129,20 +131,17 @@ pub fn validate_node_vs_node(
                     got_eof,
                 );
                 result.join_other_result(&new_result);
+                result.sync_cursor_pos(&schema_cursor, &input_cursor);
             } else {
                 trace!("One of input or schema node does not have siblings");
 
-                break;
+                return result;
             }
         }
-
-        return result;
     } else {
         trace!("Both input and schema node were top level, but they didn't both have children.");
 
         if !got_eof {
-            result.sync_cursor_pos(&input_cursor, &schema_cursor);
-
             return result;
         };
 
