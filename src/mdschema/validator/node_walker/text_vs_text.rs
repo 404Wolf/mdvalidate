@@ -545,11 +545,10 @@ pub fn validate_matcher_vs_text<'a>(
     let (schema_prefix_node, (matcher, _matcher_node), schema_suffix_node) = matcher_group;
 
     trace!(
-        "Validating matcher vs text: matcher_id={:?}, has_prefix={}, has_suffix={}, is_ruler={}",
+        "Validating matcher vs text: matcher_id={:?}, has_prefix={}, has_suffix={}",
         matcher.id(),
         schema_prefix_node.is_some(),
-        schema_suffix_node.is_some(),
-        matcher.is_ruler()
+        schema_suffix_node.is_some()
     );
 
     // How far along we've validated the input. We'll update this as we go
@@ -680,37 +679,6 @@ pub fn validate_matcher_vs_text<'a>(
     // All input that comes after the expected prefix
     let input_after_prefix =
         input_str[input_byte_offset..input_cursor.node().byte_range().end].to_string();
-
-    // If the matcher is for a ruler, we should expect the entire input node to be a ruler
-    if matcher.is_ruler() {
-        trace!("Matcher is for a ruler, validating node type");
-
-        if input_cursor.node().kind() != "thematic_break" {
-            trace!(
-                "Input node is not a ruler, reporting type mismatch error (got {:?})",
-                input_cursor.node().kind()
-            );
-
-            result.add_error(ValidationError::SchemaViolation(
-                SchemaViolationError::NodeTypeMismatch {
-                    schema_index: schema_cursor.descendant_index(),
-                    input_index: input_node_descendant_index,
-                    expected: "thematic_break".into(),
-                    actual: input_cursor.node().kind().into(),
-                },
-            ));
-
-            result.sync_cursor_pos(&input_cursor, &schema_cursor);
-
-            return result;
-        } else {
-            trace!("Ruler validated successfully");
-            // It's a ruler, no further validation needed
-            result.sync_cursor_pos(&input_cursor, &schema_cursor);
-
-            return result;
-        }
-    }
 
     if !got_eof && input_after_prefix.contains("`") {
         return result;
@@ -1721,36 +1689,7 @@ mod tests {
         assert_eq!(result.value, json!({}));
     }
 
-    #[test]
-    fn test_validate_matcher_vs_text_with_ruler() {
-        let schema_str = "`ruler`";
-        let schema_tree = parse_markdown(schema_str).unwrap();
 
-        let input_str = "---";
-        let input_tree = parse_markdown(input_str).unwrap();
-
-        let mut schema_cursor = schema_tree.walk();
-        let mut input_cursor = input_tree.walk();
-
-        schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // document -> thematic_break
-
-        let result = validate_matcher_vs_text(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
-
-        assert!(
-            result.errors.is_empty(),
-            "Errors found: {:?}",
-            result.errors
-        );
-        // Rulers don't capture matches
-        assert_eq!(result.value, json!({}));
-    }
 
     #[test]
     fn test_invalid_regex_error() {

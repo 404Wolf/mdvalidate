@@ -95,6 +95,16 @@ pub fn is_textual_node(node: &Node) -> bool {
     }
 }
 
+/// Check if a node is a "marker" (i.e., a heading marker, list marker, etc).
+pub fn is_marker_node(node: &Node) -> bool {
+    node.kind().ends_with("_marker")
+}
+
+/// Check if a node is a "rule"
+pub fn is_ruler_node(node: &Node) -> bool {
+    node.kind() == "thematic_break"
+}
+
 /// Check if a node is a "textual container" (i.e., a paragraph node, list item node, or similar).
 pub fn is_textual_container(node: &Node) -> bool {
     match node.kind() {
@@ -319,6 +329,29 @@ mod tests {
         let mut cursor = tree.walk();
         cursor.goto_first_child();
         assert!(is_codeblock(&cursor.node()));
+    }
+
+    #[test]
+    fn test_is_marker_node() {
+        let input = "# Test";
+        // walk to the marker
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        cursor.goto_first_child();
+        assert_eq!(cursor.node().kind(), "atx_h1_marker");
+        assert!(is_marker_node(&cursor.node()));
+    }
+
+    #[test]
+    fn test_is_ruler_node() {
+        let input = "----";
+        // walk to the ruler
+        let tree = parse_markdown_and_get_tree(input);
+        let mut cursor = tree.walk();
+        cursor.goto_first_child();
+        assert_eq!(cursor.node().kind(), "thematic_break");
+        assert!(is_ruler_node(&cursor.node()));
     }
 
     #[test]

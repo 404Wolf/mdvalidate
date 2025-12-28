@@ -230,12 +230,8 @@ mod tests {
             .unwrap();
         assert_eq!(result.id(), Some("id"));
 
-        match result.pattern() {
-            MatcherType::Regex(regex) => {
-                assert_eq!(regex.as_str(), "^test");
-            }
-            _ => panic!("Expected Regex pattern"),
-        }
+        // Check that the pattern displays correctly
+        assert_eq!(format!("{}", result.pattern()), "^test");
 
         assert!(result.extras().had_min_max());
         assert_eq!(result.extras().min_items(), Some(1));

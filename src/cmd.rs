@@ -4,7 +4,6 @@ use crate::mdschema::validator::{
     },
     validator::Validator,
 };
-use crate::helpers::node_print::PrettyPrint;
 use colored::Colorize;
 use serde_json::Value;
 use std::io::{Read, Write};
@@ -128,24 +127,7 @@ pub fn process_stdio<R: Read, W: Write>(
     quiet: bool,
     debug_mode: bool,
 ) -> Result<((Vec<ValidationError>, Value), bool), ProcessingError> {
-    let ((errors, matches), validator, input_str) = process(schema_str, input, fast_fail)?;
-
-    if debug_mode {
-        eprintln!("\n{}", "=== Debug Information ===");
-
-        eprintln!("\n{}", "Schema String:");
-        eprintln!("```\n{}\n```", schema_str.dimmed());
-
-        eprintln!("\n{}", "Input String:");
-        eprintln!("```\n{}\n```", input_str.dimmed());
-
-        eprintln!("\n{}", "Schema S-Expression:");
-        eprintln!("{}", validator.schema_tree.root_node().pretty_print().dimmed());
-
-        eprintln!("\n{}", "Input S-Expression:");
-        eprintln!("{}", validator.input_tree.root_node().pretty_print().dimmed());
-        eprintln!();
-    }
+    let ((errors, matches), validator, _input_str) = process(schema_str, input, fast_fail)?;
 
     let mut errored = false;
     if errors.is_empty() {
@@ -164,7 +146,7 @@ pub fn process_stdio<R: Read, W: Write>(
     } else {
         for error in &errors {
             let error_output = if debug_mode {
-                format!("{}\n{}", "Error Enum:", debug_print_error(error).dimmed())
+                debug_print_error(error)
             } else {
                 pretty_print_error(error, &validator, filename)?
             };
@@ -351,17 +333,19 @@ This is a test
 
 This is a test"#;
 
-        let cursor = Cursor::new(input_data.as_bytes());
-        let reader = LimitedReader::new(cursor, 1);
+        for cursor_size in 1..=9 {
+            let cursor = Cursor::new(input_data.as_bytes());
+            let reader = LimitedReader::new(cursor, cursor_size);
 
-        let (errors, matches) = get_validator(&schema_str, reader, false);
-        assert_eq!(
-            errors.len(),
-            1,
-            "Expected exactly one error but found {:?}",
-            errors
-        );
-        assert!(matches.is_null() || matches.as_object().map_or(true, |obj| obj.is_empty()));
+            let (errors, matches) = get_validator(&schema_str, reader, false);
+            assert_eq!(
+                errors.len(),
+                1,
+                "Expected exactly one error but found {:?}",
+                errors
+            );
+            assert!(matches.is_null() || matches.as_object().map_or(true, |obj| obj.is_empty()));
+        }
     }
 
     #[test]

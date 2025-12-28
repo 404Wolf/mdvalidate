@@ -639,7 +639,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(matcher.id(), Some("name".into()));
-        assert!(matches!(matcher.pattern(), MatcherType::Regex(_)));
+        // MatcherType is now always a regex pattern
+        assert!(!format!("{}", matcher.pattern()).is_empty());
     }
 
     #[test]

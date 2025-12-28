@@ -2,11 +2,11 @@ use log::trace;
 use tracing::instrument;
 use tree_sitter::{Node, TreeCursor};
 
+use crate::mdschema::validator::ts_utils::{is_marker_node, is_ruler_node};
 use crate::mdschema::validator::{
-    errors::{ChildrenCount, SchemaViolationError, ValidationError},
     node_walker::{
         ValidationResult, code_vs_code::validate_code_vs_code, list_vs_list::validate_list_vs_list,
-        text_vs_text::validate_text_vs_text,
+        text_vs_text::validate_text_vs_text, ruler_vs_ruler::validate_ruler_vs_ruler,
     },
     ts_utils::{is_codeblock, is_list_node, is_textual_container, is_textual_node},
     utils::compare_node_children_lengths,
@@ -39,7 +39,7 @@ pub fn validate_node_vs_node(
     let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();
 
-    // 1) Both are textual nodes - use text_vs_text directly
+    // Both are textual nodes - use text_vs_text directly
     if both_are_textual_nodes(&input_node, &schema_node) {
         trace!("Both are textual nodes, validating text vs text");
 
@@ -52,14 +52,14 @@ pub fn validate_node_vs_node(
         );
     }
 
-    // 2) Both are container nodes - use container_vs_container directly
+    // Both are container nodes - use container_vs_container directly
     if both_are_codeblocks(&input_node, &schema_node) {
         trace!("Both are container nodes, validating container vs container");
 
         return validate_code_vs_code(&input_cursor, &schema_cursor, schema_str, input_str);
     }
 
-    // 3) Both are textual containers - check for matcher usage
+    // Both are textual containers - check for matcher usage
     if both_are_textual_containers(&input_node, &schema_node) {
         trace!("Both are textual containers, validating text vs text");
 
@@ -72,7 +72,7 @@ pub fn validate_node_vs_node(
         );
     }
 
-    // 4) Both are list nodes
+    // Both are list nodes
     if both_are_list_nodes(&input_node, &schema_node) {
         trace!("Both are list nodes, validating list vs list");
 
@@ -85,7 +85,7 @@ pub fn validate_node_vs_node(
         );
     }
 
-    // 5) Both are heading nodes or document nodes
+    // Both are heading nodes or document nodes
     //
     // Crawl down one layer to get to the actual children
     if both_are_matching_top_level_nodes(&input_node, &schema_node)
@@ -138,30 +138,41 @@ pub fn validate_node_vs_node(
                 return result;
             }
         }
-    } else {
-        trace!("TODO: should not get here");
+    }
 
-        if !got_eof {
-            return result;
-        };
+    if both_are_rulers(&input_node, &schema_node) {
+        trace!("Both are rulers, validating ruler vs ruler");
+        
+        return validate_ruler_vs_ruler(&input_cursor, &schema_cursor);
+    }
 
-        let schema_child_count = schema_cursor.node().child_count();
-        let input_child_count = input_cursor.node().child_count();
-
-        if schema_child_count != input_child_count {
-            result.add_error(ValidationError::SchemaViolation(
-                SchemaViolationError::ChildrenLengthMismatch {
-                    schema_index: schema_cursor.descendant_index(),
-                    input_index: input_cursor.descendant_index(),
-                    // TODO: is there a case where we have a repeating list and this isn't true?
-                    expected: ChildrenCount::from_specific(schema_child_count),
-                    actual: input_child_count,
-                },
-            ));
-        }
-
+    if both_are_markers(&input_node, &schema_node) {
+        // Nothing to do. Markers don't have children.
+        debug_assert_eq!(input_node.child_count(), 0);
+        debug_assert_eq!(schema_node.child_count(), 0);
         return result;
     }
+
+    if !got_eof {
+        return result;
+    } else {
+        result.add_error(
+            crate::mdschema::validator::errors::ValidationError::InternalInvariantViolated(
+                "No combination of nodes that we check for was covered.".into(),
+            ),
+        );
+        return result;
+    }
+}
+
+/// Check if both nodes are markers. For example, heading markers, or list markers.
+fn both_are_markers(input_node: &Node, schema_node: &Node) -> bool {
+    is_marker_node(&input_node) && is_marker_node(&schema_node)
+}
+
+/// Check if both nodes are rulers.
+fn both_are_rulers(input_node: &Node, schema_node: &Node) -> bool {
+    is_ruler_node(&input_node) && is_ruler_node(&schema_node)
 }
 
 /// Check if both nodes are textual nodes.

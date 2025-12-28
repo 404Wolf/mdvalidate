@@ -8,7 +8,7 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::ts_utils::get_node_and_next_node;
 
 static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
+    Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?\/(?P<regex>.+?)\/").unwrap()
 });
 
 static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
@@ -217,30 +217,13 @@ pub struct Matcher {
 }
 
 #[derive(Debug, Clone)]
-pub enum MatcherType {
-    Regex(Regex),
-    Special(SpecialMatchers),
+pub struct MatcherType {
+    regex: Regex,
 }
 
 impl fmt::Display for MatcherType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MatcherType::Regex(regex) => write!(f, "{}", regex.as_str()),
-            MatcherType::Special(special) => write!(f, "{}", special),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum SpecialMatchers {
-    Ruler,
-}
-
-impl fmt::Display for SpecialMatchers {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SpecialMatchers::Ruler => write!(f, "Ruler"),
-        }
+        write!(f, "{}", self.regex.as_str())
     }
 }
 
@@ -329,18 +312,10 @@ impl Matcher {
 
     /// Get an actual match string for a given text, if it matches.
     pub fn match_str<'a>(&self, text: &'a str) -> Option<&'a str> {
-        match &self.pattern {
-            MatcherType::Regex(regex) => match regex.find(text) {
-                Some(mat) => Some(&text[mat.start()..mat.end()]),
-                None => None,
-            },
-            MatcherType::Special(SpecialMatchers::Ruler) => None,
+        match self.pattern.regex.find(text) {
+            Some(mat) => Some(&text[mat.start()..mat.end()]),
+            None => None,
         }
-    }
-
-    /// Whether the matcher is for a ruler.
-    pub fn is_ruler(&self) -> bool {
-        matches!(self.pattern, MatcherType::Special(SpecialMatchers::Ruler))
     }
 
     /// Whether the matcher repeats.
@@ -396,43 +371,33 @@ fn extract_id_and_pattern(
     pattern: &str,
 ) -> Result<(Option<String>, MatcherType), MatcherError> {
     let id = captures.name("id").map(|m| m.as_str().to_string());
-    let regex_pattern = captures.name("regex").map(|m| m.as_str().to_string());
-    let special = captures.name("special").map(|m| m.as_str().to_string());
+    let regex_pattern = captures
+        .name("regex")
+        .map(|m| m.as_str().to_string())
+        .ok_or_else(|| {
+            MatcherError::MatcherInteriorRegexInvalid(format!(
+                "Expected format: 'id:/regex/', got {}",
+                pattern
+            ))
+        })?;
 
-    let matcher = match (regex_pattern, special) {
-        (Some(regex_pattern), None) => {
-            MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
-        }
-        (None, Some(_)) => MatcherType::Special(SpecialMatchers::Ruler),
-        (Some(_), Some(_)) => {
-            return Err(MatcherError::MatcherInteriorRegexInvalid(format!(
-                "Matcher cannot be both regex and special type: {}",
-                pattern
-            )));
-        }
-        (None, None) => {
-            return Err(MatcherError::MatcherInteriorRegexInvalid(format!(
-                "Matcher must be either regex or special type: {}",
-                pattern
-            )));
-        }
+    let matcher = MatcherType {
+        regex: Regex::new(&format!("^{}", regex_pattern)).map_err(|e| {
+            MatcherError::MatcherInteriorRegexInvalid(format!("Invalid regex pattern: {}", e))
+        })?,
     };
+    
     Ok((id, matcher))
 }
 
 impl fmt::Display for Matcher {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let pattern_str = match &self.pattern {
-            MatcherType::Regex(regex) => {
-                let regex_str = regex.as_str();
-                // The regex is stored as "^<pattern>", so remove the leading ^
-                if regex_str.starts_with('^') {
-                    &regex_str[1..]
-                } else {
-                    regex_str
-                }
-            }
-            MatcherType::Special(SpecialMatchers::Ruler) => "ruler",
+        let regex_str = self.pattern.regex.as_str();
+        // The regex is stored as "^<pattern>", so remove the leading ^
+        let pattern_str = if regex_str.starts_with('^') {
+            &regex_str[1..]
+        } else {
+            regex_str
         };
 
         match &self.id {
@@ -555,23 +520,7 @@ mod tests {
         assert_eq!(matcher.match_str("tiny"), None); // Only 4 chars, should not match
     }
 
-    #[test]
-    fn test_with_no_id() {
-        let matcher = Matcher::try_from_pattern_and_suffix_str("`ruler`", None).unwrap();
-        assert!(matcher.is_ruler());
 
-        // It doesn't match anything, since it's not a regex matcher. The only
-        // way to use a ruler matcher is by calling `.is_ruler()`
-        assert_eq!(matcher.id, None);
-        assert_eq!(matcher.match_str("ruler"), None);
-        assert_eq!(matcher.match_str("***"), None);
-        assert_eq!(matcher.match_str("!@#$"), None);
-
-        let matcher = Matcher::try_from_pattern_and_suffix_str("`id:ruler`", None).unwrap();
-        assert_eq!(matcher.id, Some("id".to_string()));
-        assert_eq!(matcher.match_str("ruler"), None);
-        assert_eq!(matcher.match_str("whatever"), None);
-    }
 
     #[test]
     fn test_item_count_limits() {
