@@ -991,14 +991,20 @@ Content for section 3."#;
         for (i, chunk) in chunks.iter().enumerate() {
             let is_eof = i == chunks.len() - 1;
 
-            let indices_before = validator.state().farthest_reached_descendant_index_pair();
+            let indices_before = validator
+                .state()
+                .farthest_reached_pos()
+                .to_descendant_indexes();
 
             validator
                 .read_input(chunk, is_eof)
                 .expect("Failed to read input");
             validator.validate();
 
-            let indices_after = validator.state().farthest_reached_descendant_index_pair();
+            let indices_after = validator
+                .state()
+                .farthest_reached_pos()
+                .to_descendant_indexes();
 
             // Indices should advance (or stay the same if nothing new to validate)
             // They should NOT reset to 0

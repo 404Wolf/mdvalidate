@@ -3,6 +3,7 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::utils::join_values;
+use crate::mdschema::validator::validator_state::DescendantIndexPair;
 
 /// Validation results containing a Value with all matches, vector of all
 /// errors, and the descendant indexes after validation
@@ -12,35 +13,44 @@ pub struct ValidationResult {
     pub value: Value,
     /// Vector of all validation errors encountered
     pub errors: Vec<ValidationError>,
-    /// The descendant index in the schema after validation
-    schema_descendant_index: usize,
-    /// The descendant index in the input after validation
-    input_descendant_index: usize,
+    /// The farthest reached position
+    farthest_reached_pos: DescendantIndexPair,
 }
 
 impl ValidationResult {
     pub fn new(
         value: Value,
         errors: Vec<ValidationError>,
-        schema_descendant_index: usize,
-        input_descendant_index: usize,
+        farthest_reached_pos: DescendantIndexPair,
     ) -> Self {
         Self {
             value,
             errors,
-            schema_descendant_index,
-            input_descendant_index,
+            farthest_reached_pos,
         }
     }
 
-    /// Creates a new `ValidationResult` with an empty JSON object as the value and no errors.
-    pub fn from_empty(schema_descendant_index: usize, input_descendant_index: usize) -> Self {
+    /// Creates a new `ValidationResult` with an empty JSON object as the value and no errors, starting from given cursor positions.
+    pub fn from_cursors(schema_cursor: &TreeCursor, input_cursor: &TreeCursor) -> Self {
         Self::new(
             json!({}),
             Vec::new(),
-            schema_descendant_index,
-            input_descendant_index,
+            DescendantIndexPair::from_cursors(schema_cursor, input_cursor),
         )
+    }
+
+    /// Creates a new `ValidationResult` with an empty JSON object as the value and no errors, starting from given descendant indexes.
+    pub fn from_descendant_indexes(schema_index: usize, input_index: usize) -> Self {
+        Self::new(
+            json!({}),
+            Vec::new(),
+            DescendantIndexPair::from_descendant_indexes(schema_index, input_index),
+        )
+    }
+
+    /// Updates the cursor positions to the positions of the given cursors.
+    pub fn sync_cursor_pos(&mut self, schema_cursor: &TreeCursor, input_cursor: &TreeCursor) {
+        self.farthest_reached_pos = DescendantIndexPair::from_cursors(schema_cursor, input_cursor);
     }
 
     /// Add an error to the `ValidationResult`.
@@ -70,45 +80,23 @@ impl ValidationResult {
         self.errors.extend(other.errors.clone());
 
         // Make the descendant index pair the maximum of the two (as far as we got)
-        self.schema_descendant_index = self
-            .schema_descendant_index
-            .max(other.schema_descendant_index);
-        self.input_descendant_index = self
-            .input_descendant_index
-            .max(other.input_descendant_index);
+        self.farthest_reached_pos
+            .keep_farther_positions(&other.farthest_reached_pos());
     }
 
-    /// Update tree cursors to that of the result.
-    pub fn move_cursors_to_position(
-        &self,
-        input_cursor: &mut TreeCursor,
-        schema_cursor: &mut TreeCursor,
-    ) {
-        input_cursor.goto_descendant(self.input_descendant_index);
-        schema_cursor.goto_descendant(self.schema_descendant_index);
+    /// Get the farthest reached position as a descendant index pair.
+    pub fn farthest_reached_pos(&self) -> DescendantIndexPair {
+        self.farthest_reached_pos
     }
+}
 
-    /// Update the input and schema descendant offsets to that of given cursors.
-    pub fn update_descendant_offsets(
-        &mut self,
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-    ) {
-        self.input_descendant_index = input_cursor.descendant_index();
-        self.schema_descendant_index = schema_cursor.descendant_index();
-    }
-
-    /// Get the descendant index pair (schema, input)
-    pub fn descendant_index_pair(&self) -> (usize, usize) {
-        (self.schema_descendant_index, self.input_descendant_index)
-    }
-
-    pub fn input_descendant_index(&self) -> usize {
-        self.input_descendant_index
-    }
-
-    pub fn schema_descendant_index(&self) -> usize {
-        self.schema_descendant_index
+impl Default for ValidationResult {
+    fn default() -> Self {
+        Self {
+            value: Default::default(),
+            errors: Default::default(),
+            farthest_reached_pos: DescendantIndexPair::default(),
+        }
     }
 }
 
@@ -119,13 +107,16 @@ mod tests {
 
     #[test]
     fn test_basic_usage() {
-        let mut result = ValidationResult::from_empty(0, 0);
+        let mut result = ValidationResult::default();
 
         result.set_match("id", json!("value"));
-        result.join_other_result(&ValidationResult::from_empty(1, 1));
+        result.join_other_result(&ValidationResult::from_descendant_indexes(1, 1));
         result.add_error(ValidationError::ValidatorCreationFailed);
 
-        assert_eq!(result.descendant_index_pair(), (1, 1)); // the farther!
+        assert_eq!(
+            result.farthest_reached_pos().to_descendant_indexes(),
+            (1, 1)
+        ); // the farther!
         assert_eq!(result.value, json!({"id": "value"}));
 
         assert_eq!(result.errors.len(), 1);
@@ -137,13 +128,16 @@ mod tests {
 
     #[test]
     fn test_join_other_result() {
-        let mut result = ValidationResult::from_empty(0, 0);
-        let other = ValidationResult::from_empty(1, 1);
+        let mut result = ValidationResult::default();
+        let other = ValidationResult::from_descendant_indexes(1, 1);
 
         result.set_match("id", json!("value"));
         result.join_other_result(&other);
 
-        assert_eq!(result.descendant_index_pair(), (1, 1));
+        assert_eq!(
+            result.farthest_reached_pos().to_descendant_indexes(),
+            (1, 1)
+        );
         assert_eq!(result.value, json!({"id": "value"}));
         assert_eq!(result.errors.len(), 0);
     }

@@ -7,7 +7,7 @@ use crate::mdschema::validator::{
 
 /// A node validator that validates input nodes against schema nodes.
 pub struct NodeWalker<'a> {
-    pub state: &'a mut ValidatorState,
+    state: &'a mut ValidatorState,
     input_cursor: TreeCursor<'a>,
     schema_cursor: TreeCursor<'a>,
 }
@@ -24,17 +24,15 @@ impl<'a> NodeWalker<'a> {
             schema_cursor,
         };
 
-        node_walker.walk_cursors_to_position();
+        node_walker
+            .state()
+            .farthest_reached_pos()
+            .walk_cursors_to_position(
+                &mut node_walker.input_cursor,
+                &mut node_walker.schema_cursor,
+            );
 
         node_walker
-    }
-
-    /// Walks the cursors to the position of the farthest reached descendant in state.
-    fn walk_cursors_to_position(&mut self) {
-        let (input_descendant_index, schema_descendant_index) =
-            self.state.farthest_reached_descendant_index_pair();
-        self.input_cursor.goto_descendant(input_descendant_index);
-        self.schema_cursor.goto_descendant(schema_descendant_index);
     }
 
     pub fn validate(&mut self) -> ValidationResult {
@@ -49,6 +47,10 @@ impl<'a> NodeWalker<'a> {
         self.state.push_validation_result(validation_result.clone());
 
         validation_result
+    }
+
+    pub fn state(&self) -> &ValidatorState {
+        self.state
     }
 }
 

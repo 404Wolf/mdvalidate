@@ -27,13 +27,10 @@ pub fn validate_text_vs_text(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
+    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+
     let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();
-
-    let mut result = ValidationResult::from_empty(
-        schema_cursor.descendant_index(),
-        input_cursor.descendant_index(),
-    );
 
     // Some invariants due to previous bugs
     debug_assert_ne!(input_cursor.node().kind(), "tight_list");
@@ -183,7 +180,7 @@ pub fn validate_text_vs_text(
                     schema_cursor.goto_next_sibling();
 
                     // Move along!
-                    result.update_descendant_offsets(&input_cursor, &schema_cursor);
+                    result.sync_cursor_pos(&input_cursor, &schema_cursor);
 
                     result
                 }
@@ -249,7 +246,7 @@ pub fn validate_text_vs_text(
             if !input_cursor.goto_first_child() || !schema_cursor.goto_first_child() {
                 trace!("No children to validate");
                 // No children to validate
-                result.update_descendant_offsets(&input_cursor, &schema_cursor);
+                result.sync_cursor_pos(&input_cursor, &schema_cursor);
 
                 return result;
             }
@@ -277,7 +274,7 @@ pub fn validate_text_vs_text(
                 input_cursor.goto_next_sibling();
                 schema_cursor.goto_next_sibling();
             }
-            result.update_descendant_offsets(&input_cursor, &schema_cursor);
+            result.sync_cursor_pos(&input_cursor, &schema_cursor);
 
             result
         }
@@ -345,10 +342,7 @@ fn validate_textual_nodes(
     got_eof: bool,
     strip_extras: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(
-        schema_cursor.descendant_index(),
-        input_cursor.descendant_index(),
-    );
+    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
     let schema_node = schema_cursor.node();
     let input_node = input_cursor.node();
@@ -389,7 +383,7 @@ fn validate_textual_nodes(
         schema_cursor.goto_next_sibling();
         input_cursor.goto_next_sibling();
 
-        result.update_descendant_offsets(&input_cursor, &schema_cursor);
+        result.sync_cursor_pos(&input_cursor, &schema_cursor);
     }
 
     result
@@ -409,10 +403,7 @@ fn validate_textual_container_children(
     got_eof: bool,
     input_child_count: usize,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(
-        schema_cursor.descendant_index(),
-        input_cursor.descendant_index(),
-    );
+    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
     trace!(
         "Validating textual container children, child_count={}",
@@ -544,10 +535,7 @@ pub fn validate_matcher_vs_text<'a>(
     got_eof: bool,
     matcher_group: (Option<Node<'a>>, (Matcher, Node<'a>), Option<Node<'a>>),
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(
-        schema_cursor.descendant_index(),
-        input_cursor.descendant_index(),
-    );
+    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
     // Mutable cursors that we can walk forward as we validate
     let mut schema_cursor = schema_cursor.clone();
@@ -614,7 +602,7 @@ pub fn validate_matcher_vs_text<'a>(
 
                 // If prefix validation fails don't try to validate further.
                 // TODO: In the future we could attempt to validate further anyway!
-                result.update_descendant_offsets(&input_cursor, &schema_cursor);
+                result.sync_cursor_pos(&input_cursor, &schema_cursor);
 
                 return result;
             }
@@ -661,7 +649,7 @@ pub fn validate_matcher_vs_text<'a>(
                 ));
             }
 
-            result.update_descendant_offsets(&input_cursor, &schema_cursor);
+            result.sync_cursor_pos(&input_cursor, &schema_cursor);
             return result;
         }
     }
@@ -712,13 +700,13 @@ pub fn validate_matcher_vs_text<'a>(
                 },
             ));
 
-            result.update_descendant_offsets(&input_cursor, &schema_cursor);
+            result.sync_cursor_pos(&input_cursor, &schema_cursor);
 
             return result;
         } else {
             trace!("Ruler validated successfully");
             // It's a ruler, no further validation needed
-            result.update_descendant_offsets(&input_cursor, &schema_cursor);
+            result.sync_cursor_pos(&input_cursor, &schema_cursor);
 
             return result;
         }
@@ -770,7 +758,7 @@ pub fn validate_matcher_vs_text<'a>(
             ));
 
             // TODO: should we validate further when we fail to match the matcher?
-            result.update_descendant_offsets(&input_cursor, &schema_cursor);
+            result.sync_cursor_pos(&input_cursor, &schema_cursor);
 
             return result;
         }
@@ -815,7 +803,7 @@ pub fn validate_matcher_vs_text<'a>(
         trace!("No suffix to validate");
     }
 
-    result.update_descendant_offsets(&input_cursor, &schema_cursor);
+    result.sync_cursor_pos(&input_cursor, &schema_cursor);
 
     result
 }
@@ -1452,7 +1440,8 @@ mod tests {
         );
 
         let (new_input_node_descendant_index, new_schema_node_descendant_index) =
-            result.descendant_index_pair();
+            result.farthest_reached_pos().to_descendant_indexes();
+
         // TODO: ensure these indexes are correct
         assert_eq!(
             new_input_node_descendant_index,

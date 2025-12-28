@@ -54,10 +54,7 @@ pub fn validate_code_vs_code(
     schema_str: &str,
     input_str: &str,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(
-        input_cursor.descendant_index(),
-        input_cursor.descendant_index(),
-    );
+    let mut result = ValidationResult::from_cursors(input_cursor, input_cursor);
 
     let input_cursor = input_cursor.clone();
     let schema_cursor = schema_cursor.clone();

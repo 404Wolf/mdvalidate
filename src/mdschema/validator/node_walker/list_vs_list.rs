@@ -1,6 +1,6 @@
 use log::trace;
 use serde_json::json;
-use tracing::{instrument};
+use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
@@ -80,10 +80,7 @@ pub fn validate_list_vs_list(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(
-        input_cursor.descendant_index(),
-        input_cursor.descendant_index(),
-    );
+    let mut result = ValidationResult::from_cursors(input_cursor, input_cursor);
 
     let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();

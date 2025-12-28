@@ -30,10 +30,7 @@ pub fn validate_node_vs_node(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_empty(
-        input_cursor.descendant_index(),
-        schema_cursor.descendant_index(),
-    );
+    let mut result = ValidationResult::from_cursors(input_cursor, schema_cursor);
 
     let input_node = input_cursor.node();
     let schema_node = schema_cursor.node();
@@ -131,7 +128,6 @@ pub fn validate_node_vs_node(
                     input_str,
                     got_eof,
                 );
-
                 result.join_other_result(&new_result);
             } else {
                 trace!("One of input or schema node does not have siblings");
@@ -145,7 +141,7 @@ pub fn validate_node_vs_node(
         trace!("Both input and schema node were top level, but they didn't both have children.");
 
         if !got_eof {
-            result.update_descendant_offsets(&input_cursor, &schema_cursor);
+            result.sync_cursor_pos(&input_cursor, &schema_cursor);
 
             return result;
         };

@@ -9,7 +9,7 @@ pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, 
     use crate::mdschema::validator::ts_utils::new_markdown_parser;
     use crate::mdschema::validator::validator_state::ValidatorState;
 
-    let mut state = ValidatorState::from_beginning(schema.to_string(), input.to_string(), true);
+    let mut state = ValidatorState::from_beginning(schema.into(), input.into(), true);
 
     let mut parser = new_markdown_parser();
     let schema_tree = parser.parse(schema, None).unwrap();
@@ -21,7 +21,7 @@ pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, 
         let mut node_validator = NodeWalker::new(&mut state, input_tree.walk(), schema_tree.walk());
 
         node_validator.validate();
-        node_validator.state
+        node_validator.state().clone()
     };
 
     let errors = new_state
