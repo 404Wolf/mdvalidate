@@ -352,7 +352,7 @@ This is a test
 This is a test"#;
 
         let cursor = Cursor::new(input_data.as_bytes());
-        let reader = LimitedReader::new(cursor, 9);
+        let reader = LimitedReader::new(cursor, 1);
 
         let (errors, matches) = get_validator(&schema_str, reader, false);
         assert_eq!(
