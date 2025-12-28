@@ -139,7 +139,7 @@ pub fn validate_node_vs_node(
             }
         }
     } else {
-        trace!("Both input and schema node were top level, but they didn't both have children.");
+        trace!("TODO: should not get here");
 
         if !got_eof {
             return result;
