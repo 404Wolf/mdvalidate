@@ -95,6 +95,16 @@ pub fn is_textual_node(node: &Node) -> bool {
     }
 }
 
+/// Check if a node is specifically a text node.
+pub fn is_text_node(node: &Node) -> bool {
+    node.kind() == "text"
+}
+
+/// Check if a node is a paragraph.
+pub fn is_paragraph_node(node: &Node) -> bool {
+    node.kind() == "paragraph"
+}
+
 /// Check if a node is a "marker" (i.e., a heading marker, list marker, etc).
 pub fn is_marker_node(node: &Node) -> bool {
     node.kind().ends_with("_marker")
@@ -106,7 +116,7 @@ pub fn is_ruler_node(node: &Node) -> bool {
 }
 
 /// Check if a node is a "textual container" (i.e., a paragraph node, list item node, or similar).
-pub fn is_textual_container(node: &Node) -> bool {
+pub fn is_textual_container_node(node: &Node) -> bool {
     match node.kind() {
         "paragraph" | "heading_content" | "list_item" => true,
         _ => false,
@@ -114,9 +124,19 @@ pub fn is_textual_container(node: &Node) -> bool {
 }
 
 /// Check whether a node is a codeblock.
-pub fn is_codeblock(node: &Node) -> bool {
+pub fn is_codeblock_node(node: &Node) -> bool {
     match node.kind() {
         "fenced_code_block" => true,
+        _ => false,
+    }
+}
+
+/// Check if the node is a heading.
+///
+/// TODO: write test
+pub fn is_heading_node(node: &Node) -> bool {
+    match node.kind() {
+        "atx_heading" => true,
         _ => false,
     }
 }
@@ -136,8 +156,83 @@ pub fn extract_list_marker<'a>(cursor: &TreeCursor<'a>, schema_str: &'a str) -> 
     let mut cursor = cursor.clone();
     cursor.goto_first_child(); // Go to first list_item
     cursor.goto_first_child(); // Go to list_marker
+    debug_assert!(is_marker_node(&cursor.node()));
     let marker = cursor.node();
     marker.utf8_text(schema_str.as_bytes()).unwrap()
+}
+
+/// Check if both nodes are rulers.
+pub fn both_are_rulers(input_node: &Node, schema_node: &Node) -> bool {
+    is_ruler_node(&input_node) && is_ruler_node(&schema_node)
+}
+
+/// Check if both nodes are headings.
+pub fn both_are_headings(input_node: &Node, schema_node: &Node) -> bool {
+    is_heading_node(&input_node) && is_heading_node(&schema_node)
+}
+
+/// Check if both nodes are textual nodes.
+pub fn both_are_textual_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_textual_node(&input_node) && is_textual_node(&schema_node)
+}
+
+/// Check if both nodes are text nodes.
+pub fn both_are_text_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_text_node(&input_node) && is_text_node(&schema_node)
+}
+
+/// Check if both nodes are paragraph nodes.
+pub fn both_are_paragraphs(input_node: &Node, schema_node: &Node) -> bool {
+    is_paragraph_node(&input_node) && is_paragraph_node(&schema_node)
+}
+
+/// Check if both nodes are textual containers.
+pub fn both_are_textual_containers(input_node: &Node, schema_node: &Node) -> bool {
+    is_textual_container_node(&input_node) && is_textual_container_node(&schema_node)
+}
+
+/// Check if both nodes are list nodes.
+pub fn both_are_list_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_list_node(&input_node) && is_list_node(&schema_node)
+}
+
+/// Check if both nodes are codeblock nodes.
+pub fn both_are_codeblocks(input_node: &Node, schema_node: &Node) -> bool {
+    is_codeblock_node(&input_node) && is_codeblock_node(&schema_node)
+}
+
+/// Check if both nodes are top-level nodes (document or heading).
+pub fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    if input_node.kind() != schema_node.kind() {
+        return false;
+    }
+
+    match input_node.kind() {
+        "document" => true,
+        "atx_heading" => true,
+        _ => false,
+    }
+}
+
+/// Extract the *type* of heading a given atx_heading is.
+///
+/// Headings look like this:
+///
+/// ```ansi
+// (atx_heading)
+// │  ├─ (atx_h2_marker)
+// │  └─ (heading_content)
+// │     └─ (text)
+// ```
+//
+// You can call `get_heading_kind` when you are at an `atx_heading` to extract
+// the literal kind, `atx_xx_marker`.
+pub fn get_heading_kind<'a>(cursor: &TreeCursor<'a>) -> &'a str {
+    let mut cursor = cursor.clone();
+
+    cursor.goto_first_child(); // atx_heading -> atx_h2_marker
+    debug_assert!(cursor.node().kind().ends_with("marker"));
+    cursor.node().kind()
 }
 
 /// Check if the treesitter schema node has a single code_span child (indicating
@@ -307,28 +402,28 @@ mod tests {
         let tree = parse_markdown_and_get_tree(input);
         let mut cursor = tree.walk();
         cursor.goto_first_child();
-        assert!(is_codeblock(&cursor.node()));
+        assert!(is_codeblock_node(&cursor.node()));
 
         // With language, 3 backticks
         let input = "```rust\ncode\n```\n";
         let tree = parse_markdown_and_get_tree(input);
         let mut cursor = tree.walk();
         cursor.goto_first_child();
-        assert!(is_codeblock(&cursor.node()));
+        assert!(is_codeblock_node(&cursor.node()));
 
         // Without language, 4 backticks
         let input = "````\ncode\n````\n";
         let tree = parse_markdown_and_get_tree(input);
         let mut cursor = tree.walk();
         cursor.goto_first_child();
-        assert!(is_codeblock(&cursor.node()));
+        assert!(is_codeblock_node(&cursor.node()));
 
         // With language, 4 backticks
         let input = "````rust\ncode\n````\n";
         let tree = parse_markdown_and_get_tree(input);
         let mut cursor = tree.walk();
         cursor.goto_first_child();
-        assert!(is_codeblock(&cursor.node()));
+        assert!(is_codeblock_node(&cursor.node()));
     }
 
     #[test]

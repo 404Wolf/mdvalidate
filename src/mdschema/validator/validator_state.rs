@@ -6,12 +6,12 @@ use crate::mdschema::validator::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct DescendantIndexPair {
+pub struct NodePosPair {
     input_index: usize,
     schema_index: usize,
 }
 
-impl DescendantIndexPair {
+impl NodePosPair {
     pub fn new(input_index: usize, schema_index: usize) -> Self {
         Self {
             input_index,
@@ -19,7 +19,7 @@ impl DescendantIndexPair {
         }
     }
 
-    /// Create a new DescendantIndexPair from tree sitter TreeCursors.
+    /// Create a new `NodePosPair` from tree sitter TreeCursors.
     pub fn from_cursors(schema_cursor: &TreeCursor, input_cursor: &TreeCursor) -> Self {
         Self::new(
             input_cursor.descendant_index(),
@@ -27,37 +27,37 @@ impl DescendantIndexPair {
         )
     }
 
-    /// Create a new DescendantIndexPair from descendant indexes.
-    pub fn from_descendant_indexes(schema_index: usize, input_index: usize) -> Self {
+    /// Create a new `NodePosPair` from descendant indexes.
+    pub fn from_pos(schema_index: usize, input_index: usize) -> Self {
         Self::new(input_index, schema_index)
     }
 
-    /// Convert the DescendantIndexPair to a tuple of input and schema indexes.
-    pub fn to_descendant_indexes(&self) -> (usize, usize) {
+    /// Convert the `NodePosPair` to a tuple of input and schema indexes.
+    pub fn to_pos_tuple(&self) -> (usize, usize) {
         (self.input_index, self.schema_index)
     }
 
-    /// Join another DescendantIndexPair, keeping the farther positions for both
+    /// Join another `NodePosPair`, keeping the farther positions for both
     /// schema and input indexes.
-    pub fn keep_farther_positions(&mut self, other: &Self) {
+    pub fn keep_farther_pos(&mut self, other: &Self) {
         self.input_index = self.input_index.max(other.input_index);
         self.schema_index = self.schema_index.max(other.schema_index);
     }
 
-    /// Walk a pair of cursors to the current position of the DescendantIndexPair.
-    pub fn walk_cursors_to_position(
+    /// Walk a pair of cursors to the current position of the `NodePosPair`.
+    pub fn walk_cursors_to_pos(
         &self,
         input_cursor: &mut TreeCursor,
         schema_cursor: &mut TreeCursor,
     ) {
-        let (input_descendant_index, schema_descendant_index) = self.to_descendant_indexes();
+        let (input_pos, schema_pos) = self.to_pos_tuple();
 
-        input_cursor.goto_descendant(input_descendant_index);
-        schema_cursor.goto_descendant(schema_descendant_index);
+        input_cursor.goto_descendant(input_pos);
+        schema_cursor.goto_descendant(schema_pos);
     }
 }
 
-impl Default for DescendantIndexPair {
+impl Default for NodePosPair {
     fn default() -> Self {
         Self::new(0, 0)
     }
@@ -78,7 +78,7 @@ pub struct ValidatorState {
     /// Any errors encountered during validation.
     errors_so_far: Vec<ValidationError>,
     /// Our farthest reached position.
-    farthest_reached_pos: DescendantIndexPair,
+    farthest_reached_pos: NodePosPair,
 }
 
 impl ValidatorState {
@@ -86,7 +86,7 @@ impl ValidatorState {
         schema_str: String,
         last_input_str: String,
         got_eof: bool,
-        farthest_reached_pos: DescendantIndexPair,
+        farthest_reached_pos: NodePosPair,
     ) -> Self {
         Self {
             last_input_str,
@@ -103,7 +103,7 @@ impl ValidatorState {
             schema_str,
             last_input_str,
             got_eof,
-            DescendantIndexPair::default(),
+            NodePosPair::default(),
         )
     }
 
@@ -153,11 +153,11 @@ impl ValidatorState {
     }
 
     /// Our farthest reached position.
-    pub fn farthest_reached_pos(&self) -> DescendantIndexPair {
+    pub fn farthest_reached_pos(&self) -> NodePosPair {
         self.farthest_reached_pos
     }
 
-    pub fn set_farthest_reached_pos(&mut self, farthest_reached_pos: DescendantIndexPair) {
+    pub fn set_farthest_reached_pos(&mut self, farthest_reached_pos: NodePosPair) {
         self.farthest_reached_pos = farthest_reached_pos;
     }
 }

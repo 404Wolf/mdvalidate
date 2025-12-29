@@ -119,7 +119,6 @@ pub fn validate_code_vs_code(
             result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
                 error: error.clone(),
                 schema_index: *schema_lang_descendant_index,
-                input_index: *input_code_descendant_index,
             }));
             return result;
         }
@@ -203,7 +202,7 @@ fn extract_id_from_curly_braces(input: &str) -> Option<&str> {
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::{matcher::matcher::MatcherType, ts_utils::parse_markdown};
+    use crate::mdschema::validator::ts_utils::parse_markdown;
 
     use super::*;
 

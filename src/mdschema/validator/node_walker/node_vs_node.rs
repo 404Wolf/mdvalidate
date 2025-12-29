@@ -2,13 +2,20 @@ use log::trace;
 use tracing::instrument;
 use tree_sitter::{Node, TreeCursor};
 
-use crate::mdschema::validator::ts_utils::{is_marker_node, is_ruler_node};
+use crate::helpers::node_print::PrettyPrint;
+use crate::mdschema::validator::errors::ValidationError;
+use crate::mdschema::validator::node_walker::validators::code::validate_code_vs_code;
+use crate::mdschema::validator::node_walker::validators::headings::validate_heading_vs_heading;
+use crate::mdschema::validator::node_walker::validators::lists::validate_list_vs_list;
+use crate::mdschema::validator::node_walker::validators::rulers::validate_ruler_vs_ruler;
+use crate::mdschema::validator::node_walker::validators::text::validate_text_vs_text;
+use crate::mdschema::validator::ts_utils::{
+    both_are_codeblocks, both_are_list_nodes, both_are_matching_top_level_nodes, both_are_rulers,
+    both_are_textual_containers, both_are_textual_nodes, is_heading_node, is_ruler_node,
+};
 use crate::mdschema::validator::{
-    node_walker::{
-        ValidationResult, code_vs_code::validate_code_vs_code, list_vs_list::validate_list_vs_list,
-        text_vs_text::validate_text_vs_text, ruler_vs_ruler::validate_ruler_vs_ruler,
-    },
-    ts_utils::{is_codeblock, is_list_node, is_textual_container, is_textual_node},
+    node_walker::ValidationResult,
+    ts_utils::{is_codeblock_node, is_list_node, is_textual_container_node, is_textual_node},
     utils::compare_node_children_lengths,
 };
 
@@ -19,6 +26,7 @@ use crate::mdschema::validator::{
 /// - Code blocks -> `validate_code_vs_code`
 /// - Lists -> `validate_list_vs_list`
 /// - Headings/documents -> recursively validate children
+///   #[track_caller]
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "trace", fields(
     i = %input_cursor.descendant_index(),
     s = %schema_cursor.descendant_index(),
@@ -85,6 +93,13 @@ pub fn validate_node_vs_node(
         );
     }
 
+    // Both are ruler nodes
+    if both_are_rulers(&input_node, &schema_node) {
+        trace!("Both are rulers, validating ruler vs ruler");
+
+        return validate_ruler_vs_ruler(&input_cursor, &schema_cursor);
+    }
+
     // Both are heading nodes or document nodes
     //
     // Crawl down one layer to get to the actual children
@@ -92,7 +107,22 @@ pub fn validate_node_vs_node(
         && input_cursor.clone().goto_first_child() // don't actually do the walking down just yet
         && schema_cursor.clone().goto_first_child()
     {
-        trace!("Both are heading nodes or document nodes, validating heading vs heading");
+        // First, if they are headings, validate the headings themselves.
+        if is_heading_node(&input_node) && is_heading_node(&schema_node) {
+            trace!("Both are heading nodes, validating heading vs heading");
+
+            let heading_result = validate_heading_vs_heading(
+                &input_cursor,
+                &schema_cursor,
+                schema_str,
+                input_str,
+                got_eof,
+            );
+            result.join_other_result(&heading_result);
+            result.sync_cursor_pos(&schema_cursor, &input_cursor);
+        }
+
+        trace!("Both are heading nodes or document nodes. Recursing into sibling pairs.");
 
         // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
         if let Some(error) = compare_node_children_lengths(&schema_cursor, &input_cursor, got_eof) {
@@ -119,6 +149,13 @@ pub fn validate_node_vs_node(
             // TODO: handle case where one has more children than the other
             let input_had_sibling = input_cursor.goto_next_sibling();
             let schema_had_sibling = schema_cursor.goto_next_sibling();
+            trace!(
+                "input_had_sibling: {}, schema_had_sibling: {}, input_kind: {}, schema_kind: {}",
+                input_had_sibling,
+                schema_had_sibling,
+                input_cursor.node().kind(),
+                schema_cursor.node().kind()
+            );
 
             if input_had_sibling && schema_had_sibling {
                 trace!("Both input and schema node have siblings");
@@ -135,93 +172,50 @@ pub fn validate_node_vs_node(
             } else {
                 trace!("One of input or schema node does not have siblings");
 
-                return result;
+                break;
             }
         }
-    }
 
-    if both_are_rulers(&input_node, &schema_node) {
-        trace!("Both are rulers, validating ruler vs ruler");
-        
-        return validate_ruler_vs_ruler(&input_cursor, &schema_cursor);
-    }
-
-    if both_are_markers(&input_node, &schema_node) {
-        // Nothing to do. Markers don't have children.
-        debug_assert_eq!(input_node.child_count(), 0);
-        debug_assert_eq!(schema_node.child_count(), 0);
         return result;
     }
 
     if !got_eof {
         return result;
     } else {
-        result.add_error(
-            crate::mdschema::validator::errors::ValidationError::InternalInvariantViolated(
-                "No combination of nodes that we check for was covered.".into(),
-            ),
-        );
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("{}", input_node.pretty_print());
+            eprintln!("{}", schema_node.pretty_print());
+        }
+
+        result.add_error(ValidationError::InternalInvariantViolated(format!(
+            "No combination of nodes that we check for was covered. \
+                     Attempting to compare a {}[{}] node with a {}[{}] node",
+            input_node.kind(),
+            input_cursor.descendant_index(),
+            schema_node.kind(),
+            schema_cursor.descendant_index()
+        )));
+
         return result;
     }
-}
-
-/// Check if both nodes are markers. For example, heading markers, or list markers.
-fn both_are_markers(input_node: &Node, schema_node: &Node) -> bool {
-    is_marker_node(&input_node) && is_marker_node(&schema_node)
-}
-
-/// Check if both nodes are rulers.
-fn both_are_rulers(input_node: &Node, schema_node: &Node) -> bool {
-    is_ruler_node(&input_node) && is_ruler_node(&schema_node)
-}
-
-/// Check if both nodes are textual nodes.
-fn both_are_textual_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_textual_node(&input_node) && is_textual_node(&schema_node)
-}
-
-/// Check if both nodes are textual containers.
-fn both_are_textual_containers(input_node: &Node, schema_node: &Node) -> bool {
-    is_textual_container(&input_node) && is_textual_container(&schema_node)
-}
-
-/// Check if the schema node has a code_span child (indicating a matcher).
-
-/// Check if both nodes are list nodes.
-fn both_are_list_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_list_node(&input_node) && is_list_node(&schema_node)
-}
-
-/// Check if both nodes are top-level nodes (document or heading).
-fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    if input_node.kind() != schema_node.kind() {
-        return false;
-    }
-
-    match input_node.kind() {
-        "document" => true,
-        "atx_heading" => true,
-        _ => false,
-    }
-}
-
-/// Check if both nodes are codeblocks.
-fn both_are_codeblocks(input_node: &Node, schema_node: &Node) -> bool {
-    is_codeblock(&input_node) && is_codeblock(&schema_node)
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::{
-        errors::{ChildrenCount, SchemaViolationError, ValidationError},
-        node_walker::node_vs_node::validate_node_vs_node,
-        ts_utils::parse_markdown,
+    use crate::{
+        helpers::node_print::PrettyPrint,
+        mdschema::validator::{
+            errors::{ChildrenCount, SchemaViolationError, ValidationError},
+            node_walker::node_vs_node::validate_node_vs_node,
+            ts_utils::parse_markdown,
+        },
     };
 
     #[test]
-    fn validate_list_vs_list_with_nesting() {
+    fn test_validate_node_vs_node_with_with_nesting_lists() {
         let schema_str = r#"
 - `test:/\w+/`{2,2}
   - `test2:/\w+/`{1,1}
@@ -260,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_two_paragraphs_with_text_vs_text() {
+    fn test_validate_node_vs_node_with_two_mixed_paragraphs() {
         let schema_str = "this is **bold** text.";
         let input_str = "this is **bold** text.";
         let schema = parse_markdown(schema_str).unwrap();
@@ -296,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_matcher() {
+    fn test_validate_node_vs_node_with_simple_text_matcher() {
         let schema_str = "`name:/\\w+/`";
         let input_str = "Alice";
         let schema = parse_markdown(schema_str).unwrap();
@@ -317,7 +311,7 @@ mod tests {
     }
 
     #[test]
-    fn test_textual_container_without_matcher() {
+    fn test_validate_node_vs_node_with_textual_container_without_matcher() {
         let schema_str = "Hello **world**";
         let input_str = "Hello **world**";
         let schema = parse_markdown(schema_str).unwrap();
@@ -338,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn test_matcher_with_prefix_and_suffix() {
+    fn test_validate_node_vs_node_with_matcher_with_prefix_and_suffix() {
         let schema_str = "Hello `name:/\\w+/` world!";
         let input_str = "Hello Alice world!";
         let schema = parse_markdown(schema_str).unwrap();
@@ -359,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_schema_with_non_empty_input() {
+    fn test_validate_node_vs_node_with_empty_schema_with_non_empty_input() {
         let schema_str = "";
         let input_str = "# Some content\n";
         let schema = parse_markdown(schema_str).unwrap();
@@ -408,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn test_with_heading_and_codeblock() {
+    fn test_validate_node_vs_node_with_heading_and_codeblock() {
         let schema_str = "## Heading\n```\nCode\n```";
         let input_str = "## Heading\n```\nCode\n```";
 
@@ -417,6 +411,8 @@ mod tests {
 
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
+        eprintln!("{}", input_cursor.node().pretty_print());
+        eprintln!("{}", schema_cursor.node().pretty_print());
 
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);

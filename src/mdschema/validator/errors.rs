@@ -89,7 +89,6 @@ pub enum SchemaError {
     /// Node has multiple matchers in its children (only one is allowed).
     MultipleMatchersInNodeChildren {
         schema_index: usize,
-        input_index: usize,
         /// Number of matchers found.
         received: usize,
     },
@@ -97,31 +96,23 @@ pub enum SchemaError {
     /// List node uses a non-repeating matcher.
     ///
     /// List nodes must use matchers with repetition syntax like `{1,}`.
-    BadListMatcher {
-        schema_index: usize,
-        input_index: usize,
-    },
+    BadListMatcher { schema_index: usize },
 
     /// Matcher has invalid extras syntax.
     ///
     /// For example, `test:/1/`!{1,2} is invalid.
     InvalidMatcherExtras {
         schema_index: usize,
-        input_index: usize,
         error: MatcherExtrasError,
     },
 
     /// Matcher was not properly closed.
-    UnclosedMatcher {
-        schema_index: usize,
-        input_index: usize,
-    },
+    UnclosedMatcher { schema_index: usize },
 
     /// Error occurred while constructing a matcher.
     MatcherError {
         error: MatcherError,
         schema_index: usize,
-        input_index: usize,
     },
     /// Unbounded repeating matcher is followed by another repeating matcher.
     ///
@@ -164,16 +155,10 @@ pub enum SchemaError {
     /// - `name1:/test/`{,}
     /// - `name2:/bar/`{,2}
     /// ```
-    RepeatingMatcherUnbounded {
-        schema_index: usize,
-        input_index: usize,
-    },
+    RepeatingMatcherUnbounded { schema_index: usize },
 
     /// Schema text contains invalid UTF-8 encoding.
-    UTF8Error {
-        schema_index: usize,
-        input_index: usize,
-    },
+    UTF8Error { schema_index: usize },
 }
 
 impl fmt::Display for SchemaError {
@@ -612,19 +597,18 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
         ValidationError::SchemaError(schema_err) => {
             match schema_err {
                 SchemaError::MultipleMatchersInNodeChildren {
-                    schema_index: _,
-                    input_index,
+                    schema_index,
                     received: received_count,
                 } => {
-                    let input_node = find_node_by_index(tree.root_node(), *input_index);
-                    let input_range = input_node.start_byte()..input_node.end_byte();
+                    let schema_node = find_node_by_index(tree.root_node(), *schema_index);
+                    let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    Report::build(ReportKind::Error, (filename, schema_range.clone()))
                         .with_message("Multiple matchers in node children")
                         .with_label(
-                            Label::new((filename, input_range))
+                            Label::new((filename, schema_range))
                                 .with_message(format!(
-                                    "{} matchers found in node children",
+                                    "{} matchers found in node children (only 1 allowed)",
                                     received_count
                                 ))
                                 .with_color(Color::Red),
@@ -632,24 +616,14 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                         .with_help("Only one matcher is allowed per node's children.")
                         .finish()
                 }
-                SchemaError::BadListMatcher {
-                    schema_index,
-                    input_index,
-                } => {
+                SchemaError::BadListMatcher { schema_index } => {
                     let schema_node = find_node_by_index(tree.root_node(), *schema_index);
                     let schema_content =
                         node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                    let input_node = find_node_by_index(tree.root_node(), *input_index);
-                    let input_range = input_node.start_byte()..input_node.end_byte();
                     let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    Report::build(ReportKind::Error, (filename, schema_range.clone()))
                         .with_message("Bad list matcher")
-                        .with_label(
-                            Label::new((filename, input_range))
-                                .with_message("This input corresponds to a list node in the schema")
-                                .with_color(Color::Blue),
-                        )
                         .with_label(
                             Label::new((filename, schema_range))
                                 .with_message(format!(
@@ -658,51 +632,34 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                                 ))
                                 .with_color(Color::Red),
                         )
+                        .with_help("List nodes require repeating matcher syntax like `label:/pattern/`{1,}")
                         .finish()
                 }
                 SchemaError::UnclosedMatcher {
                     schema_index,
-                    input_index,
                 } => {
                     let schema_node = find_node_by_index(tree.root_node(), *schema_index);
-                    let input_node = find_node_by_index(tree.root_node(), *input_index);
                     let schema_range = schema_node.start_byte()..schema_node.end_byte();
-                    let input_range = input_node.start_byte()..input_node.end_byte();
 
-                    Report::build(ReportKind::Error, (filename, input_range.clone()))
-                    .with_message("Unclosed matcher")
-                    .with_label(
-                        Label::new((filename, input_range))
-                            .with_message("This input corresponds to a schema node with an unclosed matcher")
-                            .with_color(Color::Blue),
-                    )
-                    .with_label(
-                        Label::new((filename, schema_range))
-                            .with_message("Matcher is not properly closed")
-                            .with_color(Color::Red),
-                    )
-                    .with_help("Matchers must be properly closed with a backtick, e.g., `label:/pattern/`")
-                    .finish()
+                    Report::build(ReportKind::Error, (filename, schema_range.clone()))
+                        .with_message("Unclosed matcher")
+                        .with_label(
+                            Label::new((filename, schema_range))
+                                .with_message("Matcher is not properly closed")
+                                .with_color(Color::Red),
+                        )
+                        .with_help("Matchers must be properly closed with a backtick, e.g., `label:/pattern/`")
+                        .finish()
                 }
                 SchemaError::MatcherError {
                     error,
                     schema_index,
-                    input_index,
                 } => {
-                    let input_node = find_node_by_index(tree.root_node(), *input_index);
                     let schema_node = find_node_by_index(tree.root_node(), *schema_index);
-                    let input_range = input_node.start_byte()..input_node.end_byte();
                     let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    Report::build(ReportKind::Error, (filename, schema_range.clone()))
                         .with_message("Matcher error")
-                        .with_label(
-                            Label::new((filename, input_range))
-                                .with_message(
-                                    "This input corresponds to a schema node with a matcher error",
-                                )
-                                .with_color(Color::Blue),
-                        )
                         .with_label(
                             Label::new((filename, schema_range))
                                 .with_message(format!("Matcher error: {}", error))
@@ -712,22 +669,12 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 }
                 SchemaError::UTF8Error {
                     schema_index,
-                    input_index,
                 } => {
                     let schema_node = find_node_by_index(tree.root_node(), *schema_index);
-                    let input_node = find_node_by_index(tree.root_node(), *input_index);
-                    let input_range = input_node.start_byte()..input_node.end_byte();
                     let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    Report::build(ReportKind::Error, (filename, schema_range.clone()))
                         .with_message("UTF-8 error in schema")
-                        .with_label(
-                            Label::new((filename, input_range))
-                                .with_message(
-                                    "This input corresponds to a schema node with invalid UTF-8",
-                                )
-                                .with_color(Color::Blue),
-                        )
                         .with_label(
                             Label::new((filename, schema_range))
                                 .with_message("Schema text at this position is not valid UTF-8")
@@ -737,21 +684,13 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 }
                 SchemaError::InvalidMatcherExtras {
                     schema_index,
-                    input_index,
                     error,
                 } => {
                     let schema_node = find_node_by_index(tree.root_node(), *schema_index);
-                    let input_node = find_node_by_index(tree.root_node(), *input_index);
-                    let input_range = input_node.start_byte()..input_node.end_byte();
                     let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    Report::build(ReportKind::Error, (filename, schema_range.clone()))
                         .with_message("Invalid matcher extras")
-                        .with_label(
-                            Label::new((filename, input_range))
-                                .with_message("This input corresponds to a schema node with invalid matcher extras")
-                                .with_color(Color::Blue),
-                        )
                         .with_label(
                             Label::new((filename, schema_range))
                                 .with_message(format!("Invalid matcher extras: {}", error))
@@ -760,16 +699,15 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                         .finish()
                 }
                 SchemaError::RepeatingMatcherUnbounded {
-                    schema_index: _,
-                    input_index,
+                    schema_index,
                 } => {
-                    let input_node = find_node_by_index(tree.root_node(), *input_index);
-                    let input_range = input_node.start_byte()..input_node.end_byte();
+                    let schema_node = find_node_by_index(tree.root_node(), *schema_index);
+                    let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
-                    Report::build(ReportKind::Error, (filename, input_range.clone()))
+                    Report::build(ReportKind::Error, (filename, schema_range.clone()))
                         .with_message("Unbounded repeating matcher must be last")
                         .with_label(
-                            Label::new((filename, input_range))
+                            Label::new((filename, schema_range))
                                 .with_message(
                                     "This unbounded repeating matcher is followed by other repeating matchers.",
                                )

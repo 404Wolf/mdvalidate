@@ -246,7 +246,7 @@ mod tests {
         let reader = Cursor::new(input_data.as_bytes());
 
         let (errors, _) = get_validator(&schema_str, reader, false);
-        assert!(errors.is_empty(), "Should have no errors");
+        assert_eq!(errors, vec![]);
     }
 
     #[test]

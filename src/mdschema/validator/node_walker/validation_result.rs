@@ -3,7 +3,7 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::utils::join_values;
-use crate::mdschema::validator::validator_state::DescendantIndexPair;
+use crate::mdschema::validator::validator_state::NodePosPair;
 
 /// Validation results containing a Value with all matches, vector of all
 /// errors, and the descendant indexes after validation
@@ -14,14 +14,14 @@ pub struct ValidationResult {
     /// Vector of all validation errors encountered
     pub errors: Vec<ValidationError>,
     /// The farthest reached position
-    farthest_reached_pos: DescendantIndexPair,
+    farthest_reached_pos: NodePosPair,
 }
 
 impl ValidationResult {
     pub fn new(
         value: Value,
         errors: Vec<ValidationError>,
-        farthest_reached_pos: DescendantIndexPair,
+        farthest_reached_pos: NodePosPair,
     ) -> Self {
         Self {
             value,
@@ -35,7 +35,7 @@ impl ValidationResult {
         Self::new(
             json!({}),
             Vec::new(),
-            DescendantIndexPair::from_cursors(schema_cursor, input_cursor),
+            NodePosPair::from_cursors(schema_cursor, input_cursor),
         )
     }
 
@@ -44,13 +44,23 @@ impl ValidationResult {
         Self::new(
             json!({}),
             Vec::new(),
-            DescendantIndexPair::from_descendant_indexes(schema_index, input_index),
+            NodePosPair::from_pos(schema_index, input_index),
         )
     }
 
     /// Updates the cursor positions to the positions of the given cursors.
     pub fn sync_cursor_pos(&mut self, schema_cursor: &TreeCursor, input_cursor: &TreeCursor) {
-        self.farthest_reached_pos = DescendantIndexPair::from_cursors(schema_cursor, input_cursor);
+        self.farthest_reached_pos = NodePosPair::from_cursors(schema_cursor, input_cursor);
+    }
+
+    /// Updates a given pair of cursors to match our position.
+    pub fn walk_cursors_to_pos(
+        &self,
+        schema_cursor: &mut TreeCursor,
+        input_cursor: &mut TreeCursor,
+    ) {
+        self.farthest_reached_pos()
+            .walk_cursors_to_pos(input_cursor, schema_cursor);
     }
 
     /// Add an error to the `ValidationResult`.
@@ -81,11 +91,11 @@ impl ValidationResult {
 
         // Make the descendant index pair the maximum of the two (as far as we got)
         self.farthest_reached_pos
-            .keep_farther_positions(&other.farthest_reached_pos());
+            .keep_farther_pos(&other.farthest_reached_pos());
     }
 
     /// Get the farthest reached position as a descendant index pair.
-    pub fn farthest_reached_pos(&self) -> DescendantIndexPair {
+    pub fn farthest_reached_pos(&self) -> NodePosPair {
         self.farthest_reached_pos
     }
 }
@@ -95,7 +105,7 @@ impl Default for ValidationResult {
         Self {
             value: Default::default(),
             errors: Default::default(),
-            farthest_reached_pos: DescendantIndexPair::default(),
+            farthest_reached_pos: NodePosPair::default(),
         }
     }
 }
@@ -113,10 +123,7 @@ mod tests {
         result.join_other_result(&ValidationResult::from_descendant_indexes(1, 1));
         result.add_error(ValidationError::ValidatorCreationFailed);
 
-        assert_eq!(
-            result.farthest_reached_pos().to_descendant_indexes(),
-            (1, 1)
-        ); // the farther!
+        assert_eq!(result.farthest_reached_pos().to_pos_tuple(), (1, 1)); // the farther!
         assert_eq!(result.value, json!({"id": "value"}));
 
         assert_eq!(result.errors.len(), 1);
@@ -134,10 +141,7 @@ mod tests {
         result.set_match("id", json!("value"));
         result.join_other_result(&other);
 
-        assert_eq!(
-            result.farthest_reached_pos().to_descendant_indexes(),
-            (1, 1)
-        );
+        assert_eq!(result.farthest_reached_pos().to_pos_tuple(), (1, 1));
         assert_eq!(result.value, json!({"id": "value"}));
         assert_eq!(result.errors.len(), 0);
     }

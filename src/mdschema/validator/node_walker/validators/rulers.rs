@@ -2,8 +2,8 @@ use log::trace;
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::ts_utils::is_ruler_node;
 use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::mdschema::validator::ts_utils::is_ruler_node;
 
 /// Validate that both nodes are rulers (thematic breaks).
 ///
@@ -31,18 +31,17 @@ pub fn validate_ruler_vs_ruler(
     debug_assert_eq!(schema_node.child_count(), 0);
 
     trace!("Ruler validated successfully");
-    
+
     // Return empty result - rulers don't capture any data
     result
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use crate::mdschema::validator::{
-        ts_utils::parse_markdown,
-        node_walker::ruler_vs_ruler::validate_ruler_vs_ruler,
+        node_walker::validators::rulers::validate_ruler_vs_ruler, ts_utils::parse_markdown,
     };
+    use serde_json::json;
 
     #[test]
     fn test_validate_ruler_vs_ruler() {
