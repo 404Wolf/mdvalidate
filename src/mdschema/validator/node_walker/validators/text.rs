@@ -8,8 +8,8 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars},
     node_walker::{ValidationResult, node_vs_node::validate_node_vs_node},
     ts_utils::{
-        both_are_text_nodes, get_next_node, get_node_and_next_node, is_code_node, is_last_node,
-        is_text_node, is_textual_node, waiting_at_end,
+        both_are_text_nodes, both_are_textual_containers, get_next_node, get_node_and_next_node,
+        is_code_node, is_last_node, is_text_node, is_textual_node, waiting_at_end,
     },
     utils::{compare_node_children_lengths, compare_node_kinds, compare_text_contents},
 };
@@ -33,14 +33,21 @@ use crate::mdschema::validator::{
 ///
 /// This works by:
 ///
-///
+/// 1. If we're not a textual container, validate the contents and kind
+///    directly and return.
 /// 2. Count the number of top level matchers in the schema. Find the first
 ///    valid one. If there are more than 1, error.
 /// 3. Count the number of nodes for both the input and schema using special
 ///    utility that takes into account literal matchers.
-/// 4. Iterate up until the matcher that we found in both the schema and input.
-///    Now, walk down and recurse, which hits the base case of a simple non
-///    container check of textual nodes.
+/// 4. Walk the input and schema cursors at the same rate, and walk down ane
+///    recurse, which takes us to our base case of directly validating the contents
+///    and kind of the node. If the node we are at is a code node, look at it and
+///    the next node. If the two nodes correspond to a literal matcher, match the
+///    inside of the matcher against the corresponding code node in the input. Then
+///    if there is additional text in the subsequent text node after the code node,
+///    check that there is a text node in the input, maybe error, and if there is,
+///    validate that the contents of the rest of it is the same. Then move to the
+///    next node pair, hopping two nodes at once for the schema node.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     i = %input_cursor.descendant_index(),
     s = %schema_cursor.descendant_index(),
@@ -52,7 +59,47 @@ pub fn validate_text_vs_text(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
-    todo!()
+    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+
+    let mut input_cursor = input_cursor.clone();
+    let mut schema_cursor = schema_cursor.clone();
+
+    if both_are_textual_containers(&schema_cursor.node(), &input_cursor.node()) {
+        todo!()
+    } else {
+        if let Some(error) =
+            compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str)
+        {
+            trace!(
+                "Node kinds do not match. Got schema_kind={} and input_kind={}",
+                schema_cursor.node().kind(),
+                input_cursor.node().kind()
+            );
+            result.add_error(error);
+
+            return result;
+        }
+
+        let is_partial_match = waiting_at_end(got_eof, input_str, &input_cursor);
+        if let Some(error) = compare_text_contents(
+            schema_str,
+            input_str,
+            &schema_cursor,
+            &input_cursor,
+            is_partial_match,
+            false,
+        ) {
+            trace!(
+                "Text contents do not match. Got schema_text={} and input_text={}",
+                schema_str, input_str
+            );
+            result.add_error(error);
+
+            return result;
+        }
+
+        result
+    }
 }
 
 /// Count the number of matchers, starting at some cursor pointing to a textual
@@ -222,6 +269,7 @@ mod tests {
         matcher::matcher::MatcherError,
         node_walker::validators::text::{
             count_non_repeating_matchers_in_children, is_node_chunk_count_same,
+            validate_text_vs_text,
         },
         ts_utils::parse_markdown,
     };
@@ -508,5 +556,26 @@ mod tests {
             count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap(),
             1 // one is literal
         );
+    }
+
+    #[test]
+    fn test_validate_text_vs_text_on_text() {
+        let schema_str = "test";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "test";
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        input_cursor.goto_first_child(); // document -> paragraph
+        schema_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // paragraph -> text
+        schema_cursor.goto_first_child(); // paragraph -> text
+
+        let result =
+            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(result.errors.is_empty());
     }
 }
