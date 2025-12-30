@@ -93,6 +93,9 @@ pub enum SchemaError {
         received: usize,
     },
 
+    /// A repeating matcher in a textual container
+    RepeatingMatcherInTextContainer { schema_index: usize },
+
     /// List node uses a non-repeating matcher.
     ///
     /// List nodes must use matchers with repetition syntax like `{1,}`.
@@ -170,6 +173,9 @@ impl fmt::Display for SchemaError {
                     "Found {} matchers in node children (only 1 allowed)",
                     received
                 )
+            }
+            SchemaError::RepeatingMatcherInTextContainer { .. } => {
+                write!(f, "Repeating matcher cannot be used in text container")
             }
             SchemaError::BadListMatcher { .. } => {
                 write!(f, "List node requires repeating matcher syntax")
@@ -616,6 +622,20 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                         .with_help("Only one matcher is allowed per node's children.")
                         .finish()
                 }
+                SchemaError::RepeatingMatcherInTextContainer { schema_index } => {
+                    let schema_node = find_node_by_index(tree.root_node(), *schema_index);
+                    let schema_range = schema_node.start_byte()..schema_node.end_byte();
+
+                    Report::build(ReportKind::Error, (filename, schema_range.clone()))
+                        .with_message("Repeating matcher in text container")
+                        .with_label(
+                            Label::new((filename, schema_range))
+                                .with_message("Repeating matcher cannot be used in a textual container")
+                                .with_color(Color::Red),
+                        )
+                        .with_help("Text containers like paragraphs and headings cannot contain repeating matchers. Use repetition syntax only with list items.")
+                        .finish()
+                }
                 SchemaError::BadListMatcher { schema_index } => {
                     let schema_node = find_node_by_index(tree.root_node(), *schema_index);
                     let schema_content =
@@ -635,9 +655,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                         .with_help("List nodes require repeating matcher syntax like `label:/pattern/`{1,}")
                         .finish()
                 }
-                SchemaError::UnclosedMatcher {
-                    schema_index,
-                } => {
+                SchemaError::UnclosedMatcher { schema_index } => {
                     let schema_node = find_node_by_index(tree.root_node(), *schema_index);
                     let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
@@ -667,9 +685,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                         )
                         .finish()
                 }
-                SchemaError::UTF8Error {
-                    schema_index,
-                } => {
+                SchemaError::UTF8Error { schema_index } => {
                     let schema_node = find_node_by_index(tree.root_node(), *schema_index);
                     let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
@@ -698,9 +714,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                         )
                         .finish()
                 }
-                SchemaError::RepeatingMatcherUnbounded {
-                    schema_index,
-                } => {
+                SchemaError::RepeatingMatcherUnbounded { schema_index } => {
                     let schema_node = find_node_by_index(tree.root_node(), *schema_index);
                     let schema_range = schema_node.start_byte()..schema_node.end_byte();
 

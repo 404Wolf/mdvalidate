@@ -7,15 +7,14 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::ts_utils::get_node_and_next_node;
 
-static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?\/(?P<regex>.+?)\/").unwrap()
-});
+static MATCHER_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?\/(?P<regex>.+?)\/").unwrap());
 
 static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
 
 pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
     // We can have a ! instead of matcher extras to indicate that it is a literal match
-    LazyLock::new(|| Regex::new(r"^(([+\{\},0-9]*)|\!|)$").unwrap());
+    LazyLock::new(|| Regex::new(r"^(!|[+\{\},0-9]*)").unwrap());
 
 pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
     let captures = MATCHERS_EXTRA_PATTERN.captures(text);
@@ -386,7 +385,7 @@ fn extract_id_and_pattern(
             MatcherError::MatcherInteriorRegexInvalid(format!("Invalid regex pattern: {}", e))
         })?,
     };
-    
+
     Ok((id, matcher))
 }
 
@@ -455,7 +454,7 @@ mod tests {
     use crate::mdschema::validator::{
         matcher::matcher::{
             MATCHERS_EXTRA_PATTERN, Matcher, MatcherError, MatcherExtras, MatcherExtrasError,
-            extract_text_matcher,
+            extract_text_matcher, get_everything_after_special_chars,
         },
         ts_utils::new_markdown_parser,
     };
@@ -519,8 +518,6 @@ mod tests {
         );
         assert_eq!(matcher.match_str("tiny"), None); // Only 4 chars, should not match
     }
-
-
 
     #[test]
     fn test_item_count_limits() {
@@ -688,5 +685,11 @@ mod tests {
             }
             _ => panic!("Expected WasLiteralCode error"),
         }
+    }
+
+    #[test]
+    fn get_everything_after_special_chars_single_exclamation() {
+        let result = get_everything_after_special_chars("! ");
+        assert_eq!(result, Some(" "));
     }
 }

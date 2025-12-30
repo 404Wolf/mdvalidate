@@ -9,7 +9,7 @@ use crate::mdschema::validator::{
     node_walker::{ValidationResult, node_vs_node::validate_node_vs_node},
     ts_utils::{
         both_are_text_nodes, get_next_node, get_node_and_next_node, is_code_node, is_last_node,
-        is_textual_node, waiting_at_end,
+        is_text_node, is_textual_node, waiting_at_end,
     },
     utils::{compare_node_children_lengths, compare_node_kinds, compare_text_contents},
 };
@@ -33,15 +33,14 @@ use crate::mdschema::validator::{
 ///
 /// This works by:
 ///
-/// 1. Count the number of top level matchers in the schema. Find the first
-///    valid one. If there are more than 1, error.
-/// 2. Count the number of nodes for both the input and schema.
-/// 3. Iterate up until the matcher that we found in both the schema and input.
-///    For each node:
-///    - Check that the kind of the node in the input and schema matches
-/// - Walk down into the the node and recurse. TODO: make a helper to avoid the
-///   unneeded matcher checks here.
 ///
+/// 2. Count the number of top level matchers in the schema. Find the first
+///    valid one. If there are more than 1, error.
+/// 3. Count the number of nodes for both the input and schema using special
+///    utility that takes into account literal matchers.
+/// 4. Iterate up until the matcher that we found in both the schema and input.
+///    Now, walk down and recurse, which hits the base case of a simple non
+///    container check of textual nodes.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     i = %input_cursor.descendant_index(),
     s = %schema_cursor.descendant_index(),
@@ -54,6 +53,64 @@ pub fn validate_text_vs_text(
     got_eof: bool,
 ) -> ValidationResult {
     todo!()
+}
+
+/// Count the number of matchers, starting at some cursor pointing to a textual
+/// container, and iterating through all of its children.
+///
+/// Returns the number of matchers, or a `ValidationError` that is probably a
+/// `MatcherError` due to failing to construct a matcher given a code node that
+/// is not marked as literal.
+fn count_non_repeating_matchers_in_children(
+    schema_cursor: &TreeCursor,
+    schema_str: &str,
+) -> Result<usize, ValidationError> {
+    let mut count = 0;
+    let mut cursor = schema_cursor.clone();
+
+    cursor.goto_first_child();
+
+    while cursor.goto_next_sibling() {
+        if !is_code_node(&cursor.node()) {
+            continue;
+        }
+
+        // If the following node is a text node, then it may have extras, so grab them.
+        let extras_str = get_next_node(&cursor).and_then(|next_node| {
+            if !is_text_node(&next_node) {
+                return None;
+            }
+
+            let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
+            let after_special = get_everything_after_special_chars(next_node_str);
+            let extras_len = next_node_str.len() - after_special?.len();
+            Some(&next_node_str[..extras_len])
+        });
+
+        let pattern_str = cursor.node().utf8_text(schema_str.as_bytes()).unwrap();
+
+        match Matcher::try_from_pattern_and_suffix_str(pattern_str, extras_str) {
+            Ok(matcher) if matcher.is_repeated() => {
+                return Err(ValidationError::SchemaError(
+                    SchemaError::RepeatingMatcherInTextContainer {
+                        schema_index: cursor.descendant_index(),
+                    },
+                ));
+            }
+            Ok(_) => count += 1,
+            Err(MatcherError::WasLiteralCode) => {
+                // Don't count it, but this is an OK error
+            }
+            Err(err) => {
+                return Err(ValidationError::SchemaError(SchemaError::MatcherError {
+                    error: err,
+                    schema_index: cursor.descendant_index(),
+                }));
+            }
+        }
+    }
+
+    Ok(count)
 }
 
 /// Ensures that the node-chunk count between the schema and input is the same. We're
@@ -161,7 +218,12 @@ fn is_node_chunk_count_same(
 #[cfg(test)]
 mod tests {
     use crate::mdschema::validator::{
-        node_walker::validators::text::is_node_chunk_count_same, ts_utils::parse_markdown,
+        errors::{SchemaError, ValidationError},
+        matcher::matcher::MatcherError,
+        node_walker::validators::text::{
+            count_non_repeating_matchers_in_children, is_node_chunk_count_same,
+        },
+        ts_utils::parse_markdown,
     };
 
     #[test]
@@ -361,5 +423,90 @@ mod tests {
             &schema_cursor,
             schema_str
         ));
+    }
+
+    #[test]
+    fn test_count_matchers_one_valid_matcher() {
+        let schema_str = "test `foo:/bar/`";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+
+        assert_eq!(
+            count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_count_matchers_one_valid_matcher_with_extras() {
+        let schema_str = "test `foo:/bar/`{,}";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+        // (document[0]0..20)
+        // └─ (paragraph[1]0..19)
+        //    ├─ (text[2]0..5)
+        //    ├─ (code_span[3]5..16)
+        //    │  └─ (text[4]6..15)
+        //    └─ (text[5]16..19)
+
+        match count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap_err() {
+            ValidationError::SchemaError(SchemaError::RepeatingMatcherInTextContainer {
+                schema_index,
+            }) => {
+                assert_eq!(schema_index, 3); // the index of the code_span
+            }
+            _ => panic!("Expected InvalidMatcher error"),
+        }
+    }
+
+    #[test]
+    fn test_count_matchers_invalid_matcher() {
+        let schema_str = "test `_*test*_`";
+        // (document[0]0..16)
+        // └─ (paragraph[1]0..15)
+        //    ├─ (text[2]0..5)
+        //    └─ (code_span[3]5..15)
+        //       └─ (text[4]6..14)
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+
+        match count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap_err() {
+            ValidationError::SchemaError(SchemaError::MatcherError {
+                error,
+                schema_index,
+            }) => {
+                assert_eq!(schema_index, 3); // the index of the code_span
+                match error {
+                    MatcherError::MatcherInteriorRegexInvalid(_) => {}
+                    _ => panic!("Expected MatcherInteriorRegexInvalid error"),
+                }
+            }
+            _ => panic!("Expected InvalidMatcher error"),
+        }
+    }
+
+    #[test]
+    fn test_count_matchers_only_literal_matcher() {
+        let schema_str = "test `_*test*_`! `test:/test/`";
+        // (document[0]0..31)
+        // └─ (paragraph[1]0..30)
+        //    ├─ (text[2]0..5)
+        //    ├─ (code_span[3]5..15)
+        //    │  └─ (text[4]6..14)
+        //    ├─ (text[5]15..17)
+        //    └─ (code_span[6]17..30)
+        //       └─ (text[7]18..29)
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+
+        assert_eq!(
+            count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap(),
+            1 // one is literal
+        );
     }
 }
