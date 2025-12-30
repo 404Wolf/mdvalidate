@@ -8,7 +8,7 @@ use crate::mdschema::validator::node_walker::validators::code::validate_code_vs_
 use crate::mdschema::validator::node_walker::validators::headings::validate_heading_vs_heading;
 use crate::mdschema::validator::node_walker::validators::lists::validate_list_vs_list;
 use crate::mdschema::validator::node_walker::validators::rulers::validate_ruler_vs_ruler;
-use crate::mdschema::validator::node_walker::validators::text::validate_text_vs_text;
+use crate::mdschema::validator::node_walker::validators::textual::validate_textual_container_vs_textual_container;
 use crate::mdschema::validator::ts_utils::{
     both_are_codeblocks, both_are_list_nodes, both_are_matching_top_level_nodes, both_are_rulers,
     both_are_textual_containers, both_are_textual_nodes, is_heading_node, is_ruler_node,
@@ -51,7 +51,7 @@ pub fn validate_node_vs_node(
     if both_are_textual_nodes(&input_node, &schema_node) {
         trace!("Both are textual nodes, validating text vs text");
 
-        return validate_text_vs_text(
+        return validate_textual_container_vs_textual_container(
             &input_cursor,
             &schema_cursor,
             schema_str,
@@ -71,7 +71,7 @@ pub fn validate_node_vs_node(
     if both_are_textual_containers(&input_node, &schema_node) {
         trace!("Both are textual containers, validating text vs text");
 
-        return validate_text_vs_text(
+        return validate_textual_container_vs_textual_container(
             &input_cursor,
             &schema_cursor,
             schema_str,

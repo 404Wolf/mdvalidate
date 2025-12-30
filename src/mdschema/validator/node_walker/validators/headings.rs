@@ -4,7 +4,7 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::mdschema::validator::node_walker::validators::text::validate_text_vs_text;
+use crate::mdschema::validator::node_walker::validators::textual::validate_textual_container_vs_textual_container;
 use crate::mdschema::validator::ts_utils::{
     is_heading_node, is_marker_node, is_textual_container_node,
 };
@@ -64,7 +64,7 @@ pub fn validate_heading_vs_heading(
     debug_assert!(is_textual_container_node(&schema_cursor.node()));
 
     // Now that we're at the heading content, use `validate_text_vs_text`
-    validate_text_vs_text(
+    validate_textual_container_vs_textual_container(
         &input_cursor,
         &schema_cursor,
         schema_str,
@@ -172,7 +172,7 @@ mod tests {
             got_eof,
         );
         result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
-        let result = validate_text_vs_text(
+        let result = validate_textual_container_vs_textual_container(
             &input_cursor,
             &schema_cursor,
             schema_str,

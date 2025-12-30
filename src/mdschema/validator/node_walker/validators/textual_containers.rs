@@ -5,7 +5,7 @@ use tree_sitter::{Node, TreeCursor};
 
 use crate::mdschema::validator::{
     errors::*,
-    matcher::matcher::{Matcher, MatcherError, get_everything_after_special_chars},
+    matcher::matcher::{Matcher, MatcherError, partition_at_special_chars},
     node_walker::{ValidationResult, node_vs_node::validate_node_vs_node},
     ts_utils::{
         both_are_text_nodes, both_are_textual_containers, get_next_node, get_node_and_next_node,
@@ -123,16 +123,16 @@ fn count_non_repeating_matchers_in_children(
         }
 
         // If the following node is a text node, then it may have extras, so grab them.
-        let extras_str = get_next_node(&cursor).and_then(|next_node| {
-            if !is_text_node(&next_node) {
-                return None;
-            }
+        let extras_str = get_next_node(&cursor)
+            .and_then(|next_node| {
+                if !is_text_node(&next_node) {
+                    return None;
+                }
 
-            let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
-            let after_special = get_everything_after_special_chars(next_node_str);
-            let extras_len = next_node_str.len() - after_special?.len();
-            Some(&next_node_str[..extras_len])
-        });
+                let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
+                partition_at_special_chars(next_node_str)
+            })
+            .map(|(_special_chars, after)| after);
 
         let pattern_str = cursor.node().utf8_text(schema_str.as_bytes()).unwrap();
 
@@ -239,7 +239,10 @@ fn is_node_chunk_count_same(
                     // the `literal_matcher_followed_by_text_count` by 1. If there isn't text following the ! then don't.
                     let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
                     // TODO: if at very end whitespace after ! is OK
-                    if next_node_str.len() == 1 && next_node_str.starts_with('!') {
+                    if is_text_node(&next_node)
+                        && next_node_str.len() == 1
+                        && next_node_str.starts_with('!')
+                    {
                         literal_matcher_not_followed_by_text_count += 1;
                     }
                 }
@@ -267,9 +270,11 @@ mod tests {
     use crate::mdschema::validator::{
         errors::{SchemaError, ValidationError},
         matcher::matcher::MatcherError,
-        node_walker::validators::text::{
-            count_non_repeating_matchers_in_children, is_node_chunk_count_same,
-            validate_text_vs_text,
+        node_walker::validators::{
+            textual::validate_textual_container_vs_textual_container,
+            textual_containers::{
+                count_non_repeating_matchers_in_children, is_node_chunk_count_same,
+            },
         },
         ts_utils::parse_markdown,
     };
@@ -341,6 +346,26 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
 
         let input_str = "test `_*test*_`*bar*"; // text + literal matcher match + emphasis = 3 nodes
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        input_cursor.goto_first_child(); // document -> paragraph
+        schema_cursor.goto_first_child(); // document -> paragraph
+
+        assert!(is_node_chunk_count_same(
+            &input_cursor,
+            &schema_cursor,
+            schema_str
+        ));
+    }
+
+    #[test]
+    fn test_is_node_chunk_count_same_empty_string() {
+        let schema_str = "";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "";
         let input_tree = parse_markdown(input_str).unwrap();
         let mut input_cursor = input_tree.walk();
 
@@ -559,23 +584,27 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_text_vs_text_on_text() {
-        let schema_str = "test";
+    fn test_count_matchers_no_matchers() {
+        let schema_str = "test *foo* _bar_";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> paragraph
+
+        assert_eq!(
+            count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn test_count_matchers_empty_string() {
+        let schema_str = "";
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
 
-        let input_str = "test";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        input_cursor.goto_first_child(); // document -> paragraph
-        schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // paragraph -> text
-        schema_cursor.goto_first_child(); // paragraph -> text
-
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, false);
-
-        assert!(result.errors.is_empty());
+        assert_eq!(
+            count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap(),
+            0
+        );
     }
 }

@@ -2,4 +2,5 @@ pub(super) mod code;
 pub(super) mod headings;
 pub(super) mod lists;
 pub(super) mod rulers;
-pub(super) mod text;
+pub(super) mod textual;
+pub(super) mod textual_containers;

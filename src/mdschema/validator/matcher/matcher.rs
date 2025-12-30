@@ -5,7 +5,7 @@ use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
 use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::ts_utils::get_node_and_next_node;
+use crate::mdschema::validator::ts_utils::{get_next_node, get_node_and_next_node};
 
 static MATCHER_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?\/(?P<regex>.+?)\/").unwrap());
@@ -16,15 +16,25 @@ pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
     // We can have a ! instead of matcher extras to indicate that it is a literal match
     LazyLock::new(|| Regex::new(r"^(!|[+\{\},0-9]*)").unwrap());
 
-pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
+pub fn partition_at_special_chars(text: &str) -> Option<(&str, &str)> {
     let captures = MATCHERS_EXTRA_PATTERN.captures(text);
     match captures {
         Some(caps) => {
             let mat = caps.get(0)?;
-            Some(&text[mat.end()..])
+            Some((&text[..mat.end()], &text[mat.end()..]))
         }
-        None => Some(text),
+        None => Some(("", text)),
     }
+}
+
+/// Partition at where the special chars end, and then get everything that comes afterwards.
+pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
+    partition_at_special_chars(text).map(|(_, after)| after)
+}
+
+/// Partition at where the special chars end, and then get everything that comes before.
+pub fn get_everything_before_special_chars(text: &str) -> Option<&str> {
+    partition_at_special_chars(text).map(|(before, _)| before)
 }
 
 /// Errors specific to matcher construction.
@@ -309,6 +319,36 @@ impl Matcher {
         ))
     }
 
+    /// Given a schema cursor pointing at a `code_span` node, attempt to extract a new `Matcher`.
+    ///
+    /// We try to treat the `code_span` as a valid matcher, and grab extras from a
+    /// proceeding text node if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema_cursor`: A reference to a schema cursor pointing at a `code_span` node.
+    /// * `schema_str`: The string contents of the schema.
+    ///
+    /// # Returns
+    ///
+    /// If we fail to construct a `Matcher`, we error with a corresponding
+    /// `MatcherError`, otherwise the new `Matcher`.
+    pub fn try_from_schema_cursor(
+        schema_cursor: &TreeCursor,
+        schema_str: &str,
+    ) -> Result<Self, MatcherError> {
+        let pattern_str = schema_cursor
+            .node()
+            .utf8_text(schema_str.as_bytes())
+            .unwrap();
+        let next_node = get_next_node(schema_cursor);
+        let extras_str = next_node
+            .map(|n| n.utf8_text(schema_str.as_bytes()).unwrap())
+            .and_then(|n| partition_at_special_chars(n).map(|(extras, _)| extras));
+
+        Self::try_from_pattern_and_suffix_str(pattern_str, extras_str)
+    }
+
     /// Get an actual match string for a given text, if it matches.
     pub fn match_str<'a>(&self, text: &'a str) -> Option<&'a str> {
         match self.pattern.regex.find(text) {
@@ -454,9 +494,9 @@ mod tests {
     use crate::mdschema::validator::{
         matcher::matcher::{
             MATCHERS_EXTRA_PATTERN, Matcher, MatcherError, MatcherExtras, MatcherExtrasError,
-            extract_text_matcher, get_everything_after_special_chars,
+            MatcherType, extract_text_matcher, partition_at_special_chars,
         },
-        ts_utils::new_markdown_parser,
+        ts_utils::{new_markdown_parser, parse_markdown},
     };
 
     #[test]
@@ -689,7 +729,28 @@ mod tests {
 
     #[test]
     fn get_everything_after_special_chars_single_exclamation() {
-        let result = get_everything_after_special_chars("! ");
-        assert_eq!(result, Some(" "));
+        let result = partition_at_special_chars("! ");
+        assert_eq!(result, Some(("!", " ")));
+    }
+
+    #[test]
+    fn get_everything_after_special_chars_repeating() {
+        let result = partition_at_special_chars("{,1} hi");
+        assert_eq!(result, Some(("{,1}", " hi")));
+    }
+
+    #[test]
+    fn test_try_from_schema_cursor() {
+        let schema_str = "`test:/\\w+/`{1,2}";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        schema_cursor.goto_first_child(); // document -> paragraph
+        schema_cursor.goto_first_child(); // paragraph -> code_span
+        assert_eq!(schema_cursor.node().kind(), "code_span");
+
+        let matcher = Matcher::try_from_schema_cursor(&schema_cursor, schema_str).unwrap();
+        assert_eq!(matcher.pattern().to_string(), r"\w+");
+        assert_eq!(matcher.id(), Some("test"));
     }
 }
