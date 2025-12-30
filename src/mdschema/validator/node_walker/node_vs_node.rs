@@ -9,6 +9,7 @@ use crate::mdschema::validator::node_walker::validators::headings::validate_head
 use crate::mdschema::validator::node_walker::validators::lists::validate_list_vs_list;
 use crate::mdschema::validator::node_walker::validators::rulers::validate_ruler_vs_ruler;
 use crate::mdschema::validator::node_walker::validators::textual::validate_textual_vs_textual;
+use crate::mdschema::validator::node_walker::validators::textual_containers::validate_textual_container_vs_textual_container;
 use crate::mdschema::validator::ts_utils::{
     both_are_codeblocks, both_are_list_nodes, both_are_matching_top_level_nodes, both_are_rulers,
     both_are_textual_containers, both_are_textual_nodes, is_heading_node,
@@ -69,7 +70,7 @@ pub fn validate_node_vs_node(
     if both_are_textual_containers(&input_node, &schema_node) {
         trace!("Both are textual containers, validating text vs text");
 
-        return validate_textual_vs_textual(
+        return validate_textual_container_vs_textual_container(
             &input_cursor,
             &schema_cursor,
             schema_str,
