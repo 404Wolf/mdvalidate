@@ -5,7 +5,7 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::{
     errors::*,
     matcher::matcher::{Matcher, MatcherError, partition_at_special_chars},
-    node_walker::ValidationResult,
+    node_walker::{ValidationResult, validators::textual::validate_textual_vs_textual},
     ts_utils::{
         both_are_textual_containers, get_next_node, is_code_node, is_text_node, waiting_at_end,
     },
@@ -31,21 +31,19 @@ use crate::mdschema::validator::{
 ///
 /// This works by:
 ///
-/// 1. If we're not a textual container, validate the contents and kind
-///    directly and return.
-/// 2. Count the number of top level matchers in the schema. Find the first
+/// 1. Count the number of top level matchers in the schema. Find the first
 ///    valid one. If there are more than 1, error.
-/// 3. Count the number of nodes for both the input and schema using special
+/// 2. Count the number of nodes for both the input and schema using special
 ///    utility that takes into account literal matchers.
-/// 4. Walk the input and schema cursors at the same rate, and walk down ane
+/// 3. Walk the input and schema cursors at the same rate, and walk down ane
 ///    recurse, which takes us to our base case of directly validating the contents
 ///    and kind of the node. If the node we are at is a code node, look at it and
-///    the next node. If the two nodes correspond to a literal matcher, match the
-///    inside of the matcher against the corresponding code node in the input. Then
-///    if there is additional text in the subsequent text node after the code node,
-///    check that there is a text node in the input, maybe error, and if there is,
-///    validate that the contents of the rest of it is the same. Then move to the
-///    next node pair, hopping two nodes at once for the schema node.
+///    the next node. If the two nodes correspond to a literal matcher:
+///    - Match the inside of the matcher against the corresponding code node in the input.
+///    - Then if there is additional text in the subsequent text node after the code node,
+///      check that there is a text node in the input, maybe error, and if there is,
+///      validate that the contents of the rest of it is the same.
+///    - Then move to the next node pair, hopping two nodes at once for the schema node.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     i = %input_cursor.descendant_index(),
     s = %schema_cursor.descendant_index(),
@@ -59,45 +57,63 @@ pub fn validate_textual_container_vs_textual_container(
 ) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
+    debug_assert!(both_are_textual_containers(
+        &schema_cursor.node(),
+        &input_cursor.node()
+    ));
+
+    match count_non_repeating_matchers_in_children(&schema_cursor, schema_str) {
+        Ok(non_repeating_matchers_count) if non_repeating_matchers_count > 1 => result.add_error(
+            ValidationError::SchemaError(SchemaError::MultipleMatchersInNodeChildren {
+                schema_index: schema_cursor.descendant_index(),
+                received: non_repeating_matchers_count,
+            }),
+        ),
+        Ok(_) => {
+            // Exactly one non repeating matcher is OK!
+        }
+        Err(err) => {
+            result.add_error(err);
+            return result;
+        }
+    }
+
+    if !is_node_chunk_count_same(&input_cursor, &schema_cursor, schema_str) {
+        // TODO: we'd like to report to the CHUNK counts not the CHILDREN counts here. Maybe.
+        let input_node_count = input_cursor.node().child_count();
+        let schema_node_count = schema_cursor.node().child_count();
+
+        result.add_error(ValidationError::SchemaViolation(
+            SchemaViolationError::ChildrenLengthMismatch {
+                schema_index: schema_cursor.descendant_index(),
+                input_index: input_cursor.descendant_index(),
+                expected: ChildrenCount::from_specific(schema_node_count),
+                actual: input_node_count,
+            },
+        ));
+    }
+
     let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();
 
-    if both_are_textual_containers(&schema_cursor.node(), &input_cursor.node()) {
-        todo!()
-    } else {
-        if let Some(error) =
-            compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str)
-        {
-            trace!(
-                "Node kinds do not match. Got schema_kind={} and input_kind={}",
-                schema_cursor.node().kind(),
-                input_cursor.node().kind()
-            );
-            result.add_error(error);
+    // Go from the container to the first child in the container, and then
+    // iterate over the siblings at the same rate.
+    input_cursor.goto_first_child();
+    schema_cursor.goto_first_child();
 
-            return result;
-        }
-
-        let is_partial_match = waiting_at_end(got_eof, input_str, &input_cursor);
-        if let Some(error) = compare_text_contents(
+    while input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {
+        let pair_result = validate_textual_vs_textual(
+            &input_cursor,
+            &schema_cursor,
             schema_str,
             input_str,
-            &schema_cursor,
-            &input_cursor,
-            is_partial_match,
-            false,
-        ) {
-            trace!(
-                "Text contents do not match. Got schema_text={} and input_text={}",
-                schema_str, input_str
-            );
-            result.add_error(error);
-
-            return result;
-        }
-
-        result
+            got_eof,
+        );
+        result.join_other_result(&pair_result);
+        result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
     }
+
+    result
 }
 
 /// Count the number of matchers, starting at some cursor pointing to a textual
@@ -675,8 +691,13 @@ mod tests {
         assert_eq!(input_cursor.node().kind(), "heading_content");
         assert_eq!(schema_cursor.node().kind(), "heading_content");
 
-        let result =
-            validate_textual_container_vs_textual_container(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = validate_textual_container_vs_textual_container(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -718,8 +739,13 @@ mod tests {
         assert_eq!(input_cursor.node().kind(), "heading_content");
         assert_eq!(schema_cursor.node().kind(), "heading_content");
 
-        let result =
-            validate_textual_container_vs_textual_container(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = validate_textual_container_vs_textual_container(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         let errors = result.errors.clone();
         let value = result.value.clone();
