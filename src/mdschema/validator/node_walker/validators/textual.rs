@@ -166,11 +166,16 @@ pub fn validate_matcher_vs_text<'a>(
         trace!("Validating prefix before matcher");
 
         let schema_prefix_str = &schema_str[schema_prefix_node.byte_range()];
-        let input_prefix_str =
-            input_str.get(input_byte_offset..input_byte_offset + schema_prefix_str.len());
+
+        // Calculate how much input we have available from the current offset
+        let input_prefix_len = input_str.len() - input_byte_offset;
 
         // Check that the input extends enough that we can cover the full prefix.
-        if let Some(input_prefix_str) = input_prefix_str {
+        if input_prefix_len >= schema_prefix_str.len() {
+            // We have enough input to compare the full prefix
+            let input_prefix_str =
+                &input_str[input_byte_offset..input_byte_offset + schema_prefix_str.len()];
+
             // Do the actual prefix comparison
             if schema_prefix_str != input_prefix_str {
                 trace!(
@@ -196,41 +201,46 @@ pub fn validate_matcher_vs_text<'a>(
 
             trace!("Prefix matched successfully");
             input_byte_offset += schema_prefix_node.byte_range().len();
-        } else if is_last_node(input_str, &input_cursor.node()) {
-            // If we're waiting at the end, we can't validate the prefix yet
-            let best_prefix_input_we_can_do = &input_str[input_byte_offset..];
-            let best_prefix_length = best_prefix_input_we_can_do.len();
-            let schema_prefix_partial = &schema_prefix_str[..best_prefix_length];
+        } else if got_eof {
+            // We've reached EOF, so the input is complete and too short
+            let input_prefix_str = &input_str[input_byte_offset..];
 
-            if waiting_at_end(got_eof, input_str, &input_cursor) {
-                trace!("Input prefix not long enough, but waiting at end of input");
+            trace!(
+                "Prefix mismatch (input too short at EOF): expected '{}', got '{}'",
+                schema_prefix_str, input_prefix_str
+            );
 
-                if schema_prefix_partial != best_prefix_input_we_can_do {
-                    trace!(
-                        "Prefix partial mismatch at end: expected '{}', got '{}'",
-                        schema_prefix_partial, best_prefix_input_we_can_do
-                    );
-                    result.add_error(ValidationError::SchemaViolation(
-                        SchemaViolationError::NodeContentMismatch {
-                            schema_index: schema_cursor_at_prefix.descendant_index(),
-                            input_index: input_cursor_descendant_index,
-                            expected: schema_prefix_str.into(),
-                            actual: best_prefix_input_we_can_do.into(),
-                            kind: NodeContentMismatchKind::Prefix,
-                        },
-                    ));
-                } else {
-                    trace!("Prefix partial match successful, deferring full validation");
-                }
-            } else {
-                trace!("Input node is complete but no more input left, reporting mismatch error");
+            result.add_error(ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    schema_index: schema_cursor_at_prefix.descendant_index(),
+                    input_index: input_cursor_descendant_index,
+                    expected: schema_prefix_str.into(),
+                    actual: input_prefix_str.into(),
+                    kind: NodeContentMismatchKind::Prefix,
+                },
+            ));
 
+            result.sync_cursor_pos(&schema_cursor, &input_cursor);
+            return result;
+        } else {
+            // We haven't reached EOF yet, so partial match is OK
+            // Check if what we have so far matches
+            let input_prefix_str = &input_str[input_byte_offset..];
+            let schema_prefix_partial = &schema_prefix_str[..input_prefix_str.len()];
+
+            trace!("Input prefix not long enough, but waiting at end of input");
+
+            if schema_prefix_partial != input_prefix_str {
+                trace!(
+                    "Prefix partial mismatch: expected '{}', got '{}'",
+                    schema_prefix_partial, input_prefix_str
+                );
                 result.add_error(ValidationError::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch {
                         schema_index: schema_cursor_at_prefix.descendant_index(),
                         input_index: input_cursor_descendant_index,
                         expected: schema_prefix_str.into(),
-                        actual: best_prefix_input_we_can_do.into(),
+                        actual: input_prefix_str.into(),
                         kind: NodeContentMismatchKind::Prefix,
                     },
                 ));

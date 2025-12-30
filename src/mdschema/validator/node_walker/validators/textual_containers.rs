@@ -4,7 +4,10 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     errors::*,
-    matcher::matcher::{Matcher, MatcherError, partition_at_special_chars},
+    matcher::matcher::{
+        Matcher, MatcherError, get_everything_after_special_chars,
+        get_everything_before_special_chars, partition_at_special_chars,
+    },
     node_walker::{ValidationResult, validators::textual::validate_textual_vs_textual},
     ts_utils::{
         both_are_textual_containers, get_next_node, is_code_node, is_text_node, waiting_at_end,
@@ -63,17 +66,19 @@ pub fn validate_textual_container_vs_textual_container(
     ));
 
     match count_non_repeating_matchers_in_children(&schema_cursor, schema_str) {
-        Ok(non_repeating_matchers_count) if non_repeating_matchers_count > 1 => result.add_error(
-            ValidationError::SchemaError(SchemaError::MultipleMatchersInNodeChildren {
-                schema_index: schema_cursor.descendant_index(),
-                received: non_repeating_matchers_count,
-            }),
-        ),
+        Ok(non_repeating_matchers_count) if non_repeating_matchers_count > 1 && got_eof => result
+            .add_error(ValidationError::SchemaError(
+                SchemaError::MultipleMatchersInNodeChildren {
+                    schema_index: schema_cursor.descendant_index(),
+                    received: non_repeating_matchers_count,
+                },
+            )),
         Ok(_) => {
             // Exactly one non repeating matcher is OK!
         }
         Err(err) => {
             result.add_error(err);
+
             return result;
         }
     }
@@ -101,16 +106,28 @@ pub fn validate_textual_container_vs_textual_container(
     input_cursor.goto_first_child();
     schema_cursor.goto_first_child();
 
-    while input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {
+    loop {
+        let has_next_pair =
+            input_cursor.clone().goto_next_sibling() && schema_cursor.clone().goto_next_sibling();
+
         let pair_result = validate_textual_vs_textual(
             &input_cursor,
             &schema_cursor,
             schema_str,
             input_str,
-            got_eof,
+            has_next_pair || got_eof, // if we have more pairs, then eof=true. Otherwise, eof = got_eof
+        );
+        dbg!(
+            &pair_result,
+            input_cursor.descendant_index(),
+            schema_cursor.descendant_index()
         );
         result.join_other_result(&pair_result);
         result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
+
+        if !input_cursor.goto_next_sibling() || !schema_cursor.goto_next_sibling() {
+            break;
+        }
     }
 
     result
@@ -131,22 +148,22 @@ fn count_non_repeating_matchers_in_children(
 
     cursor.goto_first_child();
 
-    while cursor.goto_next_sibling() {
+    loop {
         if !is_code_node(&cursor.node()) {
-            continue;
+            if !cursor.goto_next_sibling() {
+                break;
+            } else {
+                continue;
+            }
         }
 
         // If the following node is a text node, then it may have extras, so grab them.
         let extras_str = get_next_node(&cursor)
+            .filter(|n| is_text_node(n))
             .and_then(|next_node| {
-                if !is_text_node(&next_node) {
-                    return None;
-                }
-
                 let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
-                partition_at_special_chars(next_node_str)
-            })
-            .map(|(_special_chars, after)| after);
+                get_everything_before_special_chars(next_node_str)
+            });
 
         let pattern_str = cursor.node().utf8_text(schema_str.as_bytes()).unwrap();
 
@@ -168,6 +185,10 @@ fn count_non_repeating_matchers_in_children(
                     schema_index: cursor.descendant_index(),
                 }));
             }
+        }
+
+        if !cursor.goto_next_sibling() {
+            break;
         }
     }
 
@@ -548,7 +569,7 @@ mod tests {
             }) => {
                 assert_eq!(schema_index, 3); // the index of the code_span
             }
-            _ => panic!("Expected InvalidMatcher error"),
+            error => panic!("Expected InvalidMatcher error, got {:?}", error),
         }
     }
 
@@ -776,10 +797,8 @@ mod tests {
         let mut input_cursor = input_tree.walk();
 
         schema_cursor.goto_first_child(); // document -> paragraph
-        schema_cursor.goto_first_child(); // paragraph -> text
 
         input_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // paragraph -> text
 
         let result = validate_textual_container_vs_textual_container(
             &input_cursor,
