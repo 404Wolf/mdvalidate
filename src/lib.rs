@@ -1,4 +1,4 @@
 pub mod mdschema;
-pub(crate) mod helpers;
+pub mod helpers;
 
 pub use mdschema::Validator;

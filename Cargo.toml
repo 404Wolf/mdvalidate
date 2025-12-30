@@ -1,6 +1,12 @@
 [[bin]]
 name = "mdv"
 path = "src/main.rs"
+publish = true
+
+[[bin]]
+name = "tree_inspector"
+path = "src/helpers/tree_inspector.rs"
+publish = false
 
 [dependencies]
 ariadne = "0.5.1"

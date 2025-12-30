@@ -43,6 +43,17 @@ pub fn get_node_and_next_node<'a>(cursor: &TreeCursor<'a>) -> Option<(Node<'a>, 
     Some((first_node, next_node))
 }
 
+/// Get the next node for a cursor.
+pub fn get_next_node<'a>(cursor: &TreeCursor<'a>) -> Option<Node<'a>> {
+    let mut input_cursor = cursor.clone();
+
+    if input_cursor.goto_next_sibling() {
+        Some(input_cursor.node())
+    } else {
+        None
+    }
+}
+
 /// Whether the cursor has a node sibling following it.
 pub fn has_subsequent_node_of_kind(cursor: &TreeCursor, kind: &str) -> bool {
     cursor.clone().goto_next_sibling() && cursor.node().kind() == kind
@@ -98,6 +109,11 @@ pub fn is_textual_node(node: &Node) -> bool {
 /// Check if a node is specifically a text node.
 pub fn is_text_node(node: &Node) -> bool {
     node.kind() == "text"
+}
+
+/// Check if a node is specifically a code node.
+pub fn is_code_node(node: &Node) -> bool {
+    node.kind() == "code_span"
 }
 
 /// Check if a node is a paragraph.
