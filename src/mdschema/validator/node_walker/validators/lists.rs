@@ -6,7 +6,7 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::{
     errors::{ChildrenCount, SchemaError, SchemaViolationError, ValidationError},
     matcher::matcher::{Matcher, MatcherError},
-    node_walker::{ValidationResult, validators::textual::validate_textual_container_vs_textual_container},
+    node_walker::{ValidationResult, validators::textual::validate_textual_vs_textual},
     ts_utils::{
         count_siblings, get_node_and_next_node, has_single_code_child, has_subsequent_node_of_kind,
         is_list_node, walk_to_list_item_content,
@@ -135,7 +135,7 @@ pub fn validate_list_vs_list(
                 walk_to_list_item_content(&mut input_cursor_paragraph);
                 walk_to_list_item_content(&mut schema_cursor_paragraph);
 
-                let new_matches = validate_textual_container_vs_textual_container(
+                let new_matches = validate_textual_vs_textual(
                     &input_cursor_paragraph,
                     &schema_cursor_paragraph,
                     schema_str,
@@ -377,7 +377,7 @@ pub fn validate_list_vs_list(
                 return result;
             }
 
-            let list_item_match_result = validate_textual_container_vs_textual_container(
+            let list_item_match_result = validate_textual_vs_textual(
                 &input_cursor,
                 &schema_cursor,
                 schema_str,

@@ -3,31 +3,33 @@ use serde_json::json;
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
-use crate::helpers::node_print::PrettyPrint;
 use crate::mdschema::validator::matcher::matcher::{
     Matcher, MatcherError, get_everything_after_special_chars,
 };
-use crate::mdschema::validator::node_walker::validators::textual_containers::validate_text_vs_text;
 use crate::mdschema::validator::ts_utils::{
-    both_are_textual_nodes, get_next_node, get_node_and_next_node, is_code_node, is_last_node,
+    both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_last_node,
     is_text_node,
 };
+use crate::mdschema::validator::validator_state::NodePosPair;
 use crate::mdschema::validator::{
     errors::*,
     node_walker::ValidationResult,
-    ts_utils::{both_are_textual_containers, waiting_at_end},
+    ts_utils::waiting_at_end,
     utils::{compare_node_kinds, compare_text_contents},
 };
 
 /// Validate two textual elements.
 ///
 /// # Algorithm
-/// 1. Check if the schema node is at a matcher literal. If it is, then check if the next node is a text node. If it is, attempt to gather together
+/// 1. Check if the schema node is at a `code_span`, or the current node is a
+///    text node and the next node is a `code_span`. If so, delegate to
+///    `validate_matcher_vs_text`.
+/// 2. Otherwise, check that the node kind and text contents are the same.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     i = %input_cursor.descendant_index(),
     s = %schema_cursor.descendant_index(),
 ), ret)]
-pub fn validate_textual_container_vs_textual_container(
+pub fn validate_textual_vs_textual(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
     schema_str: &str,
@@ -36,19 +38,24 @@ pub fn validate_textual_container_vs_textual_container(
 ) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
-    let mut input_cursor = input_cursor.clone();
-    let mut schema_cursor = schema_cursor.clone();
+    // If the schema is pointed at a code node, or a text node followed by a
+    // code node, validate it using `validate_matcher_vs_text`
 
-    // If the schema is pointed at a code node, attempt to validate it using `validate_text_vs_matcher`
-    if is_code_node(&schema_cursor.node()) {
-        let matcher_vs_text_result = validate_matcher_vs_text(
+    let current_node_is_code_node = is_code_node(&schema_cursor.node());
+    let current_node_is_text_node_and_next_node_code_node = {
+        get_next_node(&schema_cursor)
+            .map(|n| is_text_node(&schema_cursor.node()) && is_code_node(&n))
+            .unwrap_or(false)
+    };
+
+    if current_node_is_code_node || current_node_is_text_node_and_next_node_code_node {
+        return validate_matcher_vs_text(
             &input_cursor,
             &schema_cursor,
             schema_str,
             input_str,
             got_eof,
         );
-        result.join_other_result(&matcher_vs_text_result);
     }
 
     debug_assert!(both_are_textual_nodes(
@@ -57,11 +64,6 @@ pub fn validate_textual_container_vs_textual_container(
     ));
 
     if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
-        trace!(
-            "Node kinds do not match. Got schema_kind={} and input_kind={}",
-            schema_cursor.node().kind(),
-            input_cursor.node().kind()
-        );
         result.add_error(error);
 
         return result;
@@ -76,10 +78,6 @@ pub fn validate_textual_container_vs_textual_container(
         is_partial_match,
         false,
     ) {
-        trace!(
-            "Text contents do not match. Got schema_text={} and input_text={}",
-            schema_str, input_str
-        );
         result.add_error(error);
 
         return result;
@@ -136,7 +134,7 @@ pub fn validate_matcher_vs_text<'a>(
     let schema_suffix_node = {
         // If there is a prefix, this comes two nodes later
         if schema_prefix_node.is_some() {
-            get_next_node(&schema_cursor).and_then(|n| get_next_node(&n.walk()))
+            get_node_n_nodes_ahead(&schema_cursor, 2)
         } else {
             get_next_node(&schema_cursor)
         }
@@ -155,13 +153,13 @@ pub fn validate_matcher_vs_text<'a>(
     let mut input_byte_offset = input_cursor.node().byte_range().start;
 
     // Descendant index of the input node, specifically the paragraph (not the interior text)
-    let input_node_descendant_index = input_cursor.descendant_index();
+    let input_cursor_descendant_index = input_cursor.descendant_index();
     let input_cursor_at_prefix = input_cursor.clone();
     input_cursor.goto_first_child();
 
     // Preserve the cursor where it's pointing at the prefix node for error reporting
     let mut schema_cursor_at_prefix = schema_cursor.clone();
-    schema_cursor_at_prefix.goto_first_child(); // paragraph -> text
+    schema_cursor_at_prefix.goto_first_child();
 
     // Only do prefix verification if there is a prefix
     if let Some(schema_prefix_node) = schema_prefix_node {
@@ -182,7 +180,7 @@ pub fn validate_matcher_vs_text<'a>(
                 result.add_error(ValidationError::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch {
                         schema_index: schema_cursor_at_prefix.descendant_index(),
-                        input_index: input_node_descendant_index,
+                        input_index: input_cursor_descendant_index,
                         expected: schema_prefix_str.into(),
                         actual: input_prefix_str.into(),
                         kind: NodeContentMismatchKind::Prefix,
@@ -191,7 +189,7 @@ pub fn validate_matcher_vs_text<'a>(
 
                 // If prefix validation fails don't try to validate further.
                 // TODO: In the future we could attempt to validate further anyway!
-                result.sync_cursor_pos(&input_cursor, &schema_cursor);
+                result.sync_cursor_pos(&schema_cursor, &input_cursor);
 
                 return result;
             }
@@ -215,7 +213,7 @@ pub fn validate_matcher_vs_text<'a>(
                     result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch {
                             schema_index: schema_cursor_at_prefix.descendant_index(),
-                            input_index: input_node_descendant_index,
+                            input_index: input_cursor_descendant_index,
                             expected: schema_prefix_str.into(),
                             actual: best_prefix_input_we_can_do.into(),
                             kind: NodeContentMismatchKind::Prefix,
@@ -230,7 +228,7 @@ pub fn validate_matcher_vs_text<'a>(
                 result.add_error(ValidationError::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch {
                         schema_index: schema_cursor_at_prefix.descendant_index(),
-                        input_index: input_node_descendant_index,
+                        input_index: input_cursor_descendant_index,
                         expected: schema_prefix_str.into(),
                         actual: best_prefix_input_we_can_do.into(),
                         kind: NodeContentMismatchKind::Prefix,
@@ -238,7 +236,8 @@ pub fn validate_matcher_vs_text<'a>(
                 ));
             }
 
-            result.sync_cursor_pos(&input_cursor, &schema_cursor);
+            result.sync_cursor_pos(&schema_cursor, &input_cursor);
+
             return result;
         }
     }
@@ -255,13 +254,15 @@ pub fn validate_matcher_vs_text<'a>(
             result.add_error(ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     schema_index: schema_cursor_at_prefix.descendant_index(),
-                    input_index: input_node_descendant_index,
+                    input_index: input_cursor_descendant_index,
                     expected: schema_prefix_str.into(),
                     actual: best_prefix_input_we_can_do.into(),
                     kind: NodeContentMismatchKind::Prefix,
                 },
             ));
         }
+
+        result.sync_cursor_pos(&schema_cursor, &input_cursor);
 
         return result;
     }
@@ -290,6 +291,20 @@ pub fn validate_matcher_vs_text<'a>(
                     } else {
                         trace!("Matcher has no id, not storing match");
                     }
+
+                    // Walk so that we are ON the `code_span`
+                    schema_cursor.goto_next_sibling();
+
+                    // Walk down into the `code_span` and mark its child text as already validated!
+                    {
+                        let mut schema_cursor = schema_cursor.clone();
+
+                        schema_cursor.goto_first_child();
+                        result.keep_farther_pos(&NodePosPair::from_cursors(
+                            &schema_cursor,
+                            &input_cursor,
+                        ));
+                    }
                 }
                 None => {
                     trace!(
@@ -297,54 +312,33 @@ pub fn validate_matcher_vs_text<'a>(
                         matcher.pattern().to_string(),
                         input_after_prefix
                     );
+
                     result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch {
                             schema_index: schema_cursor.descendant_index(),
-                            input_index: input_node_descendant_index,
+                            input_index: input_cursor_descendant_index,
                             expected: matcher.pattern().to_string(),
                             actual: input_after_prefix.into(),
                             kind: NodeContentMismatchKind::Matcher,
                         },
                     ));
 
-                    // TODO: should we validate further when we fail to match the matcher?
-                    result.sync_cursor_pos(&input_cursor, &schema_cursor);
-
                     return result;
                 }
             }
-            result.sync_cursor_pos(&input_cursor, &schema_cursor);
         }
         Err(error) => match error {
             MatcherError::WasLiteralCode => {
-                // move the input to the code node now
+                // Move the input to the code node now
                 input_cursor.reset_to(&input_cursor_at_prefix);
 
-                dbg!(&schema_cursor.descendant_index());
-                dbg!(&input_cursor.descendant_index());
-                let literal_matcher_result = validate_literal_matcher_vs_text(
+                // Delegate to the literal matcher validator
+                return validate_literal_matcher_vs_textual(
                     &input_cursor,
                     &schema_cursor,
                     schema_str,
                     input_str,
                     got_eof,
-                );
-                result.join_other_result(&literal_matcher_result);
-                result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
-                if !result.errors.is_empty() {
-                    return result;
-                }
-                debug_assert!(
-                    !schema_cursor
-                        .node()
-                        .parent()
-                        .map_or(true, |node| is_code_node(&node))
-                );
-                debug_assert!(
-                    !input_cursor
-                        .node()
-                        .parent()
-                        .map_or(true, |node| is_code_node(&node))
                 );
             }
             _ => result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
@@ -356,11 +350,16 @@ pub fn validate_matcher_vs_text<'a>(
 
     // Validate suffix if there is one
     if let Some(schema_suffix_node) = schema_suffix_node {
-        trace!("Validating suffix");
+        // (document[0]0..28)
+        // └─ (paragraph[1]0..27)
+        //    ├─ (text[2]0..7)
+        //    ├─ (code_span[3]7..20) <-- from here...
+        //    │  └─ (text[4]8..19)
+        //    └─ (text[5]20..21) <-- ...go here!
         schema_cursor.goto_next_sibling(); // code_span -> text
 
         // Return early if it is not text
-        if !is_text_node(&schema_suffix_node) {
+        if !is_text_node(&schema_cursor.node()) {
             return result;
         }
 
@@ -373,10 +372,12 @@ pub fn validate_matcher_vs_text<'a>(
         };
 
         // Seek forward from the current input byte offset by the length of the suffix
-        let input_suffix = &input_str[input_byte_offset..input_byte_offset + schema_suffix.len()];
+        let input_suffix_len = input_cursor.node().byte_range().len() - input_byte_offset;
 
         // Check if input_suffix is shorter than schema_suffix
-        if input_suffix.len() < schema_suffix.len() {
+        let input_suffix = &input_str[input_byte_offset..input_cursor.node().byte_range().end];
+
+        if input_suffix_len < schema_suffix.len() {
             if got_eof {
                 // We've reached EOF, so the input is complete and too short
                 trace!(
@@ -387,7 +388,7 @@ pub fn validate_matcher_vs_text<'a>(
                 result.add_error(ValidationError::SchemaViolation(
                     SchemaViolationError::NodeContentMismatch {
                         schema_index: schema_cursor.descendant_index(),
-                        input_index: input_node_descendant_index,
+                        input_index: input_cursor_descendant_index,
                         expected: schema_suffix.into(),
                         actual: input_suffix.into(),
                         kind: NodeContentMismatchKind::Suffix,
@@ -406,7 +407,7 @@ pub fn validate_matcher_vs_text<'a>(
                     result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch {
                             schema_index: schema_cursor.descendant_index(),
-                            input_index: input_node_descendant_index,
+                            input_index: input_cursor_descendant_index,
                             expected: schema_suffix.into(),
                             actual: input_suffix.into(),
                             kind: NodeContentMismatchKind::Suffix,
@@ -425,7 +426,7 @@ pub fn validate_matcher_vs_text<'a>(
             result.add_error(ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     schema_index: schema_cursor.descendant_index(),
-                    input_index: input_node_descendant_index,
+                    input_index: input_cursor_descendant_index,
                     expected: schema_suffix.into(),
                     actual: input_suffix.into(),
                     kind: NodeContentMismatchKind::Suffix,
@@ -433,11 +434,11 @@ pub fn validate_matcher_vs_text<'a>(
             ));
         } else {
             trace!("Suffix matched successfully");
+
+            // We validated this one! Load the result with the new pos!
+            result.keep_farther_pos(&NodePosPair::from_cursors(&schema_cursor, &input_cursor));
         }
-    } else {
-        trace!("No suffix to validate");
     }
-    result.sync_cursor_pos(&schema_cursor, &input_cursor);
 
     result
 }
@@ -452,7 +453,7 @@ pub fn validate_matcher_vs_text<'a>(
 ///
 /// 1. Recurse down into the actual code node, and validate the inside
 /// 2. Validate the remaining portion of the suffix node, which contains the "!".
-fn validate_literal_matcher_vs_text(
+fn validate_literal_matcher_vs_textual(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
     schema_str: &str,
@@ -488,6 +489,7 @@ fn validate_literal_matcher_vs_text(
             result.add_error(error);
             return result;
         }
+        result.keep_farther_pos(&NodePosPair::from_cursors(&schema_cursor, &input_cursor));
     }
 
     // The schema cursor definitely has a text node after the code node, which
@@ -591,9 +593,6 @@ fn validate_literal_matcher_vs_text(
         }
     }
 
-    // Walk to the next node, then return
-    schema_cursor.goto_next_sibling();
-    input_cursor.goto_next_sibling();
     result.sync_cursor_pos(&schema_cursor, &input_cursor);
 
     result
@@ -609,50 +608,14 @@ mod tests {
         errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
         node_walker::validators::{
             textual::{
-                validate_literal_matcher_vs_text, validate_matcher_vs_text,
-                validate_textual_container_vs_textual_container,
+                validate_literal_matcher_vs_textual, validate_matcher_vs_text,
+                validate_textual_vs_textual,
             },
-            textual_containers::validate_text_vs_text,
+            textual_containers::validate_textual_container_vs_textual_container,
         },
         ts_utils::parse_markdown,
         validator_state::NodePosPair,
     };
-
-    #[test]
-    fn test_validate_text_vs_text_on_text() {
-        let schema_str = "test";
-        // (document[0]0..5)
-        // └─ (paragraph[1]0..4)
-        //    └─ (text[2]0..4)
-
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
-        let input_str = "test";
-        // (document[0]0..5)
-        // └─ (paragraph[1]0..4)
-        //    └─ (text[2]0..4)
-
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        input_cursor.goto_first_child(); // document -> paragraph
-        schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // paragraph -> text
-        schema_cursor.goto_first_child(); // paragraph -> text
-
-        let result = validate_textual_container_vs_textual_container(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            false,
-        );
-
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(2, 2));
-    }
 
     #[test]
     fn test_validate_matcher_vs_text_with_prefix_no_suffix() {
@@ -686,10 +649,16 @@ mod tests {
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({"test": "test"}));
         assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 2));
+
+        // They should use the same internal function
+        assert_eq!(
+            validate_textual_vs_textual(&input_cursor, &schema_cursor, schema_str, input_str, true),
+            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true)
+        )
     }
 
     #[test]
-    fn test_validate_matcher_vs_text_with_prefix_no_suffix_goes_farther_if_it_can() {
+    fn test_validate_matcher_vs_text_with_prefix_no_suffix_ends_at_end_of_text() {
         let schema_str = "prefix `test:/test/` *test*";
         // (document[0]0..28)
         // └─ (paragraph[1]0..27)
@@ -724,7 +693,7 @@ mod tests {
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({"test": "test"}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(6, 3)); // emphasis for both
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(5, 2)); // text before emphasis for both
     }
 
     #[test]
@@ -763,7 +732,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_matcher_vs_text_with_prefix_and_suffix_goes_farther_if_can() {
+    fn test_validate_matcher_vs_text_with_prefix_and_suffix_ends_at_end_of_text() {
         let schema_str = "prefix `test:/test/` suffix *test* _*test*_";
         // (document[0]0..44)
         // └─ (paragraph[1]0..43)
@@ -806,130 +775,8 @@ mod tests {
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({"test": "test"})); // capture what we could so far
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(9, 3)) // emphasis for both
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(5, 2))
     }
-    #[test]
-    fn test_validate_text_vs_text_header_content() {
-        let schema_str = "# Test Wolf";
-        // (document[0]0..12)
-        // └─ (atx_heading[1]0..11)
-        //    ├─ (atx_h1_marker[2]0..1)
-        //    └─ (heading_content[3]1..11)
-        //       └─ (text[4]1..11)
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
-        let input_str = "# Test Wolf";
-        // (document[0]0..12)
-        // └─ (atx_heading[1]0..11)
-        //    ├─ (atx_h1_marker[2]0..1)
-        //    └─ (heading_content[3]1..11)
-        //       └─ (text[4]1..11)
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_next_sibling();
-        schema_cursor.goto_next_sibling();
-        assert_eq!(input_cursor.node().kind(), "heading_content");
-        assert_eq!(schema_cursor.node().kind(), "heading_content");
-
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
-
-        let errors = result.errors.clone();
-        let value = result.value.clone();
-
-        assert_eq!(errors, vec![]);
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
-        assert_eq!(value, json!({}));
-    }
-
-    #[test]
-    fn test_validate_text_vs_text_header_content_and_matcher() {
-        let schema_str = "# Test `name:/[a-zA-Z]+/`";
-        // (document[0]0..26)
-        // └─ (atx_heading[1]0..25)
-        //    ├─ (atx_h1_marker[2]0..1)
-        //    └─ (heading_content[3]1..25)
-        //       ├─ (text[4]1..7)
-        //       └─ (code_span[5]7..25)
-        //          └─ (text[6]8..24)
-
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
-        let input_str = "# Test Wolf";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-        // (document[0])
-        // └─ (atx_heading[1])
-        //    ├─ (atx_h1_marker[2])
-        //    └─ (heading_content[3])
-        //       └─ (text[4])
-
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_next_sibling();
-        schema_cursor.goto_next_sibling();
-        assert_eq!(input_cursor.node().kind(), "heading_content");
-        assert_eq!(schema_cursor.node().kind(), "heading_content");
-
-        let result =
-            validate_text_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
-
-        let errors = result.errors.clone();
-        let value = result.value.clone();
-
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"name": "Wolf"}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 5));
-    }
-
-    #[test]
-    fn test_validate_text_vs_text_with_incomplete_matcher() {
-        let schema_str = "prefix `test:/test/`";
-        // (document[0]0..21)
-        // └─ (paragraph[1]0..20)
-        //    ├─ (text[2]0..7)
-        //    └─ (code_span[3]7..20)
-        //       └─ (text[4]8..19)
-
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
-        let input_str = "prefix `test:/te";
-        // (document[0]0..17)
-        // └─ (paragraph[1]0..16)
-        //    └─ (text[2]0..16)
-
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        schema_cursor.goto_first_child(); // document -> paragraph
-        schema_cursor.goto_first_child(); // paragraph -> text
-
-        input_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // paragraph -> text
-
-        let result = validate_text_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            false, // we are allowed to have a broken matcher if it is the last com
-        );
-
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(2, 2)) // no movement yet
-    }
-
     #[test]
     fn test_validate_matcher_vs_text_with_input_prefix_not_long_enough() {
         let schema_str = "prefix that is longer than input `test:/test/`";
@@ -1035,7 +882,7 @@ mod tests {
         // When waiting for more input without EOF and suffix matches so far, we shouldn't report errors yet
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({"test": "test"}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(5, 2));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 2)); // schema doesn't progress since we didn't finish validating the suffix
     }
 
     #[test]
@@ -1094,38 +941,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_matcher_vs_text_with_input_prefix_empty() {
-        let schema_str = "prefix `test:/test/`";
-        // (document[0]0..21)
-        // └─ (paragraph[1]0..20)
-        //    ├─ (text[2]0..7)
-        //    └─ (code_span[3]7..20)
-        //       └─ (text[4]8..19)
-        let schema_tree = parse_markdown(schema_str).unwrap();
-
-        let input_str = "";
-        let input_tree = parse_markdown(input_str).unwrap();
-
-        let mut schema_cursor = schema_tree.walk();
-        let mut input_cursor = input_tree.walk();
-
-        schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // document -> paragraph
-        schema_cursor.goto_first_child(); // paragraph -> text
-        input_cursor.goto_first_child(); //  paragraph -> text
-
-        // When EOF is not set and input is empty, we're waiting for more input
-        // When EOF is not set, we're waiting for more input
-        let result =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, false);
-
-        // When waiting for more input without EOF, we shouldn't report errors yet
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(2, 0)); // didn't move forward
-    }
-
-    #[test]
     fn test_validate_matcher_vs_text_literal_matcher() {
         let schema_str = "`test`! foo";
         let schema_tree = parse_markdown(schema_str).unwrap();
@@ -1151,20 +966,27 @@ mod tests {
         schema_cursor.goto_first_child(); // paragraph -> code_span
         input_cursor.goto_first_child(); //  paragraph -> code_span
 
-        let result = validate_literal_matcher_vs_text(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
+        // let result = validate_literal_matcher_vs_textual(
+        //     &input_cursor,
+        //     &schema_cursor,
+        //     schema_str,
+        //     input_str,
+        //     true,
+        // );
+
+        // assert_eq!(result.errors, vec![]);
+        // assert_eq!(result.value, json!({}));
+        // assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
+
+        let result =
+            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({}));
         assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
 
         let result =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+            validate_textual_vs_textual(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({}));
@@ -1197,28 +1019,28 @@ mod tests {
         schema_cursor.goto_first_child(); // paragraph -> code_span
         input_cursor.goto_first_child(); //  paragraph -> code_span
 
-        // let result = validate_literal_matcher_vs_text(
-        //     &input_cursor,
-        //     &schema_cursor,
-        //     schema_str,
-        //     input_str,
-        //     false, // got_eof = false
-        // );
-
-        // assert_eq!(result.errors, vec![]);
-        // assert_eq!(result.value, json!({}));
-        // assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(3, 3));
-
-        let result =
-            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, false); // got_eof = false
+        let result = validate_literal_matcher_vs_textual(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false, // got_eof = false
+        );
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({}));
         assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(3, 3));
+
+        // let result =
+        //     validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, false); // got_eof = false
+
+        // assert_eq!(result.errors, vec![]);
+        // assert_eq!(result.value, json!({}));
+        // assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(3, 3));
     }
 
     #[test]
-    fn test_validate_matcher_vs_text_literal_matcher_goes_farther_if_it_can() {
+    fn test_validate_matcher_vs_text_literal_matcher_ends_at_end_of_text() {
         let schema_str = "`test`! foo *test*";
         // (document[0]0..19)
         // └─ (paragraph[1]0..18)
@@ -1248,7 +1070,7 @@ mod tests {
         schema_cursor.goto_first_child(); // paragraph -> code_span
         input_cursor.goto_first_child(); //  paragraph -> code_span
 
-        let result = validate_literal_matcher_vs_text(
+        let result = validate_literal_matcher_vs_textual(
             &input_cursor,
             &schema_cursor,
             schema_str,
@@ -1258,14 +1080,14 @@ mod tests {
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(5, 5));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
 
         let result =
             validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(5, 5));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
     }
 
     #[test]
@@ -1298,7 +1120,7 @@ mod tests {
         schema_cursor.goto_first_child(); // paragraph -> code_span
         input_cursor.goto_first_child(); //  paragraph -> code_span
 
-        let result = validate_literal_matcher_vs_text(
+        let result = validate_literal_matcher_vs_textual(
             &input_cursor,
             &schema_cursor,
             schema_str,
@@ -1310,11 +1132,11 @@ mod tests {
         assert_eq!(result.value, json!({}));
         assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(5, 4));
 
-        // let result =
-        //     validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result =
+            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        // assert_eq!(result.errors, vec![]);
-        // assert_eq!(result.value, json!({}));
-        // assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(5, 4));
+        assert_eq!(result.errors, vec![]);
+        assert_eq!(result.value, json!({}));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(5, 4));
     }
 }

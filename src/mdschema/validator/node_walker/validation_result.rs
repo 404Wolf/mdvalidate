@@ -7,7 +7,7 @@ use crate::mdschema::validator::validator_state::NodePosPair;
 
 /// Validation results containing a Value with all matches, vector of all
 /// errors, and the descendant indexes after validation
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ValidationResult {
     /// The resulting JSON value with all matches
     pub value: Value,
@@ -94,10 +94,20 @@ impl ValidationResult {
             .keep_farther_pos(&other.farthest_reached_pos());
     }
 
+    pub fn keep_farther_pos(&mut self, other: &NodePosPair) {
+        self.farthest_reached_pos.keep_farther_pos(other);
+    }
+
     /// Get the farthest reached position as a descendant index pair.
     pub fn farthest_reached_pos(&self) -> NodePosPair {
         self.farthest_reached_pos
     }
+
+    /// Get the farthest reached position as a descendant index pair as a mutable reference to our internal one
+    pub fn farthest_reached_pos_mut(&mut self) -> &mut NodePosPair {
+        &mut self.farthest_reached_pos
+    }
+
 }
 
 impl Default for ValidationResult {

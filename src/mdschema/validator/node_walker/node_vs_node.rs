@@ -1,6 +1,6 @@
 use log::trace;
 use tracing::instrument;
-use tree_sitter::{Node, TreeCursor};
+use tree_sitter::TreeCursor;
 
 use crate::helpers::node_print::PrettyPrint;
 use crate::mdschema::validator::errors::ValidationError;
@@ -8,15 +8,13 @@ use crate::mdschema::validator::node_walker::validators::code::validate_code_vs_
 use crate::mdschema::validator::node_walker::validators::headings::validate_heading_vs_heading;
 use crate::mdschema::validator::node_walker::validators::lists::validate_list_vs_list;
 use crate::mdschema::validator::node_walker::validators::rulers::validate_ruler_vs_ruler;
-use crate::mdschema::validator::node_walker::validators::textual::validate_textual_container_vs_textual_container;
+use crate::mdschema::validator::node_walker::validators::textual::validate_textual_vs_textual;
 use crate::mdschema::validator::ts_utils::{
     both_are_codeblocks, both_are_list_nodes, both_are_matching_top_level_nodes, both_are_rulers,
-    both_are_textual_containers, both_are_textual_nodes, is_heading_node, is_ruler_node,
+    both_are_textual_containers, both_are_textual_nodes, is_heading_node,
 };
 use crate::mdschema::validator::{
-    node_walker::ValidationResult,
-    ts_utils::{is_codeblock_node, is_list_node, is_textual_container_node, is_textual_node},
-    utils::compare_node_children_lengths,
+    node_walker::ValidationResult, utils::compare_node_children_lengths,
 };
 
 /// Validate two arbitrary nodes against each other.
@@ -51,7 +49,7 @@ pub fn validate_node_vs_node(
     if both_are_textual_nodes(&input_node, &schema_node) {
         trace!("Both are textual nodes, validating text vs text");
 
-        return validate_textual_container_vs_textual_container(
+        return validate_textual_vs_textual(
             &input_cursor,
             &schema_cursor,
             schema_str,
@@ -71,7 +69,7 @@ pub fn validate_node_vs_node(
     if both_are_textual_containers(&input_node, &schema_node) {
         trace!("Both are textual containers, validating text vs text");
 
-        return validate_textual_container_vs_textual_container(
+        return validate_textual_vs_textual(
             &input_cursor,
             &schema_cursor,
             schema_str,

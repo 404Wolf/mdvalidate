@@ -1,17 +1,15 @@
 use log::trace;
-use serde_json::json;
 use tracing::instrument;
-use tree_sitter::{Node, TreeCursor};
+use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     errors::*,
     matcher::matcher::{Matcher, MatcherError, partition_at_special_chars},
-    node_walker::{ValidationResult, node_vs_node::validate_node_vs_node},
+    node_walker::ValidationResult,
     ts_utils::{
-        both_are_text_nodes, both_are_textual_containers, get_next_node, get_node_and_next_node,
-        is_code_node, is_last_node, is_text_node, is_textual_node, waiting_at_end,
+        both_are_textual_containers, get_next_node, is_code_node, is_text_node, waiting_at_end,
     },
-    utils::{compare_node_children_lengths, compare_node_kinds, compare_text_contents},
+    utils::{compare_node_kinds, compare_text_contents},
 };
 
 /// Validate a textual region of input against a textual region of schema.
@@ -52,7 +50,7 @@ use crate::mdschema::validator::{
     i = %input_cursor.descendant_index(),
     s = %schema_cursor.descendant_index(),
 ), ret)]
-pub fn validate_text_vs_text(
+pub fn validate_textual_container_vs_textual_container(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
     schema_str: &str,
@@ -267,16 +265,20 @@ fn is_node_chunk_count_same(
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use crate::mdschema::validator::{
         errors::{SchemaError, ValidationError},
         matcher::matcher::MatcherError,
         node_walker::validators::{
-            textual::validate_textual_container_vs_textual_container,
+            textual::validate_textual_vs_textual,
             textual_containers::{
                 count_non_repeating_matchers_in_children, is_node_chunk_count_same,
+                validate_textual_container_vs_textual_container,
             },
         },
         ts_utils::parse_markdown,
+        validator_state::NodePosPair,
     };
 
     #[test]
@@ -606,5 +608,163 @@ mod tests {
             count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap(),
             0
         );
+    }
+
+    #[test]
+    fn test_validate_text_vs_text_on_text() {
+        let schema_str = "test";
+        // (document[0]0..5)
+        // └─ (paragraph[1]0..4)
+        //    └─ (text[2]0..4)
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "test";
+        // (document[0]0..5)
+        // └─ (paragraph[1]0..4)
+        //    └─ (text[2]0..4)
+
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        input_cursor.goto_first_child(); // document -> paragraph
+        schema_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // paragraph -> text
+        schema_cursor.goto_first_child(); // paragraph -> text
+
+        let result = validate_textual_vs_textual(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
+
+        assert_eq!(result.errors, vec![]);
+        assert_eq!(result.value, json!({}));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(2, 2));
+    }
+
+    #[test]
+    fn test_validate_text_vs_text_header_content() {
+        let schema_str = "# Test Wolf";
+        // (document[0]0..12)
+        // └─ (atx_heading[1]0..11)
+        //    ├─ (atx_h1_marker[2]0..1)
+        //    └─ (heading_content[3]1..11)
+        //       └─ (text[4]1..11)
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "# Test Wolf";
+        // (document[0]0..12)
+        // └─ (atx_heading[1]0..11)
+        //    ├─ (atx_h1_marker[2]0..1)
+        //    └─ (heading_content[3]1..11)
+        //       └─ (text[4]1..11)
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        input_cursor.goto_first_child();
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        schema_cursor.goto_first_child();
+        input_cursor.goto_next_sibling();
+        schema_cursor.goto_next_sibling();
+        assert_eq!(input_cursor.node().kind(), "heading_content");
+        assert_eq!(schema_cursor.node().kind(), "heading_content");
+
+        let result =
+            validate_textual_container_vs_textual_container(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+
+        assert_eq!(errors, vec![]);
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
+        assert_eq!(value, json!({}));
+    }
+
+    #[test]
+    fn test_validate_text_vs_text_header_content_and_matcher() {
+        let schema_str = "# Test `name:/[a-zA-Z]+/`";
+        // (document[0]0..26)
+        // └─ (atx_heading[1]0..25)
+        //    ├─ (atx_h1_marker[2]0..1)
+        //    └─ (heading_content[3]1..25)
+        //       ├─ (text[4]1..7)
+        //       └─ (code_span[5]7..25)
+        //          └─ (text[6]8..24)
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "# Test Wolf";
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+        // (document[0])
+        // └─ (atx_heading[1])
+        //    ├─ (atx_h1_marker[2])
+        //    └─ (heading_content[3])
+        //       └─ (text[4])
+
+        input_cursor.goto_first_child();
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        schema_cursor.goto_first_child();
+        input_cursor.goto_next_sibling();
+        schema_cursor.goto_next_sibling();
+        assert_eq!(input_cursor.node().kind(), "heading_content");
+        assert_eq!(schema_cursor.node().kind(), "heading_content");
+
+        let result =
+            validate_textual_container_vs_textual_container(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        let errors = result.errors.clone();
+        let value = result.value.clone();
+
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({"name": "Wolf"}));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 5));
+    }
+
+    #[test]
+    fn test_validate_text_vs_text_with_incomplete_matcher() {
+        let schema_str = "prefix `test:/test/`";
+        // (document[0]0..21)
+        // └─ (paragraph[1]0..20)
+        //    ├─ (text[2]0..7)
+        //    └─ (code_span[3]7..20)
+        //       └─ (text[4]8..19)
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "prefix `test:/te";
+        // (document[0]0..17)
+        // └─ (paragraph[1]0..16)
+        //    └─ (text[2]0..16)
+
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child(); // document -> paragraph
+        schema_cursor.goto_first_child(); // paragraph -> text
+
+        input_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // paragraph -> text
+
+        let result = validate_textual_container_vs_textual_container(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false, // we are allowed to have a broken matcher if it is the last com
+        );
+
+        assert_eq!(result.errors, vec![]);
+        assert_eq!(result.value, json!({}));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(2, 2)) // no movement yet
     }
 }

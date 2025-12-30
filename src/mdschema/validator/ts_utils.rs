@@ -54,6 +54,19 @@ pub fn get_next_node<'a>(cursor: &TreeCursor<'a>) -> Option<Node<'a>> {
     }
 }
 
+/// Get the node n nodes ahead for a cursor.
+pub fn get_node_n_nodes_ahead<'a>(cursor: &TreeCursor<'a>, n: usize) -> Option<Node<'a>> {
+    let mut input_cursor = cursor.clone();
+
+    for _ in 0..n {
+        if !input_cursor.goto_next_sibling() {
+            return None;
+        }
+    }
+
+    Some(input_cursor.node())
+}
+
 /// Whether the cursor has a node sibling following it.
 pub fn has_subsequent_node_of_kind(cursor: &TreeCursor, kind: &str) -> bool {
     cursor.clone().goto_next_sibling() && cursor.node().kind() == kind

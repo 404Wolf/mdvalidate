@@ -7,8 +7,8 @@ use crate::mdschema::validator::{
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NodePosPair {
-    input_index: usize,
     schema_index: usize,
+    input_index: usize,
 }
 
 impl NodePosPair {

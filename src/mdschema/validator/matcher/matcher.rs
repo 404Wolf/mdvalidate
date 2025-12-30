@@ -494,7 +494,7 @@ mod tests {
     use crate::mdschema::validator::{
         matcher::matcher::{
             MATCHERS_EXTRA_PATTERN, Matcher, MatcherError, MatcherExtras, MatcherExtrasError,
-            MatcherType, extract_text_matcher, partition_at_special_chars,
+            extract_text_matcher, partition_at_special_chars,
         },
         ts_utils::{new_markdown_parser, parse_markdown},
     };
