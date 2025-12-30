@@ -107,7 +107,6 @@ impl ValidationResult {
     pub fn farthest_reached_pos_mut(&mut self) -> &mut NodePosPair {
         &mut self.farthest_reached_pos
     }
-
 }
 
 impl Default for ValidationResult {

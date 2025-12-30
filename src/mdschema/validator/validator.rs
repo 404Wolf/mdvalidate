@@ -71,7 +71,6 @@ impl Validator {
     /// (which this updates).
     #[tracing::instrument(skip(self, input))]
     fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), ValidationError> {
-        dbg!(input);
 
         // Update internal state of the last input string
         self.state.set_last_input_str(input.to_string());
@@ -893,7 +892,6 @@ Footer: goodbye
         validator.validate();
 
         let mut errors = validator.errors_so_far();
-        dbg!(&errors);
         match errors.next() {
             Some(ValidationError::SchemaError(SchemaError::MultipleMatchersInNodeChildren {
                 received,

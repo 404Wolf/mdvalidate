@@ -1,18 +1,11 @@
-use log::trace;
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     errors::*,
-    matcher::matcher::{
-        Matcher, MatcherError, get_everything_after_special_chars,
-        get_full_special_chars_prefix, partition_at_special_chars,
-    },
+    matcher::matcher::{Matcher, MatcherError, get_full_special_chars_prefix},
     node_walker::{ValidationResult, validators::textual::validate_textual_vs_textual},
-    ts_utils::{
-        both_are_textual_containers, get_next_node, is_code_node, is_text_node, waiting_at_end,
-    },
-    utils::{compare_node_kinds, compare_text_contents},
+    ts_utils::{both_are_textual_containers, get_next_node, is_code_node, is_text_node},
 };
 
 /// Validate a textual region of input against a textual region of schema.
@@ -266,7 +259,7 @@ fn is_node_chunk_count_same(
 
         match Matcher::try_from_pattern_and_suffix_str(pattern_str, extras_str) {
             Ok(_matcher) => {
-                // Regular matcher: deduct from schema count (consumes input inline)
+                // Regular matcher: should be deducted because it doesn't add a node in input
                 true
             }
             Err(MatcherError::WasLiteralCode) => {
@@ -322,7 +315,15 @@ fn is_node_chunk_count_same(
         }
     }
 
-    input_count == schema_count - schema_deduction
+    // Special case: if schema has only 1 node and it's a matcher, don't deduct it
+    // because the matcher represents the entire content
+    let actual_schema_count = if schema_count == 1 && schema_deduction == 1 {
+        1 // Don't deduct when it's the only node
+    } else {
+        schema_count - schema_deduction
+    };
+
+    input_count == actual_schema_count
 }
 
 #[cfg(test)]

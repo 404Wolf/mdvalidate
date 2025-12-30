@@ -1,8 +1,4 @@
-# Test
+# Test `name:/[A-Za-z]+/`
 
-
-Test
-
----
-
-Test
+- test
+- `item:/test\d/`{,}

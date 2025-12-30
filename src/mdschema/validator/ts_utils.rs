@@ -114,7 +114,8 @@ pub fn is_list_node(node: &Node) -> bool {
 /// Check if a node is "textual" (i.e., a text node, bold node, code node, or similar).
 pub fn is_textual_node(node: &Node) -> bool {
     match node.kind() {
-        "text" | "emphasis" | "strong_emphasis" | "code_span" => true,
+        // TODO: does list_item belong here?
+        "text" | "emphasis" | "strong_emphasis" | "code_span" | "list_item" => true,
         _ => false,
     }
 }

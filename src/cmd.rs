@@ -144,7 +144,12 @@ pub fn process_stdio<R: Read, W: Write>(
             _ => {}
         }
     } else {
-        for error in &errors {
+        use std::collections::HashSet;
+
+        // TODO: fix the underlying issue, we shouldn't have duplicates
+        let unique_errors: HashSet<_> = errors.iter().collect();
+
+        for error in unique_errors {
             let error_output = if debug_mode {
                 debug_print_error(error)
             } else {

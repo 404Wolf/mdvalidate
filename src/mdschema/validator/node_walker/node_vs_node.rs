@@ -2,8 +2,6 @@ use log::trace;
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
-use crate::helpers::node_print::PrettyPrint;
-use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::node_walker::validators::code::validate_code_vs_code;
 use crate::mdschema::validator::node_walker::validators::headings::validate_heading_vs_heading;
 use crate::mdschema::validator::node_walker::validators::lists::validate_list_vs_list;
@@ -66,11 +64,24 @@ pub fn validate_node_vs_node(
         return validate_code_vs_code(&input_cursor, &schema_cursor, schema_str, input_str);
     }
 
-    // Both are textual containers - check for matcher usage
+    // Both are textual containers
     if both_are_textual_containers(&input_node, &schema_node) {
         trace!("Both are textual containers, validating text vs text");
 
         return validate_textual_container_vs_textual_container(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            got_eof,
+        );
+    }
+
+    // Both are textual nodes
+    if both_are_textual_nodes(&input_node, &schema_node) {
+        trace!("Both are textual nodes, validating text vs text");
+
+        return validate_textual_vs_textual(
             &input_cursor,
             &schema_cursor,
             schema_str,
@@ -177,27 +188,28 @@ pub fn validate_node_vs_node(
 
         return result;
     }
+    result
 
-    if !got_eof {
-        return result;
-    } else {
-        #[cfg(debug_assertions)]
-        {
-            eprintln!("{}", input_node.pretty_print());
-            eprintln!("{}", schema_node.pretty_print());
-        }
+    // if !got_eof {
+    //     return result;
+    // } else {
+    //     #[cfg(debug_assertions)]
+    //     {
+    //         eprintln!("{}", input_node.pretty_print());
+    //         eprintln!("{}", schema_node.pretty_print());
+    //     }
 
-        result.add_error(ValidationError::InternalInvariantViolated(format!(
-            "No combination of nodes that we check for was covered. \
-                     Attempting to compare a {}[{}] node with a {}[{}] node",
-            input_node.kind(),
-            input_cursor.descendant_index(),
-            schema_node.kind(),
-            schema_cursor.descendant_index()
-        )));
+    //     result.add_error(ValidationError::InternalInvariantViolated(format!(
+    //         "No combination of nodes that we check for was covered. \
+    //                  Attempting to compare a {}[{}] node with a {}[{}] node",
+    //         input_node.kind(),
+    //         input_cursor.descendant_index(),
+    //         schema_node.kind(),
+    //         schema_cursor.descendant_index()
+    //     )));
 
-        return result;
-    }
+    //     return result;
+    // }
 }
 
 #[cfg(test)]
@@ -381,8 +393,8 @@ mod tests {
                         },
                     ) => {
                         // Expected this specific error type
-                        assert!(schema_index >= &0, "schema_index should be non-negative");
-                        assert!(input_index >= &0, "input_index should be non-negative");
+                        assert!(*schema_index >= 0, "schema_index should be non-negative");
+                        assert!(*input_index >= 0, "input_index should be non-negative");
                         assert_eq!(
                             *expected,
                             ChildrenCount::SpecificCount(0),

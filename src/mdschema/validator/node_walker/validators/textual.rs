@@ -7,8 +7,7 @@ use crate::mdschema::validator::matcher::matcher::{
     Matcher, MatcherError, get_everything_after_special_chars,
 };
 use crate::mdschema::validator::ts_utils::{
-    both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_last_node,
-    is_text_node,
+    both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_text_node,
 };
 use crate::mdschema::validator::validator_state::NodePosPair;
 use crate::mdschema::validator::{
@@ -29,6 +28,7 @@ use crate::mdschema::validator::{
     i = %input_cursor.descendant_index(),
     s = %schema_cursor.descendant_index(),
 ), ret)]
+#[track_caller]
 pub fn validate_textual_vs_textual(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
@@ -58,10 +58,12 @@ pub fn validate_textual_vs_textual(
         );
     }
 
-    debug_assert!(both_are_textual_nodes(
-        &schema_cursor.node(),
-        &input_cursor.node(),
-    ));
+    debug_assert!(
+        both_are_textual_nodes(&schema_cursor.node(), &input_cursor.node()),
+        "got schema kind: {:?}, input kind: {:?}",
+        schema_cursor.node().kind(),
+        input_cursor.node().kind()
+    );
 
     if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
         result.add_error(error);
@@ -621,12 +623,9 @@ mod tests {
 
     use crate::mdschema::validator::{
         errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
-        node_walker::validators::{
-            textual::{
-                validate_literal_matcher_vs_textual, validate_matcher_vs_text,
-                validate_textual_vs_textual,
-            },
-            textual_containers::validate_textual_container_vs_textual_container,
+        node_walker::validators::textual::{
+            validate_literal_matcher_vs_textual, validate_matcher_vs_text,
+            validate_textual_vs_textual,
         },
         ts_utils::parse_markdown,
         validator_state::NodePosPair,
