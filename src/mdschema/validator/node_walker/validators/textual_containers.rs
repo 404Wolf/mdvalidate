@@ -6,7 +6,7 @@ use crate::mdschema::validator::{
     errors::*,
     matcher::matcher::{
         Matcher, MatcherError, get_everything_after_special_chars,
-        get_everything_before_special_chars, partition_at_special_chars,
+        get_full_special_chars_prefix, partition_at_special_chars,
     },
     node_walker::{ValidationResult, validators::textual::validate_textual_vs_textual},
     ts_utils::{
@@ -83,7 +83,7 @@ pub fn validate_textual_container_vs_textual_container(
         }
     }
 
-    if !is_node_chunk_count_same(&input_cursor, &schema_cursor, schema_str) {
+    if !is_node_chunk_count_same(&input_cursor, &schema_cursor, schema_str) && got_eof {
         // TODO: we'd like to report to the CHUNK counts not the CHILDREN counts here. Maybe.
         let input_node_count = input_cursor.node().child_count();
         let schema_node_count = schema_cursor.node().child_count();
@@ -117,11 +117,7 @@ pub fn validate_textual_container_vs_textual_container(
             input_str,
             has_next_pair || got_eof, // if we have more pairs, then eof=true. Otherwise, eof = got_eof
         );
-        dbg!(
-            &pair_result,
-            input_cursor.descendant_index(),
-            schema_cursor.descendant_index()
-        );
+
         result.join_other_result(&pair_result);
         result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
 
@@ -162,7 +158,7 @@ fn count_non_repeating_matchers_in_children(
             .filter(|n| is_text_node(n))
             .and_then(|next_node| {
                 let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
-                get_everything_before_special_chars(next_node_str)
+                get_full_special_chars_prefix(next_node_str)
             });
 
         let pattern_str = cursor.node().utf8_text(schema_str.as_bytes()).unwrap();
@@ -201,7 +197,9 @@ fn count_non_repeating_matchers_in_children(
 ///
 /// To ensure the node count is the same, we expect the total number of nodes in
 /// the input to be equal to that of the schema, minus the number of literal
-/// nodes that do not have text coming directly after them in the schema ("the deduction").
+/// nodes that do not have text coming directly after them in the schema ("the
+/// deduction"), minus the number of real matchers (which morph into surrounding
+/// text always).
 ///
 /// If the very last node in the schema is a text node with "!" followed by
 /// whitespace, and the node before it is a code node, that is also something
@@ -251,6 +249,44 @@ fn is_node_chunk_count_same(
     schema_cursor: &TreeCursor,
     schema_str: &str,
 ) -> bool {
+    // Helper to check whether a node should be deducted from the schema count
+    let should_deduct_matcher = |cursor: &TreeCursor| -> bool {
+        if !is_code_node(&cursor.node()) {
+            return false;
+        }
+
+        let extras_str = get_next_node(cursor)
+            .filter(|n| is_text_node(n))
+            .and_then(|next_node| {
+                let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
+                get_full_special_chars_prefix(next_node_str)
+            });
+
+        let pattern_str = cursor.node().utf8_text(schema_str.as_bytes()).unwrap();
+
+        match Matcher::try_from_pattern_and_suffix_str(pattern_str, extras_str) {
+            Ok(_matcher) => {
+                // Regular matcher: deduct from schema count (consumes input inline)
+                true
+            }
+            Err(MatcherError::WasLiteralCode) => {
+                // Literal matcher: check if the `!` node has no text after it
+                if let Some(next_node) = get_next_node(cursor) {
+                    if is_text_node(&next_node) {
+                        let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
+                        // If it's just "!" with no following text, deduct it
+                        return next_node_str.len() == 1 && next_node_str == "!";
+                    }
+                }
+                false
+            }
+            Err(_) => {
+                // Invalid matcher - not our concern here
+                false
+            }
+        }
+    };
+
     let mut input_cursor = input_cursor.clone(); // paragraph, heading_content, or similar
     let mut schema_cursor = schema_cursor.clone(); // paragraph, heading_content, or similar
 
@@ -259,33 +295,18 @@ fn is_node_chunk_count_same(
 
     let mut input_count = 0;
     let mut schema_count = 0;
-    let mut literal_matcher_not_followed_by_text_count = 0;
+    let mut schema_deduction = 0; // Matchers that don't add to chunk count
 
-    while input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {
+    loop {
         input_count += 1;
         schema_count += 1;
 
-        // If the `schema_cursor` is a code node followed by a `!`, check if it
-        // has additional text coming after it.
-        if is_code_node(&schema_cursor.node()) {
-            match get_next_node(&schema_cursor) {
-                Some(next_node) => {
-                    // if the next node starts with a !, then if there is text following it in the same text node, update
-                    // the `literal_matcher_followed_by_text_count` by 1. If there isn't text following the ! then don't.
-                    let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
-                    // TODO: if at very end whitespace after ! is OK
-                    if is_text_node(&next_node)
-                        && next_node_str.len() == 1
-                        && next_node_str.starts_with('!')
-                    {
-                        literal_matcher_not_followed_by_text_count += 1;
-                    }
-                }
-                None => {
-                    // No point in going forward, the schema has nothing left.
-                    break;
-                }
-            }
+        if should_deduct_matcher(&schema_cursor) {
+            schema_deduction += 1;
+        }
+
+        if !input_cursor.goto_next_sibling() || !schema_cursor.goto_next_sibling() {
+            break;
         }
     }
 
@@ -295,9 +316,13 @@ fn is_node_chunk_count_same(
     }
     while schema_cursor.goto_next_sibling() {
         schema_count += 1;
+
+        if should_deduct_matcher(&schema_cursor) {
+            schema_deduction += 1;
+        }
     }
 
-    input_count - (schema_count - literal_matcher_not_followed_by_text_count) == 0
+    input_count == schema_count - schema_deduction
 }
 
 #[cfg(test)]
@@ -529,6 +554,46 @@ mod tests {
 
         input_cursor.goto_first_child(); // document -> paragraph
         schema_cursor.goto_first_child(); // document -> paragraph
+
+        assert!(is_node_chunk_count_same(
+            &input_cursor,
+            &schema_cursor,
+            schema_str
+        ));
+    }
+
+    #[test]
+    fn test_is_node_chunk_count_same_with_matcher_in_heading() {
+        let schema_str = "# Test `name:/[a-zA-Z]+/`";
+        // (document[0]0..26)
+        // └─ (atx_heading[1]0..25)
+        //    ├─ (atx_h1_marker[2]0..1)
+        //    └─ (heading_content[3]1..25)
+        //       ├─ (text[4]1..7)
+        //       └─ (code_span[5]7..25)
+        //          └─ (text[6]8..24)
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "# Test Wolf";
+        // (document[0]0..12)
+        // └─ (atx_heading[1]0..11)
+        //    ├─ (atx_h1_marker[2]0..1)
+        //    └─ (heading_content[3]1..11)
+        //       └─ (text[4]1..11)
+
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        input_cursor.goto_first_child(); // document -> atx_heading
+        schema_cursor.goto_first_child(); // document -> atx_heading
+        input_cursor.goto_first_child(); // atx_heading -> atx_h1_marker
+        schema_cursor.goto_first_child(); // atx_heading -> atx_h1_marker
+        input_cursor.goto_next_sibling(); // atx_h1_marker -> heading_content
+        schema_cursor.goto_next_sibling(); // atx_h1_marker -> heading_content
+        assert_eq!(schema_cursor.node().kind(), "heading_content");
+        assert_eq!(input_cursor.node().kind(), "heading_content");
 
         assert!(is_node_chunk_count_same(
             &input_cursor,
@@ -773,7 +838,7 @@ mod tests {
 
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"name": "Wolf"}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 5));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(6, 4));
     }
 
     #[test]

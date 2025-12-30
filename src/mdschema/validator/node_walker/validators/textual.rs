@@ -317,6 +317,11 @@ pub fn validate_matcher_vs_text<'a>(
                     }
                 }
                 None => {
+                    // TODO: can we do partial validation of matcher contents
+                    if !got_eof {
+                        return result;
+                    };
+
                     trace!(
                         "Matcher did not match input string: pattern={}, input='{}'",
                         matcher.pattern().to_string(),

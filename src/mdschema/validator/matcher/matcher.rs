@@ -33,7 +33,7 @@ pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
 }
 
 /// Partition at where the special chars end, and then get everything that comes before.
-pub fn get_everything_before_special_chars(text: &str) -> Option<&str> {
+pub fn get_full_special_chars_prefix(text: &str) -> Option<&str> {
     partition_at_special_chars(text).map(|(before, _)| before)
 }
 
