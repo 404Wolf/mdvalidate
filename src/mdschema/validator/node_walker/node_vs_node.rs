@@ -75,7 +75,8 @@ pub fn validate_node_vs_node(
         // the containers to contain repeating matchers since the same utility
         // is used for list validation.
 
-        if let Some(repeating_matcher_index) = check_repeating_matchers(&schema_cursor, schema_str) {
+        if let Some(repeating_matcher_index) = check_repeating_matchers(&schema_cursor, schema_str)
+        {
             result.add_error(ValidationError::SchemaError(
                 SchemaError::RepeatingMatcherInTextContainer {
                     schema_index: repeating_matcher_index,
@@ -157,18 +158,19 @@ pub fn validate_node_vs_node(
         }
 
         // Now actually go down to the children
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-
-        let new_result = validate_node_vs_node(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
-        result.join_other_result(&new_result);
-        result.sync_cursor_pos(&schema_cursor, &input_cursor);
+        if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
+            let new_result = validate_node_vs_node(
+                &input_cursor,
+                &schema_cursor,
+                schema_str,
+                input_str,
+                got_eof,
+            );
+            result.join_other_result(&new_result);
+            result.sync_cursor_pos(&schema_cursor, &input_cursor);
+        } else {
+            return result; // nothing left
+        }
 
         loop {
             // TODO: handle case where one has more children than the other
@@ -237,6 +239,7 @@ mod tests {
             errors::{ChildrenCount, SchemaViolationError, ValidationError},
             node_walker::node_vs_node::validate_node_vs_node,
             ts_utils::parse_markdown,
+            utils::test_logging,
         },
     };
 
@@ -334,6 +337,27 @@ mod tests {
             result.errors
         );
         assert_eq!(result.value, json!({"name": "Alice"}));
+    }
+
+    #[test]
+    fn test_validate_node_vs_node_with_empty_documents() {
+        let schema_str = "";
+        let input_str = "";
+        let schema = parse_markdown(schema_str).unwrap();
+        let input = parse_markdown(input_str).unwrap();
+
+        let schema_cursor = schema.walk();
+        let input_cursor = input.walk();
+
+        let result =
+            validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
+        assert_eq!(result.value, json!({}));
     }
 
     #[test]
