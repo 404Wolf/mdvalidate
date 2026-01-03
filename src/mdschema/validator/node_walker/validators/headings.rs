@@ -3,9 +3,9 @@ use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::errors::ValidationError;
+use crate::mdschema::validator::node_walker::validators::textual_container::validate_textual_container_vs_textual_container;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::textual::validate_textual_vs_textual;
-use crate::mdschema::validator::node_walker::validators::textual_containers::validate_textual_container_vs_textual_container;
 use crate::mdschema::validator::ts_utils::{
     is_heading_node, is_marker_node, is_textual_container_node,
 };

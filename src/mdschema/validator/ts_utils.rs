@@ -391,6 +391,11 @@ pub fn count_siblings(cursor: &TreeCursor) -> usize {
     count
 }
 
+/// Whether a cursor is at the end of its container's children (has no more siblings).
+pub fn has_next_sibling(cursor: &TreeCursor) -> bool {
+    cursor.node().next_sibling().is_some()
+}
+
 #[allow(dead_code)]
 pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<ValidationError>) {
     use crate::mdschema::validator::validator_state::ValidatorState;

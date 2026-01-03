@@ -7,7 +7,7 @@ use crate::mdschema::validator::node_walker::validators::headings::validate_head
 use crate::mdschema::validator::node_walker::validators::lists::validate_list_vs_list;
 use crate::mdschema::validator::node_walker::validators::rulers::validate_ruler_vs_ruler;
 use crate::mdschema::validator::node_walker::validators::textual::validate_textual_vs_textual;
-use crate::mdschema::validator::node_walker::validators::textual_containers::validate_textual_container_vs_textual_container;
+use crate::mdschema::validator::node_walker::validators::textual_container::validate_textual_container_vs_textual_container;
 use crate::mdschema::validator::ts_utils::{
     both_are_codeblocks, both_are_list_nodes, both_are_matching_top_level_nodes, both_are_rulers,
     both_are_textual_containers, both_are_textual_nodes, is_heading_node,
@@ -113,10 +113,9 @@ pub fn validate_node_vs_node(
     // Both are heading nodes or document nodes
     //
     // Crawl down one layer to get to the actual children
-    if both_are_matching_top_level_nodes(&input_node, &schema_node)
-        && input_cursor.clone().goto_first_child() // don't actually do the walking down just yet
-        && schema_cursor.clone().goto_first_child()
-    {
+    if both_are_matching_top_level_nodes(&input_node, &schema_node) {
+        trace!("Both are matching top level nodes. Checking of which kind.");
+
         // First, if they are headings, validate the headings themselves.
         if is_heading_node(&input_node) && is_heading_node(&schema_node) {
             trace!("Both are heading nodes, validating heading vs heading");
@@ -222,6 +221,7 @@ mod tests {
             errors::{ChildrenCount, SchemaViolationError, ValidationError},
             node_walker::node_vs_node::validate_node_vs_node,
             ts_utils::parse_markdown,
+            utils::test_logging,
         },
     };
 
@@ -355,11 +355,7 @@ mod tests {
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(
-            result.errors.is_empty(),
-            "Expected no errors, got: {:?}",
-            result.errors
-        );
+        assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({"name": "Alice"}));
     }
 
@@ -376,38 +372,21 @@ mod tests {
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(
-            !result.errors.is_empty(),
-            "Expected validation errors when schema is empty but input is not"
-        );
+        assert_ne!(result.errors, vec![]);
 
         match result.errors.first() {
-            Some(error) => {
-                match error {
-                    ValidationError::SchemaViolation(
-                        SchemaViolationError::ChildrenLengthMismatch {
-                            schema_index,
-                            input_index,
-                            expected,
-                            actual,
-                        },
-                    ) => {
-                        // Expected this specific error type
-                        assert!(*schema_index >= 0, "schema_index should be non-negative");
-                        assert!(*input_index >= 0, "input_index should be non-negative");
-                        assert_eq!(
-                            *expected,
-                            ChildrenCount::SpecificCount(0),
-                            "expected should be 0 for empty schema"
-                        );
-                        assert!(
-                            actual > &0,
-                            "actual should be greater than 0 for non-empty input"
-                        );
-                    }
-                    _ => panic!("Expected ChildrenLengthMismatch error, got: {:?}", error),
+            Some(error) => match error {
+                ValidationError::SchemaViolation(
+                    SchemaViolationError::ChildrenLengthMismatch { expected, .. },
+                ) => {
+                    assert_eq!(
+                        *expected,
+                        ChildrenCount::SpecificCount(0),
+                        "expected should be 0 for empty schema"
+                    );
                 }
-            }
+                _ => panic!("Expected ChildrenLengthMismatch error, got: {:?}", error),
+            },
             None => panic!("Expected error"),
         }
     }

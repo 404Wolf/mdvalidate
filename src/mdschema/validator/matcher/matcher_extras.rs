@@ -7,18 +7,29 @@ static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\
 
 pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
     // We can have a ! instead of matcher extras to indicate that it is a literal match
-    LazyLock::new(|| Regex::new(r"^(([+\{\},0-9]*)|\!)$").unwrap());
+    LazyLock::new(|| Regex::new(r"^((\!)|([+\{\},0-9]*))").unwrap());
 
-pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
-    let captures = MATCHERS_EXTRA_PATTERN.captures(text);
-    match captures {
-        Some(caps) => {
-            let mat = caps.get(0)?;
-            Some(&text[mat.end()..])
+    pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
+        let captures = MATCHERS_EXTRA_PATTERN.captures(text);
+        match captures {
+            Some(caps) => {
+                let mat = caps.get(0)?;
+                Some(&text[mat.end()..])
+            }
+            None => Some(text),
         }
-        None => Some(text),
     }
-}
+
+    pub fn get_all_special_chars(text: &str) -> Option<&str> {
+        let captures = MATCHERS_EXTRA_PATTERN.captures(text);
+        match captures {
+            Some(caps) => {
+                let mat = caps.get(0)?;
+                Some(&text[..mat.end()])
+            }
+            None => None,
+        }
+    }
 
 /// Errors specific to matcher extras construction
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -167,6 +178,12 @@ mod tests {
 
         let result = MatcherExtras::try_new(Some("bullshit"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_all_extras() {
+        let result = get_all_special_chars("{1,} test");
+        assert_eq!(result.unwrap(), "{1,}");
     }
 
     #[test]
