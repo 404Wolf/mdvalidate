@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
 use tree_sitter_markdown::language;
 

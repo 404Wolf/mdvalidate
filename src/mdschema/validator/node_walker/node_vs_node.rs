@@ -239,7 +239,6 @@ mod tests {
             errors::{ChildrenCount, SchemaViolationError, ValidationError},
             node_walker::node_vs_node::validate_node_vs_node,
             ts_utils::parse_markdown,
-            utils::test_logging,
         },
     };
 

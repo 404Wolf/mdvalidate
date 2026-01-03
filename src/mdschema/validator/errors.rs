@@ -1,4 +1,4 @@
-use crate::mdschema::validator::{matcher::matcher::*, validator::Validator};
+use crate::mdschema::validator::{matcher::{matcher::*, matcher_extras::MatcherExtrasError}, validator::Validator};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use std::fmt;
 

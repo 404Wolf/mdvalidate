@@ -9,26 +9,45 @@ pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
     // We can have a ! instead of matcher extras to indicate that it is a literal match
     LazyLock::new(|| Regex::new(r#"^((\!)|([+\{\},0-9]+))"#).unwrap());
 
-pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
+pub fn partition_at_special_chars(text: &str) -> Option<(&str, &str)> {
     let captures = MATCHERS_EXTRA_PATTERN.captures(text);
     match captures {
         Some(caps) => {
             let mat = caps.get(0)?;
-            Some(&text[mat.end()..])
+            Some((&text[..mat.end()], &text[mat.end()..]))
         }
-        None => Some(text),
+        None => Some(("", text)),
     }
 }
 
-pub fn get_all_extras(text: &str) -> Option<&str> {
-    let captures = MATCHERS_EXTRA_PATTERN.captures(text);
-    match captures {
-        Some(caps) => {
-            let mat = caps.get(0)?;
-            Some(&text[..mat.end()])
-        }
-        None => None,
+pub fn get_everything_after_extras(text: &str) -> Result<&str, MatcherExtrasError> {
+    let (_extras, after) =
+        partition_at_special_chars(text).ok_or(MatcherExtrasError::MatcherExtrasInvalid)?;
+
+    if has_literal_within_extras(text) {
+        return Err(MatcherExtrasError::MixedLiteralAndOthers);
     }
+
+    Ok(after)
+}
+
+pub fn get_all_extras(text: &str) -> Result<&str, MatcherExtrasError> {
+    let (extras, _after) =
+        partition_at_special_chars(text).ok_or(MatcherExtrasError::MatcherExtrasInvalid)?;
+
+    if has_literal_within_extras(text) {
+        return Err(MatcherExtrasError::MixedLiteralAndOthers);
+    }
+
+    Ok(extras)
+}
+
+/// Our regular regex for extras will look at your extras, and if it starts with
+/// "!" ignore the rest of it and pretend that the only extras
+///
+/// If the string starts with a !, then try running get_everything_after_extras
+pub fn has_literal_within_extras(text: &str) -> bool {
+    text.starts_with('!') && text.len() != 1 && get_everything_after_extras(&text[1..]).is_ok()
 }
 
 /// Errors specific to matcher extras construction
@@ -38,6 +57,9 @@ pub enum MatcherExtrasError {
     ///
     /// We get this if we see something like `name:/test/`$%^&*.
     MatcherExtrasInvalid,
+    /// When we have a literal extra, and any other extras. If we are literal we
+    /// can *only* be literal.
+    MixedLiteralAndOthers,
 }
 
 impl std::fmt::Display for MatcherExtrasError {
@@ -45,6 +67,9 @@ impl std::fmt::Display for MatcherExtrasError {
         match self {
             MatcherExtrasError::MatcherExtrasInvalid => {
                 write!(f, "Invalid matcher extras")
+            }
+            MatcherExtrasError::MixedLiteralAndOthers => {
+                write!(f, "Cannot mix literal extras with other extras")
             }
         }
     }
@@ -181,9 +206,30 @@ mod tests {
     }
 
     #[test]
-    fn test_get_all_extras() {
+    fn test_get_all_extras_repeating() {
         let result = get_all_extras("{1,} test");
         assert_eq!(result.unwrap(), "{1,}");
+    }
+
+    #[test]
+    fn test_get_all_extras_with_literal_too() {
+        let result = get_all_extras("!{1,} test");
+        match result.unwrap_err() {
+            MatcherExtrasError::MixedLiteralAndOthers => (),
+            error => panic!("expected MixedLiteralAndOthers, got {:?}", error),
+        }
+    }
+
+    #[test]
+    fn test_get_all_extras_no_extras() {
+        let result = get_all_extras("");
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_get_all_extras_just_literal() {
+        let result = get_all_extras("!");
+        assert_eq!(result.unwrap(), "!");
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::{collections::HashSet, sync::LazyLock};
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
-    matcher::matcher_extras::{MATCHERS_EXTRA_PATTERN, get_all_extras},
+    matcher::matcher_extras::{MatcherExtrasError, get_all_extras, partition_at_special_chars},
     ts_utils::{get_next_node, get_node_and_next_node, is_text_node},
 };
 
@@ -16,27 +16,6 @@ static REGEX_MATCHER_PATTERN: LazyLock<Regex> =
 static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
 
 pub const LITERAL_INDICATOR: char = '!';
-
-pub fn partition_at_special_chars(text: &str) -> Option<(&str, &str)> {
-    let captures = MATCHERS_EXTRA_PATTERN.captures(text);
-    match captures {
-        Some(caps) => {
-            let mat = caps.get(0)?;
-            Some((&text[..mat.end()], &text[mat.end()..]))
-        }
-        None => Some(("", text)),
-    }
-}
-
-/// Partition at where the special chars end, and then get everything that comes afterwards.
-pub fn get_everything_after_extras(text: &str) -> Option<&str> {
-    partition_at_special_chars(text).map(|(_, after)| after)
-}
-
-/// Partition at where the special chars end, and then get everything that comes before.
-pub fn get_all_special_chars(text: &str) -> Option<&str> {
-    partition_at_special_chars(text).map(|(before, _)| before)
-}
 
 /// Errors specific to matcher construction.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -74,31 +53,6 @@ impl std::fmt::Display for MatcherError {
             }
             MatcherError::InvariantViolation(err) => {
                 write!(f, "Invariant violation: {}", err)
-            }
-        }
-    }
-}
-
-/// Errors specific to matcher extras construction
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub enum MatcherExtrasError {
-    /// The extras that came after the matcher were impossible and contained wrong or invalid patterns.
-    ///
-    /// We get this if we see something like `name:/test/`$%^&*.
-    MatcherExtrasInvalid,
-    /// When we have a literal extra, and any other extras. If we are literal we
-    /// can *only* be literal.
-    MixedLiteralAndOthers,
-}
-
-impl std::fmt::Display for MatcherExtrasError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MatcherExtrasError::MatcherExtrasInvalid => {
-                write!(f, "Invalid matcher extras")
-            }
-            MatcherExtrasError::MixedLiteralAndOthers => {
-                write!(f, "Literal matcher cannot have other extras")
             }
         }
     }
@@ -152,7 +106,6 @@ impl MatcherExtras {
         let is_literal = extras.starts_with(LITERAL_INDICATOR);
         if is_literal {
             // If it's literal, we can't have anything else after the matcher
-
             if extras.len() > 1 {
                 return Err(MatcherExtrasError::MixedLiteralAndOthers);
             }
@@ -180,17 +133,8 @@ impl MatcherExtras {
     /// # Arguments
     /// * `text` - Optional text following the matcher code block
     pub fn try_from_post_matcher_str(text: Option<&str>) -> Result<Self, MatcherExtrasError> {
-        let extras = get_all_extras(text.unwrap_or_default());
-
-        match extras {
-            Some(extras_str) => Self::try_from_extras_str(extras_str),
-            None => Ok(Self {
-                min_items: None,
-                max_items: None,
-                had_min_max: false,
-                is_literal_code: false,
-            }),
-        }
+        let extras_str = get_all_extras(text.unwrap_or_default())?;
+        Self::try_from_extras_str(extras_str)
     }
 
     /// Return optional minimum number of items at this list level
@@ -516,8 +460,8 @@ pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, E
 mod tests {
     use crate::mdschema::validator::{
         matcher::matcher::{
-            MATCHERS_EXTRA_PATTERN, Matcher, MatcherError, MatcherExtras, MatcherExtrasError,
-            extract_text_matcher, partition_at_special_chars,
+            Matcher, MatcherError, MatcherExtrasError, extract_text_matcher,
+            partition_at_special_chars,
         },
         ts_utils::{new_markdown_parser, parse_markdown},
     };
@@ -536,11 +480,14 @@ mod tests {
         // Test error handling for invalid pattern using try_from_pattern_and_suffix_str
         let result = Matcher::try_from_pattern_and_suffix_str("`invalid_pattern`", None);
         assert!(result.is_err());
-        match result.unwrap_err() {
+        match result.as_ref().unwrap_err() {
             MatcherError::MatcherInteriorRegexInvalid(_) => {
                 // Expected error type
             }
-            _ => panic!("Expected MatcherInteriorRegexInvalid error"),
+            _ => panic!(
+                "Expected MatcherInteriorRegexInvalid error, got {:?}",
+                result.unwrap_err()
+            ),
         }
     }
 
@@ -705,11 +652,14 @@ mod tests {
         // Test that a single ! makes it literal code even though the matcher isn't valid
         let result = Matcher::try_from_pattern_and_suffix_str("`testing!!!`", Some("!"));
         assert!(result.is_err());
-        match result.unwrap_err() {
+        match result.as_ref().unwrap_err() {
             MatcherError::WasLiteralCode => {
                 // Expected
             }
-            _ => panic!("Expected WasLiteralCode error"),
+            _ => panic!(
+                "Expected WasLiteralCode error, got {:?}",
+                result.as_ref().unwrap_err()
+            ),
         }
     }
 
@@ -726,7 +676,7 @@ mod tests {
             MatcherError::WasLiteralCode => {
                 // Expected - should be treated as literal code
             }
-            _ => panic!("Expected WasLiteralCode error"),
+            error => panic!("Expected WasLiteralCode error, got {:?}", error),
         }
     }
 
@@ -734,12 +684,12 @@ mod tests {
     fn test_mixed_literal_and_non_literal_extras() {
         // Mixing literal code with non-literal extras is invalid
         let result = Matcher::try_from_pattern_and_suffix_str("`test:/\\w+/`", Some("!{,}"));
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            MatcherError::MatcherExtrasError(MatcherExtrasError::MatcherExtrasInvalid) => {
+        assert!(&result.is_err());
+        match &result.unwrap_err() {
+            MatcherError::MatcherExtrasError(MatcherExtrasError::MixedLiteralAndOthers) => {
                 // You can't combine literal code with non-literal extras
             }
-            _ => panic!("Expected WasLiteralCode error"),
+            error => panic!("Expected MixedLiteralAndOthers error, got {:?}", error),
         }
     }
 
@@ -766,7 +716,7 @@ mod tests {
         assert_eq!(schema_cursor.node().kind(), "code_span");
 
         let matcher = Matcher::try_from_schema_cursor(&schema_cursor, schema_str).unwrap();
-        assert_eq!(matcher.pattern().to_string(), r"\w+");
+        assert_eq!(matcher.pattern().to_string(), r"^\w+");
         assert_eq!(matcher.id(), Some("test"));
     }
 

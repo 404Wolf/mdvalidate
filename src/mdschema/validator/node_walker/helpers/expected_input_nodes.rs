@@ -4,7 +4,7 @@ use crate::mdschema::validator::{
     errors::{SchemaError, ValidationError},
     matcher::{
         matcher::{Matcher, MatcherError},
-        matcher_extras::{get_all_extras, get_everything_after_special_chars},
+        matcher_extras::{get_all_extras, get_everything_after_extras},
     },
     ts_utils::{get_next_node, is_code_node, is_text_node},
 };
@@ -155,7 +155,7 @@ fn text_after_matcher<'a>(schema_cursor: &TreeCursor, schema_str: &'a str) -> &'
 
             let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
 
-            get_everything_after_special_chars(next_node_str).unwrap_or("")
+            get_everything_after_extras(next_node_str).unwrap_or("")
         }
         None => "",
     }

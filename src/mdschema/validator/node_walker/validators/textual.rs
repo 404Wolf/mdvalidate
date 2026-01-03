@@ -3,9 +3,8 @@ use serde_json::json;
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::matcher::matcher::{
-    Matcher, MatcherError, get_everything_after_extras,
-};
+use crate::mdschema::validator::matcher::matcher::{Matcher, MatcherError};
+use crate::mdschema::validator::matcher::matcher_extras::get_everything_after_extras;
 use crate::mdschema::validator::ts_utils::{
     both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_text_node,
 };
@@ -544,11 +543,14 @@ fn validate_literal_matcher_vs_textual(
     let schema_node_str_has_more_than_extras = schema_node_str.len() > 1;
 
     // Now see if there is more text than just the "!" in the schema text node.
-    let Some(schema_text_after_extras) = get_everything_after_extras(schema_node_str) else {
-        result.add_error(ValidationError::InternalInvariantViolated(
-            "we should have had extras in the matcher string".into(),
-        ));
-        return result;
+    let schema_text_after_extras = match get_everything_after_extras(schema_node_str) {
+        Ok(text) => text,
+        Err(_) => {
+            result.add_error(ValidationError::InternalInvariantViolated(
+                "we should have had extras in the matcher string".into(),
+            ));
+            return result;
+        }
     };
 
     if !input_cursor.goto_next_sibling() && schema_node_str_has_more_than_extras {

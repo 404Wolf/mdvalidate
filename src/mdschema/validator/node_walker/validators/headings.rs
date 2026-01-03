@@ -5,7 +5,6 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::node_walker::validators::textual_container::validate_textual_container_vs_textual_container;
 use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::mdschema::validator::node_walker::validators::textual::validate_textual_vs_textual;
 use crate::mdschema::validator::ts_utils::{
     is_heading_node, is_marker_node, is_textual_container_node,
 };
@@ -102,9 +101,7 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<(), ValidationEr
 mod tests {
     use super::*;
     use crate::mdschema::validator::{
-        errors::SchemaViolationError,
-        ts_utils::{is_textual_node, parse_markdown},
-        validator_state::NodePosPair,
+        errors::SchemaViolationError, node_walker::validators::textual::validate_textual_vs_textual, ts_utils::{is_textual_node, parse_markdown}, validator_state::NodePosPair
     };
     use serde_json::json;
 

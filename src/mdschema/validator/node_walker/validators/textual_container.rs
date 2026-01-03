@@ -3,7 +3,10 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     errors::*,
-    matcher::matcher::{Matcher, MatcherError, get_all_special_chars},
+    matcher::{
+        matcher::{Matcher, MatcherError},
+        matcher_extras::get_all_extras,
+    },
     node_walker::{
         ValidationResult, helpers::expected_input_nodes::expected_input_nodes,
         validators::textual::validate_textual_vs_textual,
@@ -157,12 +160,21 @@ fn count_non_literal_matchers_in_children(
         }
 
         // If the following node is a text node, then it may have extras, so grab them.
-        let extras_str = get_next_node(&cursor)
+        let extras_str = match get_next_node(&cursor)
             .filter(|n| is_text_node(n))
-            .and_then(|next_node| {
+            .map(|next_node| {
                 let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
-                get_all_special_chars(next_node_str)
-            });
+                get_all_extras(next_node_str)
+            }) {
+            Some(Ok(extras)) => Some(extras),
+            Some(Err(error)) => {
+                return Err(ValidationError::SchemaError(SchemaError::MatcherError {
+                    error: error.into(),
+                    schema_index: schema_cursor.descendant_index(),
+                }));
+            }
+            None => None,
+        };
 
         let pattern_str = cursor.node().utf8_text(schema_str.as_bytes()).unwrap();
 
@@ -185,35 +197,6 @@ fn count_non_literal_matchers_in_children(
     }
 
     Ok(count)
-}
-
-fn at_matcher_and_is_literal_matcher(
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-) -> Result<(bool, bool), ValidationError> {
-    match Matcher::try_from_schema_cursor(schema_cursor, schema_str) {
-        Ok(_) => Ok((true, false)),
-        Err(MatcherError::WasLiteralCode) => Ok((true, true)),
-        Err(error) => Err(ValidationError::SchemaError(SchemaError::MatcherError {
-            error,
-            schema_index: schema_cursor.descendant_index(),
-        })),
-    }
-}
-
-fn has_next_and_next_is_matcher_and_is_literal_matcher(
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-) -> Result<(bool, bool, bool), ValidationError> {
-    let mut schema_cursor = schema_cursor.clone();
-
-    Ok(if schema_cursor.goto_next_sibling() {
-        let (is_matcher, is_literal) =
-            at_matcher_and_is_literal_matcher(&schema_cursor, schema_str)?;
-        (true, is_matcher, is_literal)
-    } else {
-        (false, false, false) // there is no next
-    })
 }
 
 #[cfg(test)]

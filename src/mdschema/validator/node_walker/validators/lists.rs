@@ -573,7 +573,6 @@ mod tests {
             validate_list_vs_list,
         },
         ts_utils::parse_markdown,
-        utils::test_logging,
     };
 
     #[test]
