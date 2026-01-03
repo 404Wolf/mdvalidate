@@ -4,7 +4,7 @@ use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::matcher::matcher::{
-    Matcher, MatcherError, get_everything_after_special_chars,
+    Matcher, MatcherError, get_everything_after_extras,
 };
 use crate::mdschema::validator::ts_utils::{
     both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_text_node,
@@ -20,6 +20,7 @@ use crate::mdschema::validator::{
 /// Validate two textual elements.
 ///
 /// # Algorithm
+///
 /// 1. Check if the schema node is at a `code_span`, or the current node is a
 ///    text node and the next node is a `code_span`. If so, delegate to
 ///    `validate_matcher_vs_text`.
@@ -108,6 +109,8 @@ pub fn validate_textual_vs_textual(
 /// ```
 ///
 /// So, when the matcher has extras, assume that the subsequent text node also will get validated.
+///
+/// Repeating matchers are **ignored** and are treated as normal matchers.
 pub fn validate_matcher_vs_text<'a>(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
@@ -120,6 +123,8 @@ pub fn validate_matcher_vs_text<'a>(
     let mut schema_cursor = schema_cursor.clone();
     let mut input_cursor = input_cursor.clone();
 
+    let input_node = input_cursor.node();
+
     let schema_prefix_node = {
         if is_code_node(&schema_cursor.node()) {
             None
@@ -127,7 +132,7 @@ pub fn validate_matcher_vs_text<'a>(
             Some(schema_cursor.node())
         } else {
             unreachable!(
-                "only should be called with `code_span` or `text` but got {:?}",
+                "only should be called with `code_span` or text but got {:?}",
                 schema_cursor.node()
             )
         }
@@ -255,7 +260,7 @@ pub fn validate_matcher_vs_text<'a>(
     }
 
     // Don't validate after the prefix if there isn't enough content
-    if input_byte_offset >= input_str.len() {
+    if input_byte_offset >= input_node.byte_range().end {
         if got_eof {
             let schema_prefix_str = schema_prefix_node
                 .map(|node| &schema_str[node.byte_range()])
@@ -283,6 +288,16 @@ pub fn validate_matcher_vs_text<'a>(
     let input_after_prefix =
         input_str[input_byte_offset..input_cursor.node().byte_range().end].to_string();
 
+    dbg!(
+        input_cursor.node().to_sexp(),
+        schema_cursor.node().to_sexp(),
+        input_cursor.node().utf8_text(input_str.as_bytes()).unwrap(),
+        schema_cursor
+            .node()
+            .utf8_text(schema_str.as_bytes())
+            .unwrap(),
+        &matcher
+    );
     match matcher {
         Ok(matcher) => {
             // Actually perform the match for the matcher
@@ -319,8 +334,8 @@ pub fn validate_matcher_vs_text<'a>(
                     }
                 }
                 None => {
-                    // TODO: can we do partial validation of matcher contents
-                    if !got_eof {
+                    // TODO: is this right?
+                    if waiting_at_end(got_eof, input_str, &input_cursor) {
                         return result;
                     };
 
@@ -385,11 +400,11 @@ pub fn validate_matcher_vs_text<'a>(
             let text_node_after_code_node_str_contents =
                 &schema_str[schema_suffix_node.byte_range()];
             // All text after the matcher node and maybe the text node right after it ("extras")
-            get_everything_after_special_chars(text_node_after_code_node_str_contents).unwrap()
+            get_everything_after_extras(text_node_after_code_node_str_contents).unwrap()
         };
 
         // Seek forward from the current input byte offset by the length of the suffix
-        let input_suffix_len = input_cursor.node().byte_range().len() - input_byte_offset;
+        let input_suffix_len = input_cursor.node().byte_range().end - input_byte_offset;
 
         // Check if input_suffix is shorter than schema_suffix
         let input_suffix = &input_str[input_byte_offset..input_cursor.node().byte_range().end];
@@ -529,7 +544,7 @@ fn validate_literal_matcher_vs_textual(
     let schema_node_str_has_more_than_extras = schema_node_str.len() > 1;
 
     // Now see if there is more text than just the "!" in the schema text node.
-    let Some(schema_text_after_extras) = get_everything_after_special_chars(schema_node_str) else {
+    let Some(schema_text_after_extras) = get_everything_after_extras(schema_node_str) else {
         result.add_error(ValidationError::InternalInvariantViolated(
             "we should have had extras in the matcher string".into(),
         ));
@@ -1051,6 +1066,42 @@ mod tests {
         // assert_eq!(result.errors, vec![]);
         // assert_eq!(result.value, json!({}));
         // assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(3, 3));
+    }
+
+    #[test]
+    fn test_validate_matcher_vs_text_with_repeating() {
+        let schema_str = "test `test:/test/`{1,} foo";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        // (document[0]0..14)
+        // └─ (paragraph[1]0..13)
+        //    ├─ (code_span[2]0..9)
+        //    │  └─ (text[3]1..8) ^
+        //    └─ (text[4]9..13)
+
+        let input_str = "test test foo";
+        let input_tree = parse_markdown(input_str).unwrap();
+        // (document[0]0..9)
+        // └─ (paragraph[1]0..8)
+        //    └─ (text[2]0..8)
+
+        let mut schema_cursor = schema_tree.walk();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // document -> paragraph
+        schema_cursor.goto_first_child(); // paragraph -> code_span
+        input_cursor.goto_first_child(); // document -> text
+
+        let result = validate_textual_vs_textual(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true, // got_eof = true
+        );
+
+        assert_eq!(result.errors, vec![]);
+        assert_eq!(result.value, json!({"test": "test"}));
     }
 
     #[test]

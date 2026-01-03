@@ -3,7 +3,7 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     errors::*,
-    matcher::matcher::{Matcher, MatcherError, get_full_special_chars_prefix},
+    matcher::matcher::{Matcher, MatcherError, get_all_special_chars},
     node_walker::{
         ValidationResult, helpers::expected_input_nodes::expected_input_nodes,
         validators::textual::validate_textual_vs_textual,
@@ -161,7 +161,7 @@ fn count_non_literal_matchers_in_children(
             .filter(|n| is_text_node(n))
             .and_then(|next_node| {
                 let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
-                get_full_special_chars_prefix(next_node_str)
+                get_all_special_chars(next_node_str)
             });
 
         let pattern_str = cursor.node().utf8_text(schema_str.as_bytes()).unwrap();

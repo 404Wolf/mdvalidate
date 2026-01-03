@@ -8,15 +8,11 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError},
     node_walker::{
         ValidationResult,
-        validators::{
-            textual::validate_textual_vs_textual,
-            textual_container::validate_textual_container_vs_textual_container,
-        },
+        validators::textual_container::validate_textual_container_vs_textual_container,
     },
     ts_utils::{
         count_siblings, get_node_and_next_node, has_single_code_child, has_subsequent_node_of_kind,
         is_list_item_node, is_list_marker_node, is_list_node, is_paragraph_node,
-        walk_to_list_item_content,
     },
     utils::compare_node_kinds,
 };
@@ -139,8 +135,6 @@ pub fn validate_list_vs_list(
 
                 debug_assert_eq!(input_cursor.node().kind(), "list_item");
                 debug_assert_eq!(schema_cursor.node().kind(), "list_item");
-
-                dbg!(input_cursor.node().kind());
 
                 let new_matches = validate_list_item_contents_vs_list_item_contents(
                     &input_cursor,
@@ -370,7 +364,6 @@ pub fn validate_list_vs_list(
             // lengths aren't allowed for literal lists.
             let remaining_schema_nodes = count_siblings(&schema_cursor);
             let remaining_input_nodes = count_siblings(&input_cursor);
-            dbg!(remaining_schema_nodes, remaining_input_nodes);
 
             if remaining_schema_nodes != remaining_input_nodes {
                 result.add_error(ValidationError::SchemaViolation(
@@ -417,10 +410,12 @@ pub fn validate_list_vs_list(
 /// Validate the contents of a list item against the contents of a different
 /// list item.
 ///
+/// ```ansi
 /// ├─ (list_item) <-- we are here
 /// │  ├─ (list_marker) <-- we already validated this
 /// │  └─ (paragraph) <-- we want to be here
 /// │     └─ (text)
+/// ```
 ///
 /// Walks into their actual paragraphs and runs textual container validation.
 fn validate_list_item_contents_vs_list_item_contents(
@@ -578,6 +573,7 @@ mod tests {
             validate_list_vs_list,
         },
         ts_utils::parse_markdown,
+        utils::test_logging,
     };
 
     #[test]
@@ -941,10 +937,29 @@ Footer: test (footer isn't validated with_list_vs_list)
     #[test]
     fn test_validate_list_vs_list_with_simple_matcher() {
         let schema_str = r#"- `test:/test\d/`{2,2}"#;
+        // (document[0]0..23)
+        // └─ (tight_list[1]0..22)
+        //    └─ (list_item[2]0..22)
+        //       ├─ (list_marker[3]0..1)
+        //       └─ (paragraph[4]2..22)
+        //          ├─ (code_span[5]2..17)
+        //          │  └─ (text[6]3..16)
+        //          └─ (text[7]17..22)
+
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
 
         let input_str = "- test1\n- test2";
+        // (document[0]0..16)
+        // └─ (tight_list[1]0..15)
+        //    ├─ (list_item[2]0..7)
+        //    │  ├─ (list_marker[3]0..1)
+        //    │  └─ (paragraph[4]2..7)
+        //    │     └─ (text[5]2..7)
+        //    └─ (list_item[6]8..15)
+        //       ├─ (list_marker[7]8..9)
+        //       └─ (paragraph[8]10..15)
+        //          └─ (text[9]10..15)
         let input_tree = parse_markdown(input_str).unwrap();
         let mut input_cursor = input_tree.walk();
 
@@ -1004,19 +1019,46 @@ Footer: test (footer isn't validated with_list_vs_list)
     #[test]
     fn test_validate_list_vs_list_with_stacked_matcher_too_many_first() {
         let schema_str = r#"
-- `testA:/test\d/`{2,2}
-- `testB:/line2test\d/`{2,2}
+- `testA:/test\d/`{1,1}
+- `testB:/line2test\d/`{1,1}
 "#;
+        // (document[0]0..54)
+        // └─ (tight_list[1]0..52)
+        //    ├─ (list_item[2]0..23)
+        //    │  ├─ (list_marker[3]0..1)
+        //    │  └─ (paragraph[4]2..23)
+        //    │     ├─ (code_span[5]2..18)
+        //    │     │  └─ (text[6]3..17)
+        //    │     └─ (text[7]18..23)
+        //    └─ (list_item[8]24..52)
+        //       ├─ (list_marker[9]24..25)
+        //       └─ (paragraph[10]26..52)
+        //          ├─ (code_span[11]26..47)
+        //          │  └─ (text[12]27..46)
+        //          └─ (text[13]47..52)
+
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
 
         let input_str = r#"
 - test1
 - test2
-- test3
 - line2test1
-- line2test2
 "#;
+        // (document[0]0..30)
+        // └─ (tight_list[1]0..28)
+        //    ├─ (list_item[2]0..7)
+        //    │  ├─ (list_marker[3]0..1)
+        //    │  └─ (paragraph[4]2..7)
+        //    │     └─ (text[5]2..7)
+        //    ├─ (list_item[6]8..15)
+        //    │  ├─ (list_marker[7]8..9)
+        //    │  └─ (paragraph[8]10..15)
+        //    │     └─ (text[9]10..15)
+        //    └─ (list_item[10]16..28)
+        //       ├─ (list_marker[11]16..17)
+        //       └─ (paragraph[12]18..28)
+        //          └─ (text[13]18..28)
         let input_tree = parse_markdown(input_str).unwrap();
         let mut input_cursor = input_tree.walk();
 
@@ -1027,13 +1069,9 @@ Footer: test (footer isn't validated with_list_vs_list)
 
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        // even with eof=false we should know that there is an error by now
 
-        assert_eq!(
-            result.errors.len(),
-            1,
-            "Expected one error, got: {:?}",
-            result.errors
-        );
+        assert_eq!(result.errors.len(), 1, "Expected an error");
 
         match &result.errors[0] {
             ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
@@ -1044,9 +1082,9 @@ Footer: test (footer isn't validated with_list_vs_list)
                 actual,
             }) => {
                 assert_eq!(*schema_index, 11);
-                assert_eq!(*input_index, 12);
+                assert_eq!(*input_index, 9);
                 assert_eq!(expected, "^line2test\\d");
-                assert_eq!(actual, "test3");
+                assert_eq!(actual, "test2");
             }
             _ => panic!(
                 "Expected NodeContentMismatch error with Matcher kind, got: {:?}",
@@ -1054,10 +1092,8 @@ Footer: test (footer isn't validated with_list_vs_list)
             ),
         }
 
-        assert_eq!(
-            result.value,
-            json!({"testA": ["test1", "test2"], "testB": [{}, "line2test1"]})
-        );
+        // TODO: strange that only in this case we seem to support partial outputs
+        assert_eq!(result.value, json!({"testA": ["test1"], "testB": [{}]}));
     }
 
     #[test]

@@ -80,11 +80,11 @@ mod tests {
     fn test_pretty_print() {
         let tree = parse_markdown("# Test").unwrap();
         let node = tree.root_node();
-        let expected = "(document[0])
-└─ (atx_heading[1])
-   ├─ (atx_h1_marker[2])
-   └─ (heading_content[3])
-      └─ (text[4])
+        let expected = "(document[0]0..6)
+└─ (atx_heading[1]0..6)
+   ├─ (atx_h1_marker[2]0..1)
+   └─ (heading_content[3]1..6)
+      └─ (text[4]1..6)
 ";
         assert_eq!(node.pretty_print(), expected);
     }

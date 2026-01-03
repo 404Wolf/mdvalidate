@@ -1,7 +1,7 @@
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
-    matcher::matcher::{Matcher, MatcherError, get_full_special_chars_prefix},
+    matcher::matcher::{Matcher, MatcherError, get_all_special_chars},
     ts_utils::{get_next_node, is_code_node, is_text_node},
 };
 

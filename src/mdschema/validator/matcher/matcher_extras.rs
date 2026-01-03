@@ -20,7 +20,7 @@ pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
         }
     }
 
-    pub fn get_all_special_chars(text: &str) -> Option<&str> {
+    pub fn get_all_extras(text: &str) -> Option<&str> {
         let captures = MATCHERS_EXTRA_PATTERN.captures(text);
         match captures {
             Some(caps) => {
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_get_all_extras() {
-        let result = get_all_special_chars("{1,} test");
+        let result = get_all_extras("{1,} test");
         assert_eq!(result.unwrap(), "{1,}");
     }
 

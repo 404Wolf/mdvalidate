@@ -2,6 +2,8 @@ use log::trace;
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
+use crate::mdschema::validator::errors::{SchemaError, ValidationError};
+use crate::mdschema::validator::node_walker::helpers::check_repeating_matchers::check_repeating_matchers;
 use crate::mdschema::validator::node_walker::validators::code::validate_code_vs_code;
 use crate::mdschema::validator::node_walker::validators::headings::validate_heading_vs_heading;
 use crate::mdschema::validator::node_walker::validators::lists::validate_list_vs_list;
@@ -67,6 +69,20 @@ pub fn validate_node_vs_node(
     // Both are textual containers
     if both_are_textual_containers(&input_node, &schema_node) {
         trace!("Both are textual containers, validating text vs text");
+
+        // If we have top level textual containers, they CANNOT have repeating
+        // matchers. `validate_textual_container_vs_textual_container` allows
+        // the containers to contain repeating matchers since the same utility
+        // is used for list validation.
+
+        if let Some(repeating_matcher_index) = check_repeating_matchers(&schema_cursor, schema_str) {
+            result.add_error(ValidationError::SchemaError(
+                SchemaError::RepeatingMatcherInTextContainer {
+                    schema_index: repeating_matcher_index,
+                },
+            ));
+            return result;
+        }
 
         return validate_textual_container_vs_textual_container(
             &input_cursor,
@@ -221,7 +237,6 @@ mod tests {
             errors::{ChildrenCount, SchemaViolationError, ValidationError},
             node_walker::node_vs_node::validate_node_vs_node,
             ts_utils::parse_markdown,
-            utils::test_logging,
         },
     };
 
