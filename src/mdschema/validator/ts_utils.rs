@@ -135,6 +135,16 @@ pub fn is_paragraph_node(node: &Node) -> bool {
     node.kind() == "paragraph"
 }
 
+/// Check if a node is a list marker.
+pub fn is_list_marker_node(node: &Node) -> bool {
+    node.kind() == "list_marker"
+}
+
+/// Check if a node is a list item.
+pub fn is_list_item_node(node: &Node) -> bool {
+    node.kind() == "list_item"
+}
+
 /// Check if a node is a "marker" (i.e., a heading marker, list marker, etc).
 pub fn is_marker_node(node: &Node) -> bool {
     node.kind().ends_with("_marker")
@@ -382,15 +392,13 @@ pub fn walk_to_list_item_content(cursor: &mut TreeCursor) {
 }
 
 /// Count the number of siblings a node has.
+///
+/// Does not include the node itself.
 pub fn count_siblings(cursor: &TreeCursor) -> usize {
     let mut cursor = cursor.clone();
     let mut count = 0;
-    loop {
+    while cursor.goto_next_sibling() {
         count += 1;
-
-        if !cursor.goto_next_sibling() {
-            break;
-        }
     }
     count
 }

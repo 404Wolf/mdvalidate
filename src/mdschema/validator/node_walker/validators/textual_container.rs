@@ -63,7 +63,7 @@ pub fn validate_textual_container_vs_textual_container(
         &input_cursor.node()
     ));
 
-    match count_non_repeating_matchers_in_children(&schema_cursor, schema_str) {
+    match count_non_literal_matchers_in_children(&schema_cursor, schema_str) {
         Ok(non_repeating_matchers_count) if non_repeating_matchers_count > 1 && got_eof => result
             .add_error(ValidationError::SchemaError(
                 SchemaError::MultipleMatchersInNodeChildren {
@@ -89,7 +89,7 @@ pub fn validate_textual_container_vs_textual_container(
         }
     };
 
-    let actual_input_node_count = count_siblings(&input_cursor);
+    let actual_input_node_count = count_siblings(&input_cursor) + 1; // including the node we are currently at
     if (actual_input_node_count != expected_input_node_count) && got_eof {
         result.add_error(ValidationError::SchemaViolation(
             SchemaViolationError::ChildrenLengthMismatch {
@@ -138,7 +138,7 @@ pub fn validate_textual_container_vs_textual_container(
 /// Returns the number of matchers, or a `ValidationError` that is probably a
 /// `MatcherError` due to failing to construct a matcher given a code node that
 /// is not marked as literal.
-fn count_non_repeating_matchers_in_children(
+fn count_non_literal_matchers_in_children(
     schema_cursor: &TreeCursor,
     schema_str: &str,
 ) -> Result<usize, ValidationError> {
@@ -167,13 +167,6 @@ fn count_non_repeating_matchers_in_children(
         let pattern_str = cursor.node().utf8_text(schema_str.as_bytes()).unwrap();
 
         match Matcher::try_from_pattern_and_suffix_str(pattern_str, extras_str) {
-            Ok(matcher) if matcher.is_repeated() => {
-                return Err(ValidationError::SchemaError(
-                    SchemaError::RepeatingMatcherInTextContainer {
-                        schema_index: cursor.descendant_index(),
-                    },
-                ));
-            }
             Ok(_) => count += 1,
             Err(MatcherError::WasLiteralCode) => {
                 // Don't count it, but this is an OK error
@@ -231,21 +224,25 @@ mod tests {
         errors::{SchemaError, ValidationError},
         matcher::matcher::MatcherError,
         node_walker::validators::{
-            textual::validate_textual_vs_textual, textual_container::{count_non_repeating_matchers_in_children, validate_textual_container_vs_textual_container},
+            textual::validate_textual_vs_textual,
+            textual_container::{
+                count_non_literal_matchers_in_children,
+                validate_textual_container_vs_textual_container,
+            },
         },
         ts_utils::parse_markdown,
         validator_state::NodePosPair,
     };
 
     #[test]
-    fn test_count_non_repeating_matchers_in_children_invalid_matcher() {
+    fn test_count_non_literal_matchers_in_children_invalid_matcher() {
         let schema_str = "test `_*test*_`";
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child();
         schema_cursor.goto_first_child();
 
-        match count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap_err() {
+        match count_non_literal_matchers_in_children(&schema_cursor, schema_str).unwrap_err() {
             ValidationError::SchemaError(SchemaError::MatcherError {
                 error,
                 schema_index,
@@ -261,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn test_count_non_repeating_matchers_in_children_only_literal_matcher() {
+    fn test_count_non_literal_matchers_in_children_only_literal_matcher() {
         let schema_str = "test `_*test*_`! `test:/test/`";
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
@@ -269,20 +266,20 @@ mod tests {
         schema_cursor.goto_first_child();
 
         assert_eq!(
-            count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap(),
+            count_non_literal_matchers_in_children(&schema_cursor, schema_str).unwrap(),
             1 // one is literal
         );
     }
 
     #[test]
-    fn test_count_non_repeating_matchers_in_children_no_matchers() {
+    fn test_count_non_literal_matchers_in_children_no_matchers() {
         let schema_str = "test *foo* _bar_";
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child();
 
         assert_eq!(
-            count_non_repeating_matchers_in_children(&schema_cursor, schema_str).unwrap(),
+            count_non_literal_matchers_in_children(&schema_cursor, schema_str).unwrap(),
             0
         );
     }
