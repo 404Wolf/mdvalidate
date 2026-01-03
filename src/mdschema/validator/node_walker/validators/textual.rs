@@ -4,7 +4,7 @@ use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::matcher::matcher::{Matcher, MatcherError};
-use crate::mdschema::validator::matcher::matcher_extras::get_everything_after_extras;
+use crate::mdschema::validator::matcher::matcher_extras::get_after_extras;
 use crate::mdschema::validator::ts_utils::{
     both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_text_node,
 };
@@ -399,7 +399,7 @@ pub fn validate_matcher_vs_text<'a>(
             let text_node_after_code_node_str_contents =
                 &schema_str[schema_suffix_node.byte_range()];
             // All text after the matcher node and maybe the text node right after it ("extras")
-            get_everything_after_extras(text_node_after_code_node_str_contents).unwrap()
+            get_after_extras(text_node_after_code_node_str_contents).unwrap()
         };
 
         // Seek forward from the current input byte offset by the length of the suffix
@@ -543,9 +543,9 @@ fn validate_literal_matcher_vs_textual(
     let schema_node_str_has_more_than_extras = schema_node_str.len() > 1;
 
     // Now see if there is more text than just the "!" in the schema text node.
-    let schema_text_after_extras = match get_everything_after_extras(schema_node_str) {
-        Ok(text) => text,
-        Err(_) => {
+    let schema_text_after_extras = match get_after_extras(schema_node_str) {
+        Some(text) => text,
+        None => {
             result.add_error(ValidationError::InternalInvariantViolated(
                 "we should have had extras in the matcher string".into(),
             ));

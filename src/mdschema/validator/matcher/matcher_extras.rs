@@ -20,15 +20,8 @@ pub fn partition_at_special_chars(text: &str) -> Option<(&str, &str)> {
     }
 }
 
-pub fn get_everything_after_extras(text: &str) -> Result<&str, MatcherExtrasError> {
-    let (_extras, after) =
-        partition_at_special_chars(text).ok_or(MatcherExtrasError::MatcherExtrasInvalid)?;
-
-    if has_literal_within_extras(text) {
-        return Err(MatcherExtrasError::MixedLiteralAndOthers);
-    }
-
-    Ok(after)
+pub fn get_after_extras(text: &str) -> Option<&str> {
+    partition_at_special_chars(text).map(|(_extras, after)| after)
 }
 
 pub fn get_all_extras(text: &str) -> Result<&str, MatcherExtrasError> {
@@ -47,7 +40,7 @@ pub fn get_all_extras(text: &str) -> Result<&str, MatcherExtrasError> {
 ///
 /// If the string starts with a !, then try running get_everything_after_extras
 pub fn has_literal_within_extras(text: &str) -> bool {
-    text.starts_with('!') && text.len() != 1 && get_everything_after_extras(&text[1..]).is_ok()
+    text.starts_with('!') && text.len() != 1 && get_after_extras(&text[1..]).is_some()
 }
 
 /// Errors specific to matcher extras construction
@@ -228,8 +221,21 @@ mod tests {
 
     #[test]
     fn test_get_all_extras_just_literal() {
-        let result = get_all_extras("!");
+        let result = get_after_extras("!");
         assert_eq!(result.unwrap(), "!");
+    }
+
+    #[test]
+    fn test_get_after_extras_literal_then_some() {
+        let result = get_after_extras("! test");
+        assert_eq!(result, Some(" test"));
+    }
+
+    #[test]
+    fn test_get_after_extras_but_none() {
+        // If there are no extras then it's all after the extras
+        let result = get_after_extras("test");
+        assert_eq!(result, Some("test"));
     }
 
     #[test]
