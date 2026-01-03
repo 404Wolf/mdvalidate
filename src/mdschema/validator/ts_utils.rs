@@ -385,8 +385,12 @@ pub fn walk_to_list_item_content(cursor: &mut TreeCursor) {
 pub fn count_siblings(cursor: &TreeCursor) -> usize {
     let mut cursor = cursor.clone();
     let mut count = 0;
-    while cursor.goto_next_sibling() {
+    loop {
         count += 1;
+
+        if !cursor.goto_next_sibling() {
+            break;
+        }
     }
     count
 }
