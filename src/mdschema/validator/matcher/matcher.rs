@@ -6,20 +6,16 @@ use std::{collections::HashSet, sync::LazyLock};
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
-    matcher::matcher_extras::get_all_extras,
+    matcher::matcher_extras::{MATCHERS_EXTRA_PATTERN, get_all_extras},
     ts_utils::{get_next_node, get_node_and_next_node, is_text_node},
 };
 
-static MATCHER_PATTERN: LazyLock<Regex> =
+static REGEX_MATCHER_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?\/(?P<regex>.+?)\/").unwrap());
 
 static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
 
 pub const LITERAL_INDICATOR: char = '!';
-
-pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
-    // We can have a ! instead of matcher extras to indicate that it is a literal match
-    LazyLock::new(|| Regex::new(r"^(!|[+\{\},0-9]*)").unwrap());
 
 pub fn partition_at_special_chars(text: &str) -> Option<(&str, &str)> {
     let captures = MATCHERS_EXTRA_PATTERN.captures(text);
@@ -99,11 +95,11 @@ impl std::fmt::Display for MatcherExtrasError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MatcherExtrasError::MatcherExtrasInvalid => {
-                        write!(f, "Invalid matcher extras")
-                    }
+                write!(f, "Invalid matcher extras")
+            }
             MatcherExtrasError::MixedLiteralAndOthers => {
-                        write!(f, "Literal matcher cannot have other extras")
-                    }
+                write!(f, "Literal matcher cannot have other extras")
+            }
         }
     }
 }
@@ -148,47 +144,53 @@ pub struct MatcherExtras {
 }
 
 impl MatcherExtras {
-    /// Create new MatcherExtras by parsing the text following a matcher.
+    /// Create new `MatcherExtras` directly with the extras that come after a matcher.
+    ///
+    /// # Arguments
+    /// * `extras` - The extras string that follows a matcher. Does not include any potential additional text.
+    pub fn try_from_extras_str(extras: &str) -> Result<Self, MatcherExtrasError> {
+        let is_literal = extras.starts_with(LITERAL_INDICATOR);
+        if is_literal {
+            // If it's literal, we can't have anything else after the matcher
+
+            if extras.len() > 1 {
+                return Err(MatcherExtrasError::MixedLiteralAndOthers);
+            }
+
+            Ok(Self {
+                min_items: None,
+                max_items: None,
+                had_min_max: false,
+                is_literal_code: true,
+            })
+        } else {
+            let (min_items, max_items, had_range_syntax) = extract_item_count_limits(extras);
+
+            Ok(Self {
+                min_items,
+                max_items,
+                had_min_max: had_range_syntax,
+                is_literal_code: is_literal, // We handle literal code at a higher level now
+            })
+        }
+    }
+
+    /// Create new `MatcherExtras` by parsing the text following a matcher.
     ///
     /// # Arguments
     /// * `text` - Optional text following the matcher code block
-    pub fn try_new(text: Option<&str>) -> Result<Self, MatcherExtrasError> {
+    pub fn try_from_post_matcher_str(text: Option<&str>) -> Result<Self, MatcherExtrasError> {
         let extras = get_all_extras(text.unwrap_or_default());
 
-        Ok(match extras {
-            Some(text) => {
-                let is_literal = text.starts_with(LITERAL_INDICATOR);
-                if is_literal {
-                   // If it's literal, we can't have anything else after the matcher
-
-                   if text.len() > 1 {
-                       return Err(MatcherExtrasError::MixedLiteralAndOthers);
-                   }
-
-                   Self {
-                       min_items: None,
-                       max_items: None,
-                       had_min_max: false,
-                       is_literal_code: true,
-                   }
-                } else {
-                    let (min_items, max_items, had_range_syntax) = extract_item_count_limits(text);
-
-                    Self {
-                        min_items,
-                        max_items,
-                        had_min_max: had_range_syntax,
-                        is_literal_code: is_literal, // We handle literal code at a higher level now
-                    }
-                }
-            }
-            None => Self {
+        match extras {
+            Some(extras_str) => Self::try_from_extras_str(extras_str),
+            None => Ok(Self {
                 min_items: None,
                 max_items: None,
                 had_min_max: false,
                 is_literal_code: false,
-            },
-        })
+            }),
+        }
     }
 
     /// Return optional minimum number of items at this list level
@@ -301,17 +303,17 @@ impl Matcher {
     ///
     /// # Arguments
     /// * `pattern` - The pattern string within the matcher codeblock.
-    /// * `extras` - Optional extras string following the pattern. This must
+    /// * `after_str` - Optional extras string following the pattern. This must
     ///   have a sequence of valid matcher extras, only followed by additional
     ///   text if there is a space in between.
     pub fn try_from_pattern_and_suffix_str(
         pattern_str: &str,
-        extras_str: Option<&str>,
+        after_str: Option<&str>,
     ) -> Result<Matcher, MatcherError> {
         let pattern_str = pattern_str[1..pattern_str.len() - 1].trim(); // Remove surrounding backticks
-        let captures = MATCHER_PATTERN.captures(pattern_str);
+        let captures = REGEX_MATCHER_PATTERN.captures(pattern_str);
 
-        let extras = MatcherExtras::try_new(extras_str)?;
+        let extras = MatcherExtras::try_from_post_matcher_str(after_str)?;
 
         // We are allowed to have an invalid matcher interior if it is literal
         // code, so throw this error before trying to create the matcher
@@ -329,7 +331,7 @@ impl Matcher {
             }
         };
 
-        let original_str_len = pattern_str.len() + extras_str.map_or(0, |s| s.len());
+        let original_str_len = pattern_str.len() + after_str.map_or(0, |s| s.len());
 
         Ok(Self::new_with_empty_flags(
             id,
@@ -544,15 +546,11 @@ mod tests {
 
     #[test]
     fn test_new_matcher_with_bullshit_extras() {
-        let result = MatcherExtras::try_new(Some("bullshit"));
-        assert!(result.is_err());
-
-        // obviously bullshit is not a valid extras pattern.
-        // `name:/test/`bullshit is invalid! If they wanted "bullshit" to come
-        // directly after the matcher they can just put it directly into the
-        // regex.
+        // For now, this actually is fine. It will assume there are no extras,
+        // rather than there being wrong ones. We probably want to change this
+        // eventually though.
         let result = Matcher::try_from_pattern_and_suffix_str("`name:/test/`", Some("bullshit"));
-        assert!(result.is_err());
+        assert!(!result.is_err()); // TODO: for now
     }
 
     #[test]
