@@ -5,7 +5,7 @@ use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
 use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::ts_utils::{get_next_node, get_node_and_next_node};
+use crate::mdschema::validator::ts_utils::{get_next_node, get_node_and_next_node, is_text_node};
 
 static MATCHER_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?\/(?P<regex>.+?)\/").unwrap());
@@ -343,6 +343,7 @@ impl Matcher {
             .unwrap();
         let next_node = get_next_node(schema_cursor);
         let extras_str = next_node
+            .filter(|n| is_text_node(&n)) // don't bother if not text; extras must be in text
             .map(|n| n.utf8_text(schema_str.as_bytes()).unwrap())
             .and_then(|n| partition_at_special_chars(n).map(|(extras, _)| extras));
 

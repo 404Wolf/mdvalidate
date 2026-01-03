@@ -55,7 +55,6 @@ pub fn expected_input_nodes(
         correction_count += match at_literal_matcher(&schema_cursor, schema_str)? {
             Some(at_literal) => {
                 let has_extra_text = has_extra_text(&schema_cursor, schema_str);
-                let next_is_last_node = next_is_last_node(&schema_cursor);
 
                 if at_literal {
                     if !has_extra_text {
@@ -84,21 +83,6 @@ pub fn expected_input_nodes(
     }
 
     Ok(node_chunk_count - correction_count)
-}
-
-/// Whether the next node is the last node.
-///
-/// If there is no next node, returns Err.
-fn next_is_last_node(schema_cursor: &TreeCursor) -> Result<bool, ()> {
-    let mut schema_cursor = schema_cursor.clone();
-
-    if !schema_cursor.goto_next_sibling() {
-        Err(())
-    } else if schema_cursor.goto_next_sibling() {
-        Ok(false)
-    } else {
-        Ok(true)
-    }
 }
 
 /// Whether the next node is non text. If there is no next node, then this returns false.
@@ -136,7 +120,7 @@ fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> bool {
     let mut lookahead_cursor = schema_cursor.clone();
     match at_literal_matcher(schema_cursor, schema_str).unwrap_or(Some(false)) {
         Some(is_literal) => {
-            move_cursor_to_next_matcher(&mut lookahead_cursor, schema_str);
+            let had_next_matcher = move_cursor_to_next_matcher(&mut lookahead_cursor, schema_str);
 
             let text_after_matcher = text_after_matcher(schema_cursor, schema_str) != "";
 
@@ -144,7 +128,8 @@ fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> bool {
                 true
             } else if is_literal {
                 match at_literal_matcher(&lookahead_cursor, schema_str).unwrap_or(Some(false)) {
-                    Some(next_matcher_is_literal) => !next_matcher_is_literal,
+                    Some(next_matcher_is_literal) if had_next_matcher => !next_matcher_is_literal,
+                    Some(_) => text_after_matcher,
                     None => text_after_matcher,
                 }
             } else {
@@ -257,7 +242,8 @@ fn move_cursor_to_next_matcher(schema_cursor: &mut TreeCursor, schema_str: &str)
 mod tests {
     use crate::mdschema::validator::{
         node_walker::helpers::expected_input_nodes::{
-            expected_input_nodes, extras_after_matcher, has_extra_text, text_after_matcher,
+            at_literal_matcher, expected_input_nodes, extras_after_matcher, has_extra_text,
+            text_after_matcher,
         },
         ts_utils::parse_markdown,
     };
@@ -294,6 +280,14 @@ mod tests {
         extras_after_matcher(&schema_cursor, schema_str)
     }
 
+    fn get_at_literal_matcher(schema_str: &str) -> Option<bool> {
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child();
+        schema_cursor.goto_first_child();
+        at_literal_matcher(&schema_cursor, schema_str).unwrap()
+    }
+
     #[test]
     fn test_get_extras_after_matcher() {
         assert_eq!(get_extras_after_matcher("`test`!"), "!");
@@ -323,6 +317,7 @@ mod tests {
     #[test]
     fn test_has_extra_text_for_mixed() {
         assert!(get_has_extra_text("`test`!`test`"));
+        assert!(!get_has_extra_text("`test``test`!"));
     }
 
     #[test]
@@ -346,6 +341,12 @@ mod tests {
     }
 
     #[test]
+    fn test_expected_input_nodes_matcher_then_matcher() {
+        let schema_str = "`foo:/bar/``foo:/bar/`";
+        assert_eq!(get_expected_input_nodes(schema_str), 1);
+    }
+
+    #[test]
     fn test_expected_input_nodes_only_literal_matcher() {
         let schema_str = "`test`!";
         assert_eq!(get_expected_input_nodes(schema_str), 1);
@@ -361,6 +362,22 @@ mod tests {
     fn test_expected_input_nodes_literal_then_regular() {
         let schema_str = "`test`!`test:/bar/`";
         assert_eq!(get_expected_input_nodes(schema_str), 2);
+    }
+
+    #[test]
+    fn test_expected_input_nodes_regular_then_literal() {
+        let schema_str = "`test:/bar/` `test`!";
+        assert_eq!(get_expected_input_nodes(schema_str), 2);
+    }
+
+    #[test]
+    fn test_at_literal_matcher() {
+        assert!(get_at_literal_matcher("`test:/test/`!").unwrap());
+        assert!(get_at_literal_matcher("`test:/test/`! test").unwrap());
+        assert!(!get_at_literal_matcher("`test:/test/`").unwrap());
+        assert!(!get_at_literal_matcher("`test:/test/` test").unwrap());
+        assert!(!get_at_literal_matcher("`test:/test/``test:/test/`").unwrap());
+        assert!(get_at_literal_matcher("`test`!`test:/test/`").unwrap());
     }
 
     #[test]
