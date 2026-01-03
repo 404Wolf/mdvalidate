@@ -1,1 +1,4 @@
-# Test `name:/[a-zA-Z]+/`
+# Test `name:/[A-Za-z]+/`
+
+- test
+- `item:/test\d/`{,}

@@ -119,7 +119,6 @@ pub fn validate_code_vs_code(
             result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
                 error: error.clone(),
                 schema_index: *schema_lang_descendant_index,
-                input_index: *input_code_descendant_index,
             }));
             return result;
         }
@@ -203,7 +202,7 @@ fn extract_id_from_curly_braces(input: &str) -> Option<&str> {
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::{matcher::matcher::MatcherType, ts_utils::parse_markdown};
+    use crate::mdschema::validator::ts_utils::parse_markdown;
 
     use super::*;
 
@@ -230,12 +229,8 @@ mod tests {
             .unwrap();
         assert_eq!(result.id(), Some("id"));
 
-        match result.pattern() {
-            MatcherType::Regex(regex) => {
-                assert_eq!(regex.as_str(), "^test");
-            }
-            _ => panic!("Expected Regex pattern"),
-        }
+        // Check that the pattern displays correctly
+        assert_eq!(format!("{}", result.pattern()), "^test");
 
         assert!(result.extras().had_min_max());
         assert_eq!(result.extras().min_items(), Some(1));

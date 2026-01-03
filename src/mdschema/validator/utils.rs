@@ -3,11 +3,13 @@ use crate::mdschema::validator::ts_utils::new_markdown_parser;
 use serde_json::Value;
 #[cfg(test)]
 use tree_sitter::Tree;
-use tree_sitter::{Node, TreeCursor};
+use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
-    ts_utils::{extract_list_marker, is_ordered_list_marker, is_unordered_list_marker},
+    ts_utils::{
+        extract_list_marker, get_heading_kind, is_ordered_list_marker, is_unordered_list_marker,
+    },
 };
 
 /// Join two values together in-place.
@@ -47,9 +49,9 @@ pub fn compare_node_kinds(
     let schema_kind = schema_node.kind();
     let input_kind = input_node.kind();
 
-    // Special case! If they are both tight lists, check the first children of
-    // each of them, which are list markers. This will indicate whether they are
-    // the same type of list.
+    // If they are both tight lists, check the first children of each of them,
+    // which are list markers. This will indicate whether they are the same type
+    // of list.
     if schema_cursor.node().kind() == "tight_list" && input_cursor.node().kind() == "tight_list" {
         let schema_list_marker = extract_list_marker(schema_cursor, schema_str);
         let input_list_marker = extract_list_marker(input_cursor, input_str);
@@ -75,6 +77,22 @@ pub fn compare_node_kinds(
                     // TODO: find a better way to represent the *kind* of list in this error
                     expected: format!("{}({})", input_cursor.node().kind(), schema_list_marker),
                     actual: format!("{}({})", input_cursor.node().kind(), input_list_marker),
+                },
+            ));
+        }
+    }
+
+    if schema_cursor.node().kind() == "atx_heading" && input_cursor.node().kind() == "atx_heading" {
+        let schema_heading_kind = get_heading_kind(&schema_cursor);
+        let input_heading_kind = get_heading_kind(&input_cursor);
+
+        if schema_heading_kind != input_heading_kind {
+            return Some(ValidationError::SchemaViolation(
+                SchemaViolationError::NodeTypeMismatch {
+                    schema_index: schema_cursor.descendant_index(),
+                    input_index: input_cursor.descendant_index(),
+                    expected: format!("{}({})", input_cursor.node().kind(), schema_heading_kind),
+                    actual: format!("{}({})", input_cursor.node().kind(), input_heading_kind),
                 },
             ));
         }
@@ -146,12 +164,10 @@ pub fn compare_node_children_lengths(
 /// Compare text contents and return an error if they don't match
 ///
 /// # Arguments
-/// * `schema_node` - The schema node to compare against
-/// * `input_node` - The input node to compare
-/// * `schema_str` - The full schema string
-/// * `input_str` - The full input string
 /// * `schema_cursor` - The schema cursor, pointed at any node that has text contents
 /// * `input_cursor` - The input cursor, pointed at any node that has text contents
+/// * `schema_str` - The full schema string
+/// * `input_str` - The full input string
 /// * `is_partial_match` - Whether the match is partial
 /// * `strip_extras` - Whether to strip matcher extras from the start of the
 ///   input string. For example, if the input string is "{1,2}! test", when
@@ -160,8 +176,6 @@ pub fn compare_node_children_lengths(
 /// # Returns
 /// An optional validation error if the text contents don't match
 pub fn compare_text_contents(
-    schema_node: &Node,
-    input_node: &Node,
     schema_str: &str,
     input_str: &str,
     schema_cursor: &TreeCursor,
@@ -170,17 +184,24 @@ pub fn compare_text_contents(
     strip_extras: bool,
 ) -> Option<ValidationError> {
     let (schema_text, input_text) = match (
-        schema_node.utf8_text(schema_str.as_bytes()),
-        input_node.utf8_text(input_str.as_bytes()),
+        schema_cursor.node().utf8_text(schema_str.as_bytes()),
+        input_cursor.node().utf8_text(input_str.as_bytes()),
     ) {
         (Ok(schema), Ok(input)) => (schema, input),
         (Err(_), _) | (_, Err(_)) => return None, // Can't compare invalid UTF-8
     };
     let schema_text = if strip_extras {
-        schema_text
+        // TODO: this assumes that ! is the only extra when it is an extra
+        let stripped = schema_text
             .split_once(" ")
             .map(|(_extras, rest)| format!(" {}", rest))
-            .unwrap_or(schema_text.to_string())
+            .unwrap_or(schema_text.to_string());
+
+        if stripped.len() == 1 {
+            " ".into()
+        } else {
+            stripped
+        }
     } else {
         schema_text.to_string()
     };
@@ -353,6 +374,51 @@ mod tests {
 
         let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_compare_node_kinds_headings() {
+        let input_1 = "# test1";
+        let input_1_tree = parse_markdown(input_1).unwrap();
+        let mut input_1_cursor = input_1_tree.walk();
+
+        let input_2 = "# test2";
+        let input_2_tree = parse_markdown(input_2).unwrap();
+        let mut input_2_cursor = input_2_tree.walk();
+
+        input_1_cursor.goto_first_child();
+        input_2_cursor.goto_first_child();
+        assert_eq!(input_2_cursor.node().kind(), "atx_heading");
+        assert_eq!(input_1_cursor.node().kind(), "atx_heading");
+
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        assert!(result.is_none());
+
+        let input_2 = "## test2";
+        let input_2_tree = parse_markdown(input_2).unwrap();
+        let mut input_2_cursor = input_2_tree.walk();
+
+        input_2_cursor.goto_first_child();
+        assert_eq!(input_2_cursor.node().kind(), "atx_heading");
+        assert_eq!(input_1_cursor.node().kind(), "atx_heading");
+
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        assert!(result.is_some(), "Should detect heading level mismatch");
+
+        if let Some(ValidationError::SchemaViolation(SchemaViolationError::NodeTypeMismatch {
+            expected,
+            actual,
+            schema_index,
+            input_index,
+        })) = result
+        {
+            assert_eq!(expected, "atx_heading(atx_h2_marker)");
+            assert_eq!(actual, "atx_heading(atx_h1_marker)");
+            assert_eq!(input_index, 1);
+            assert_eq!(schema_index, 1);
+        } else {
+            panic!("Expected NodeTypeMismatch error for different heading levels");
+        }
     }
 
     #[test]

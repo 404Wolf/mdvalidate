@@ -6,7 +6,7 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::{
     errors::{ChildrenCount, SchemaError, SchemaViolationError, ValidationError},
     matcher::matcher::{Matcher, MatcherError},
-    node_walker::{ValidationResult, text_vs_text::validate_text_vs_text},
+    node_walker::{ValidationResult, validators::textual::validate_textual_vs_textual},
     ts_utils::{
         count_siblings, get_node_and_next_node, has_single_code_child, has_subsequent_node_of_kind,
         is_list_node, walk_to_list_item_content,
@@ -116,7 +116,6 @@ pub fn validate_list_vs_list(
                 result.add_error(ValidationError::SchemaError(
                     SchemaError::RepeatingMatcherUnbounded {
                         schema_index: schema_cursor.descendant_index(),
-                        input_index: input_cursor.descendant_index(),
                     },
                 ));
                 return result;
@@ -136,7 +135,7 @@ pub fn validate_list_vs_list(
                 walk_to_list_item_content(&mut input_cursor_paragraph);
                 walk_to_list_item_content(&mut schema_cursor_paragraph);
 
-                let new_matches = validate_text_vs_text(
+                let new_matches = validate_textual_vs_textual(
                     &input_cursor_paragraph,
                     &schema_cursor_paragraph,
                     schema_str,
@@ -349,7 +348,6 @@ pub fn validate_list_vs_list(
             result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
                 error: e,
                 schema_index: schema_cursor.descendant_index(),
-                input_index: input_cursor.descendant_index(),
             }));
         }
         // We didn't find a repeating matcher. In this case, just use text_vs_text and move on.
@@ -379,7 +377,7 @@ pub fn validate_list_vs_list(
                 return result;
             }
 
-            let list_item_match_result = validate_text_vs_text(
+            let list_item_match_result = validate_textual_vs_textual(
                 &input_cursor,
                 &schema_cursor,
                 schema_str,
@@ -528,8 +526,7 @@ mod tests {
 
     use crate::mdschema::validator::{
         errors::{ChildrenCount, NodeContentMismatchKind, SchemaViolationError, ValidationError},
-        matcher::matcher::MatcherType,
-        node_walker::list_vs_list::{
+        node_walker::validators::lists::{
             ensure_at_first_list_item, extract_repeated_matcher_from_list_item,
             validate_list_vs_list,
         },
@@ -639,7 +636,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(matcher.id(), Some("name".into()));
-        assert!(matches!(matcher.pattern(), MatcherType::Regex(_)));
+        // MatcherType is now always a regex pattern
+        assert!(!format!("{}", matcher.pattern()).is_empty());
     }
 
     #[test]

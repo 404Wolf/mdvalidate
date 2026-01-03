@@ -5,27 +5,36 @@ use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
 use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::ts_utils::get_node_and_next_node;
+use crate::mdschema::validator::ts_utils::{get_next_node, get_node_and_next_node, is_text_node};
 
-static MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?(\/(?P<regex>.+?)\/|(?P<special>ruler))").unwrap()
-});
+static MATCHER_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?\/(?P<regex>.+?)\/").unwrap());
 
 static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
 
 pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
     // We can have a ! instead of matcher extras to indicate that it is a literal match
-    LazyLock::new(|| Regex::new(r"^(([+\{\},0-9]*)|\!|)$").unwrap());
+    LazyLock::new(|| Regex::new(r"^(!|[+\{\},0-9]*)").unwrap());
 
-pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
+pub fn partition_at_special_chars(text: &str) -> Option<(&str, &str)> {
     let captures = MATCHERS_EXTRA_PATTERN.captures(text);
     match captures {
         Some(caps) => {
             let mat = caps.get(0)?;
-            Some(&text[mat.end()..])
+            Some((&text[..mat.end()], &text[mat.end()..]))
         }
-        None => Some(text),
+        None => Some(("", text)),
     }
+}
+
+/// Partition at where the special chars end, and then get everything that comes afterwards.
+pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
+    partition_at_special_chars(text).map(|(_, after)| after)
+}
+
+/// Partition at where the special chars end, and then get everything that comes before.
+pub fn get_full_special_chars_prefix(text: &str) -> Option<&str> {
+    partition_at_special_chars(text).map(|(before, _)| before)
 }
 
 /// Errors specific to matcher construction.
@@ -217,30 +226,13 @@ pub struct Matcher {
 }
 
 #[derive(Debug, Clone)]
-pub enum MatcherType {
-    Regex(Regex),
-    Special(SpecialMatchers),
+pub struct MatcherType {
+    regex: Regex,
 }
 
 impl fmt::Display for MatcherType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MatcherType::Regex(regex) => write!(f, "{}", regex.as_str()),
-            MatcherType::Special(special) => write!(f, "{}", special),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum SpecialMatchers {
-    Ruler,
-}
-
-impl fmt::Display for SpecialMatchers {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SpecialMatchers::Ruler => write!(f, "Ruler"),
-        }
+        write!(f, "{}", self.regex.as_str())
     }
 }
 
@@ -327,20 +319,43 @@ impl Matcher {
         ))
     }
 
-    /// Get an actual match string for a given text, if it matches.
-    pub fn match_str<'a>(&self, text: &'a str) -> Option<&'a str> {
-        match &self.pattern {
-            MatcherType::Regex(regex) => match regex.find(text) {
-                Some(mat) => Some(&text[mat.start()..mat.end()]),
-                None => None,
-            },
-            MatcherType::Special(SpecialMatchers::Ruler) => None,
-        }
+    /// Given a schema cursor pointing at a `code_span` node, attempt to extract a new `Matcher`.
+    ///
+    /// We try to treat the `code_span` as a valid matcher, and grab extras from a
+    /// proceeding text node if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `schema_cursor`: A reference to a schema cursor pointing at a `code_span` node.
+    /// * `schema_str`: The string contents of the schema.
+    ///
+    /// # Returns
+    ///
+    /// If we fail to construct a `Matcher`, we error with a corresponding
+    /// `MatcherError`, otherwise the new `Matcher`.
+    pub fn try_from_schema_cursor(
+        schema_cursor: &TreeCursor,
+        schema_str: &str,
+    ) -> Result<Self, MatcherError> {
+        let pattern_str = schema_cursor
+            .node()
+            .utf8_text(schema_str.as_bytes())
+            .unwrap();
+        let next_node = get_next_node(schema_cursor);
+        let extras_str = next_node
+            .filter(|n| is_text_node(&n)) // don't bother if not text; extras must be in text
+            .map(|n| n.utf8_text(schema_str.as_bytes()).unwrap())
+            .and_then(|n| partition_at_special_chars(n).map(|(extras, _)| extras));
+
+        Self::try_from_pattern_and_suffix_str(pattern_str, extras_str)
     }
 
-    /// Whether the matcher is for a ruler.
-    pub fn is_ruler(&self) -> bool {
-        matches!(self.pattern, MatcherType::Special(SpecialMatchers::Ruler))
+    /// Get an actual match string for a given text, if it matches.
+    pub fn match_str<'a>(&self, text: &'a str) -> Option<&'a str> {
+        match self.pattern.regex.find(text) {
+            Some(mat) => Some(&text[mat.start()..mat.end()]),
+            None => None,
+        }
     }
 
     /// Whether the matcher repeats.
@@ -396,43 +411,33 @@ fn extract_id_and_pattern(
     pattern: &str,
 ) -> Result<(Option<String>, MatcherType), MatcherError> {
     let id = captures.name("id").map(|m| m.as_str().to_string());
-    let regex_pattern = captures.name("regex").map(|m| m.as_str().to_string());
-    let special = captures.name("special").map(|m| m.as_str().to_string());
+    let regex_pattern = captures
+        .name("regex")
+        .map(|m| m.as_str().to_string())
+        .ok_or_else(|| {
+            MatcherError::MatcherInteriorRegexInvalid(format!(
+                "Expected format: 'id:/regex/', got {}",
+                pattern
+            ))
+        })?;
 
-    let matcher = match (regex_pattern, special) {
-        (Some(regex_pattern), None) => {
-            MatcherType::Regex(Regex::new(&format!("^{}", regex_pattern)).unwrap())
-        }
-        (None, Some(_)) => MatcherType::Special(SpecialMatchers::Ruler),
-        (Some(_), Some(_)) => {
-            return Err(MatcherError::MatcherInteriorRegexInvalid(format!(
-                "Matcher cannot be both regex and special type: {}",
-                pattern
-            )));
-        }
-        (None, None) => {
-            return Err(MatcherError::MatcherInteriorRegexInvalid(format!(
-                "Matcher must be either regex or special type: {}",
-                pattern
-            )));
-        }
+    let matcher = MatcherType {
+        regex: Regex::new(&format!("^{}", regex_pattern)).map_err(|e| {
+            MatcherError::MatcherInteriorRegexInvalid(format!("Invalid regex pattern: {}", e))
+        })?,
     };
+
     Ok((id, matcher))
 }
 
 impl fmt::Display for Matcher {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let pattern_str = match &self.pattern {
-            MatcherType::Regex(regex) => {
-                let regex_str = regex.as_str();
-                // The regex is stored as "^<pattern>", so remove the leading ^
-                if regex_str.starts_with('^') {
-                    &regex_str[1..]
-                } else {
-                    regex_str
-                }
-            }
-            MatcherType::Special(SpecialMatchers::Ruler) => "ruler",
+        let regex_str = self.pattern.regex.as_str();
+        // The regex is stored as "^<pattern>", so remove the leading ^
+        let pattern_str = if regex_str.starts_with('^') {
+            &regex_str[1..]
+        } else {
+            regex_str
         };
 
         match &self.id {
@@ -490,9 +495,9 @@ mod tests {
     use crate::mdschema::validator::{
         matcher::matcher::{
             MATCHERS_EXTRA_PATTERN, Matcher, MatcherError, MatcherExtras, MatcherExtrasError,
-            extract_text_matcher,
+            extract_text_matcher, partition_at_special_chars,
         },
-        ts_utils::new_markdown_parser,
+        ts_utils::{new_markdown_parser, parse_markdown},
     };
 
     #[test]
@@ -553,24 +558,6 @@ mod tests {
             Some("user_12345")
         );
         assert_eq!(matcher.match_str("tiny"), None); // Only 4 chars, should not match
-    }
-
-    #[test]
-    fn test_with_no_id() {
-        let matcher = Matcher::try_from_pattern_and_suffix_str("`ruler`", None).unwrap();
-        assert!(matcher.is_ruler());
-
-        // It doesn't match anything, since it's not a regex matcher. The only
-        // way to use a ruler matcher is by calling `.is_ruler()`
-        assert_eq!(matcher.id, None);
-        assert_eq!(matcher.match_str("ruler"), None);
-        assert_eq!(matcher.match_str("***"), None);
-        assert_eq!(matcher.match_str("!@#$"), None);
-
-        let matcher = Matcher::try_from_pattern_and_suffix_str("`id:ruler`", None).unwrap();
-        assert_eq!(matcher.id, Some("id".to_string()));
-        assert_eq!(matcher.match_str("ruler"), None);
-        assert_eq!(matcher.match_str("whatever"), None);
     }
 
     #[test]
@@ -739,5 +726,32 @@ mod tests {
             }
             _ => panic!("Expected WasLiteralCode error"),
         }
+    }
+
+    #[test]
+    fn get_everything_after_special_chars_single_exclamation() {
+        let result = partition_at_special_chars("! ");
+        assert_eq!(result, Some(("!", " ")));
+    }
+
+    #[test]
+    fn get_everything_after_special_chars_repeating() {
+        let result = partition_at_special_chars("{,1} hi");
+        assert_eq!(result, Some(("{,1}", " hi")));
+    }
+
+    #[test]
+    fn test_try_from_schema_cursor() {
+        let schema_str = "`test:/\\w+/`{1,2}";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        schema_cursor.goto_first_child(); // document -> paragraph
+        schema_cursor.goto_first_child(); // paragraph -> code_span
+        assert_eq!(schema_cursor.node().kind(), "code_span");
+
+        let matcher = Matcher::try_from_schema_cursor(&schema_cursor, schema_str).unwrap();
+        assert_eq!(matcher.pattern().to_string(), r"\w+");
+        assert_eq!(matcher.id(), Some("test"));
     }
 }
