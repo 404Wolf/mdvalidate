@@ -7,6 +7,8 @@ rustPlatform.buildRustPackage {
 
   cargoHash = "sha256-B1qv5LPlttcv7xrdHwne7j+nQc/yBhkahQThfKjfOIs=";
 
+  cargoBuildFlags = [ "--bin" "mdv" ];
+
   # TODO: for now, until we get them all passing!
   doCheck = false;
 

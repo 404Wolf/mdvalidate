@@ -7,6 +7,8 @@ pkgs.pkgsCross.musl64.rustPlatform.buildRustPackage {
 
   cargoHash = "sha256-HCxLc3M3Tza1pVlLOPgmiZu6Ra2oFzSCmwSSTuQW+u0=";
 
+  cargoBuildFlags = [ "--bin" "mdv" ];
+
   env = {
     RUSTFLAGS = "-C target-feature=+crt-static -C link-self-contained=yes";
   };
