@@ -3,7 +3,7 @@ rustPlatform.buildRustPackage {
   pname = "mdvalidate";
   version = "0.1.0";
 
-  src = ../.;
+  src = ../../.;
 
   cargoHash = "sha256-B1qv5LPlttcv7xrdHwne7j+nQc/yBhkahQThfKjfOIs=";
 

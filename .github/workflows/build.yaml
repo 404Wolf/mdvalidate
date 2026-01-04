@@ -22,3 +22,4 @@ jobs:
         with:
           artifacts: "result/*"
           draft: true
+          tag: "v0.0.0-test"
