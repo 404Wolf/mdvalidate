@@ -129,17 +129,8 @@ We're validating:
 
 ---
 
-## Building
+## Get started!
 
-You can build `mdvalidate` with the `nix` build system using `nix build github:404wolf/mdvalidate`.
+You can build `mdvalidate` with `nix` using `nix build github:404wolf/mdvalidate`.
 
-You can build our design document or software requirements specification with typst, using
-
-```bash
-typst compile docs/design_document.typ
-typst compile docs/software_requirements_specification.typ
-```
-
-## Authors
-
-By *Wolf Mermelstein* and *Alessandro Mason*.
+Alternatively download a pre-built binary from releases.
