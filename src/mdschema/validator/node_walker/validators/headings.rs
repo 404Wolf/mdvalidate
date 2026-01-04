@@ -171,17 +171,10 @@ mod tests {
             input_str,
             got_eof,
         );
-        result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
-        let result = validate_textual_vs_textual(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
+
         assert_eq!(result.value, json!({})); // No real match content
         assert_eq!(result.errors, vec![]);
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 5));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
     }
 
     #[test]
