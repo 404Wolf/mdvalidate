@@ -71,7 +71,6 @@ impl Validator {
     /// (which this updates).
     #[tracing::instrument(skip(self, input))]
     fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), ValidationError> {
-
         // Update internal state of the last input string
         self.state.set_last_input_str(input.to_string());
 
@@ -531,10 +530,7 @@ Version: 1
 "; // "Wrong" instead of "Nested"
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            !errors.is_empty(),
-            "Expected validation error for nested list mismatch"
-        );
+        assert_ne!(errors, vec![]);
     }
 
     #[test]

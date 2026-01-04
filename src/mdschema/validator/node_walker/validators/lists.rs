@@ -351,7 +351,7 @@ pub fn validate_list_vs_list(
                 schema_index: schema_cursor.descendant_index(),
             }));
         }
-        // We didn't find a repeating matcher. In this case, just use `validate_textual_vs_textual` and move on.
+        // We didn't find a repeating matcher. In this case, just use validate the insides directly and move on.
         None => {
             trace!(
                 "No repeated matcher found, using textual validation. Current node kinds: {:?} and {:?}",
@@ -386,6 +386,37 @@ pub fn validate_list_vs_list(
                 got_eof,
             );
             result.join_other_result(&list_item_match_result);
+
+            {
+                // Recurse down into the next list if there is one
+                let mut input_cursor = input_cursor.clone();
+                let mut schema_cursor = schema_cursor.clone();
+
+                input_cursor.goto_last_child();
+                schema_cursor.goto_last_child();
+
+                if let Some(error) =
+                    compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str)
+                {
+                    result.add_error(error);
+                    return result;
+                }
+
+                if is_list_node(&input_cursor.node()) {
+                    // and we know that schema is the same
+                    input_cursor.goto_first_child();
+                    schema_cursor.goto_first_child();
+
+                    let deeper_result = validate_list_vs_list(
+                        &input_cursor,
+                        &schema_cursor,
+                        schema_str,
+                        input_str,
+                        got_eof,
+                    );
+                    result.join_other_result(&deeper_result);
+                }
+            }
 
             // Recurse on next sibling if available!
             if input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {
@@ -723,7 +754,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_list_vs_list_literal_list_items() {
+    fn test_validate_list_vs_list_literal_list_items_matching() {
         let schema_str = "- test1\n- test2";
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
@@ -743,8 +774,10 @@ mod tests {
             "Expected no errors, got: {:?}",
             result.errors
         );
+    }
 
-        // Test with different list items (should have errors)
+    #[test]
+    fn test_validate_list_vs_list_literal_list_items_different() {
         let input_str = "- test1\n- different";
         let input_tree = parse_markdown(input_str).unwrap();
         let mut input_cursor = input_tree.walk();
@@ -767,6 +800,127 @@ mod tests {
             }) => {}
             _ => panic!("Unexpected error type"),
         }
+    }
+
+    #[test]
+    fn test_validate_list_vs_list_literal_list_items_with_nesting_mismatch() {
+        let schema_str = "- test1\n  - nested1";
+        // (document[0]0..20)
+        // └─ (tight_list[1]0..19)
+        //    └─ (list_item[2]0..19)
+        //       ├─ (list_marker[3]0..1)
+        //       ├─ (paragraph[4]2..7)
+        //       │  └─ (text[5]2..7)
+        //       └─ (tight_list[6]10..19)
+        //          └─ (list_item[7]10..19)
+        //             ├─ (list_marker[8]10..11)
+        //             └─ (paragraph[9]12..19)
+        //                └─ (text[10]12..19)
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "- test1\n  - nested_different";
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(
+            !result.errors.is_empty(),
+            "Expected errors with mismatched nested literal items"
+        );
+
+        match &result.errors[0] {
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
+                kind: NodeContentMismatchKind::Literal,
+                expected,
+                actual,
+                ..
+            }) => {
+                assert_eq!(expected, "nested1");
+                assert_eq!(actual, "nested_different");
+            }
+            _ => panic!("Unexpected error type: {:?}", result.errors[0]),
+        }
+    }
+
+    #[test]
+    fn test_validate_list_vs_list_literal_list_items_with_nesting_mismatch_and_more() {
+        let schema_str = "- test1\n  - nested1\n- test2";
+        // (document[0]0..28)
+        // └─ (tight_list[1]0..27)
+        //    ├─ (list_item[2]0..19)
+        //    │  ├─ (list_marker[3]0..1)
+        //    │  ├─ (paragraph[4]2..7)
+        //    │  │  └─ (text[5]2..7)
+        //    │  └─ (tight_list[6]10..19)
+        //    │     └─ (list_item[7]10..19)
+        //    │        ├─ (list_marker[8]10..11)
+        //    │        └─ (paragraph[9]12..19)
+        //    │           └─ (text[10]12..19)
+        //    └─ (list_item[11]20..27)
+        //       ├─ (list_marker[12]20..21)
+        //       └─ (paragraph[13]22..27)
+        //          └─ (text[14]22..27)
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "- test1\n  - nested1\n- test3";
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(
+            !result.errors.is_empty(),
+            "Expected errors with mismatched nested literal items"
+        );
+
+        match &result.errors[0] {
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
+                kind: NodeContentMismatchKind::Literal,
+                expected,
+                actual,
+                ..
+            }) => {
+                assert_eq!(expected, "test2");
+                assert_eq!(actual, "test3");
+            }
+            _ => panic!("Unexpected error type: {:?}", result.errors[0]),
+        }
+    }
+
+    #[test]
+    fn test_validate_list_vs_list_literal_list_items_with_nesting() {
+        let schema_str = "- test1\n- test2\n  - nested1";
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = "- test1\n- test2\n  - nested1";
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors with nested literal items, got: {:?}",
+            result.errors
+        );
     }
 
     #[test]
