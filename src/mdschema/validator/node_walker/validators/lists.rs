@@ -1835,4 +1835,59 @@ Footer: test (footer isn't validated with_list_vs_list)
 
         assert!(result.errors.is_empty());
     }
+
+    #[test]
+    fn test_validate_list_vs_list_with_nesting_lists() {
+        let schema_str = r#"
+- `test:/\w+/`{2,2}
+  - `test2:/\w+/`{1,1}
+"#;
+        // (document[0]0..44)
+        // └─ (tight_list[1]0..42)
+        //    └─ (list_item[2]0..42)
+        //       ├─ (list_marker[3]0..1)
+        //       ├─ (paragraph[4]2..19)
+        //       │  ├─ (code_span[5]2..14)
+        //       │  │  └─ (text[6]3..13)
+        //       │  └─ (text[7]14..19)
+        //       └─ (tight_list[8]22..42)
+        //          └─ (list_item[9]22..42)
+        //             ├─ (list_marker[10]22..23)
+        //             └─ (paragraph[11]24..42)
+        //                ├─ (code_span[12]24..37)
+        //                │  └─ (text[13]25..36)
+        //                └─ (text[14]37..42)
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- test1
+- test2
+  - deepy
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert_eq!(result.errors, vec![]);
+
+        assert_eq!(
+            result.value,
+            json!({
+                "test": [
+                    "test1",
+                    "test2",
+                    { "test2": [ "deepy" ] }
+                ]
+            })
+        );
+    }
 }

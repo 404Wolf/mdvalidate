@@ -58,6 +58,27 @@ pub fn validate_textual_vs_textual(
         );
     }
 
+    validate_textual_vs_textual_direct(input_cursor, schema_cursor, schema_str, input_str, got_eof)
+}
+
+/// Validate two textual elements directly without checking for matchers.
+///
+/// This performs the actual node kind and text content comparison without
+/// delegating to `validate_matcher_vs_text`.
+#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
+    i = %input_cursor.descendant_index(),
+    s = %schema_cursor.descendant_index(),
+), ret)]
+#[track_caller]
+pub fn validate_textual_vs_textual_direct(
+    input_cursor: &TreeCursor,
+    schema_cursor: &TreeCursor,
+    schema_str: &str,
+    input_str: &str,
+    got_eof: bool,
+) -> ValidationResult {
+    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+
     debug_assert!(
         both_are_textual_nodes(&schema_cursor.node(), &input_cursor.node()),
         "got schema kind: {:?}, input kind: {:?}",
@@ -167,94 +188,112 @@ pub fn validate_matcher_vs_text<'a>(
     let mut schema_cursor_at_prefix = schema_cursor.clone();
     schema_cursor_at_prefix.goto_first_child();
 
-    // Only do prefix verification if there is a prefix
-    if let Some(schema_prefix_node) = schema_prefix_node {
-        trace!("Validating prefix before matcher");
-
-        let schema_prefix_str = &schema_str[schema_prefix_node.byte_range()];
-
-        // Calculate how much input we have available from the current offset
-        let input_prefix_len = input_str.len() - input_byte_offset;
-
-        // Check that the input extends enough that we can cover the full prefix.
-        if input_prefix_len >= schema_prefix_str.len() {
-            // We have enough input to compare the full prefix
-            let input_prefix_str =
-                &input_str[input_byte_offset..input_byte_offset + schema_prefix_str.len()];
-
-            // Do the actual prefix comparison
-            if schema_prefix_str != input_prefix_str {
-                trace!(
-                    "Prefix mismatch: expected '{}', got '{}'",
-                    schema_prefix_str, input_prefix_str
-                );
-                result.add_error(ValidationError::SchemaViolation(
-                    SchemaViolationError::NodeContentMismatch {
-                        schema_index: schema_cursor_at_prefix.descendant_index(),
-                        input_index: input_cursor_descendant_index,
-                        expected: schema_prefix_str.into(),
-                        actual: input_prefix_str.into(),
-                        kind: NodeContentMismatchKind::Prefix,
-                    },
-                ));
-
-                // If prefix validation fails don't try to validate further.
-                // TODO: In the future we could attempt to validate further anyway!
-                result.sync_cursor_pos(&schema_cursor, &input_cursor);
-
-                return result;
-            }
-
-            trace!("Prefix matched successfully");
-            input_byte_offset += schema_prefix_node.byte_range().len();
-        } else if got_eof {
-            // We've reached EOF, so the input is complete and too short
-            let input_prefix_str = &input_str[input_byte_offset..];
-
-            trace!(
-                "Prefix mismatch (input too short at EOF): expected '{}', got '{}'",
-                schema_prefix_str, input_prefix_str
+    match at_text_and_next_at_literal_matcher(&schema_cursor, schema_str) {
+        Ok(Some(true)) => {
+            let prefix_result = validate_textual_vs_textual_direct(
+                &input_cursor,
+                &schema_cursor,
+                schema_str,
+                input_str,
+                got_eof,
             );
-
-            result.add_error(ValidationError::SchemaViolation(
-                SchemaViolationError::NodeContentMismatch {
-                    schema_index: schema_cursor_at_prefix.descendant_index(),
-                    input_index: input_cursor_descendant_index,
-                    expected: schema_prefix_str.into(),
-                    actual: input_prefix_str.into(),
-                    kind: NodeContentMismatchKind::Prefix,
-                },
-            ));
-
-            result.sync_cursor_pos(&schema_cursor, &input_cursor);
+            result.join_other_result(&prefix_result);
+        }
+        Err(error) => {
+            result.add_error(error);
             return result;
-        } else {
-            // We haven't reached EOF yet, so partial match is OK
-            // Check if what we have so far matches
-            let input_prefix_str = &input_str[input_byte_offset..];
-            let schema_prefix_partial = &schema_prefix_str[..input_prefix_str.len()];
+        }
+        _ => {
+            // Only do prefix verification if there is a prefix
+            if let Some(schema_prefix_node) = schema_prefix_node {
+                trace!("Validating prefix before matcher");
 
-            trace!("Input prefix not long enough, but waiting at end of input");
+                let schema_prefix_str = &schema_str[schema_prefix_node.byte_range()];
 
-            if schema_prefix_partial != input_prefix_str {
-                trace!(
-                    "Prefix partial mismatch: expected '{}', got '{}'",
-                    schema_prefix_partial, input_prefix_str
-                );
-                result.add_error(ValidationError::SchemaViolation(
-                    SchemaViolationError::NodeContentMismatch {
-                        schema_index: schema_cursor_at_prefix.descendant_index(),
-                        input_index: input_cursor_descendant_index,
-                        expected: schema_prefix_str.into(),
-                        actual: input_prefix_str.into(),
-                        kind: NodeContentMismatchKind::Prefix,
-                    },
-                ));
+                // Calculate how much input we have available from the current offset
+                let input_prefix_len = input_str.len() - input_byte_offset;
+
+                // Check that the input extends enough that we can cover the full prefix.
+                if input_prefix_len >= schema_prefix_str.len() {
+                    // We have enough input to compare the full prefix
+                    let input_prefix_str =
+                        &input_str[input_byte_offset..input_byte_offset + schema_prefix_str.len()];
+
+                    // Do the actual prefix comparison
+                    if schema_prefix_str != input_prefix_str {
+                        trace!(
+                            "Prefix mismatch: expected '{}', got '{}'",
+                            schema_prefix_str, input_prefix_str
+                        );
+                        result.add_error(ValidationError::SchemaViolation(
+                            SchemaViolationError::NodeContentMismatch {
+                                schema_index: schema_cursor_at_prefix.descendant_index(),
+                                input_index: input_cursor_descendant_index,
+                                expected: schema_prefix_str.into(),
+                                actual: input_prefix_str.into(),
+                                kind: NodeContentMismatchKind::Prefix,
+                            },
+                        ));
+
+                        // If prefix validation fails don't try to validate further.
+                        // TODO: In the future we could attempt to validate further anyway!
+                        result.sync_cursor_pos(&schema_cursor, &input_cursor);
+
+                        return result;
+                    }
+
+                    trace!("Prefix matched successfully");
+                    input_byte_offset += schema_prefix_node.byte_range().len();
+                } else if got_eof {
+                    // We've reached EOF, so the input is complete and too short
+                    let input_prefix_str = &input_str[input_byte_offset..];
+
+                    trace!(
+                        "Prefix mismatch (input too short at EOF): expected '{}', got '{}'",
+                        schema_prefix_str, input_prefix_str
+                    );
+
+                    result.add_error(ValidationError::SchemaViolation(
+                        SchemaViolationError::NodeContentMismatch {
+                            schema_index: schema_cursor_at_prefix.descendant_index(),
+                            input_index: input_cursor_descendant_index,
+                            expected: schema_prefix_str.into(),
+                            actual: input_prefix_str.into(),
+                            kind: NodeContentMismatchKind::Prefix,
+                        },
+                    ));
+
+                    result.sync_cursor_pos(&schema_cursor, &input_cursor);
+                    return result;
+                } else {
+                    // We haven't reached EOF yet, so partial match is OK
+                    // Check if what we have so far matches
+                    let input_prefix_str = &input_str[input_byte_offset..];
+                    let schema_prefix_partial = &schema_prefix_str[..input_prefix_str.len()];
+
+                    trace!("Input prefix not long enough, but waiting at end of input");
+
+                    if schema_prefix_partial != input_prefix_str {
+                        trace!(
+                            "Prefix partial mismatch: expected '{}', got '{}'",
+                            schema_prefix_partial, input_prefix_str
+                        );
+                        result.add_error(ValidationError::SchemaViolation(
+                            SchemaViolationError::NodeContentMismatch {
+                                schema_index: schema_cursor_at_prefix.descendant_index(),
+                                input_index: input_cursor_descendant_index,
+                                expected: schema_prefix_str.into(),
+                                actual: input_prefix_str.into(),
+                                kind: NodeContentMismatchKind::Prefix,
+                            },
+                        ));
+                    }
+
+                    result.sync_cursor_pos(&schema_cursor, &input_cursor);
+
+                    return result;
+                }
             }
-
-            result.sync_cursor_pos(&schema_cursor, &input_cursor);
-
-            return result;
         }
     }
 
@@ -287,16 +326,6 @@ pub fn validate_matcher_vs_text<'a>(
     let input_after_prefix =
         input_str[input_byte_offset..input_cursor.node().byte_range().end].to_string();
 
-    dbg!(
-        input_cursor.node().to_sexp(),
-        schema_cursor.node().to_sexp(),
-        input_cursor.node().utf8_text(input_str.as_bytes()).unwrap(),
-        schema_cursor
-            .node()
-            .utf8_text(schema_str.as_bytes())
-            .unwrap(),
-        &matcher
-    );
     match matcher {
         Ok(matcher) => {
             // Actually perform the match for the matcher
@@ -360,8 +389,17 @@ pub fn validate_matcher_vs_text<'a>(
         }
         Err(error) => match error {
             MatcherError::WasLiteralCode => {
-                // Move the input to the code node now
-                input_cursor.reset_to(&input_cursor_at_prefix);
+                // Move the schema/input to the code node before validating literal matchers.
+                let mut schema_cursor = schema_cursor.clone();
+                let mut input_cursor = input_cursor_at_prefix.clone();
+
+                if schema_prefix_node.is_some() {
+                    schema_cursor.goto_next_sibling();
+                    if !input_cursor.goto_next_sibling() {
+                        result.sync_cursor_pos(&schema_cursor, &input_cursor);
+                        return result;
+                    }
+                }
 
                 // Delegate to the literal matcher validator
                 return validate_literal_matcher_vs_textual(
@@ -472,6 +510,47 @@ pub fn validate_matcher_vs_text<'a>(
     }
 
     result
+}
+
+fn at_literal_matcher(
+    schema_cursor: &TreeCursor,
+    schema_str: &str,
+) -> Result<Option<bool>, ValidationError> {
+    if !is_code_node(&schema_cursor.node()) {
+        return Ok(None);
+    }
+
+    match Matcher::try_from_schema_cursor(schema_cursor, schema_str) {
+        Ok(_) => Ok(Some(false)),
+        Err(MatcherError::WasLiteralCode) => Ok(Some(true)),
+        Err(error) => Err(ValidationError::SchemaError(SchemaError::MatcherError {
+            error,
+            schema_index: schema_cursor.descendant_index(),
+        })),
+    }
+}
+
+fn at_text_and_next_at_literal_matcher(
+    schema_cursor: &TreeCursor,
+    schema_str: &str,
+) -> Result<Option<bool>, ValidationError> {
+    if !is_text_node(&schema_cursor.node()) {
+        return Ok(None);
+    }
+
+    let mut next_cursor = schema_cursor.clone();
+    if !next_cursor.goto_next_sibling() || !is_code_node(&next_cursor.node()) {
+        return Ok(None);
+    }
+
+    match Matcher::try_from_schema_cursor(&next_cursor, schema_str) {
+        Ok(_) => Ok(Some(false)),
+        Err(MatcherError::WasLiteralCode) => Ok(Some(true)),
+        Err(error) => Err(ValidationError::SchemaError(SchemaError::MatcherError {
+            error,
+            schema_index: schema_cursor.descendant_index(),
+        })),
+    }
 }
 
 /// Validate a literal matcher against an input string.
@@ -1022,6 +1101,44 @@ mod tests {
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({}));
         assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
+    }
+
+    #[test]
+    fn test_validate_matcher_vs_text_literal_matcher_with_prefix() {
+        let schema_str = "prefix `test`! foo";
+        // (document[0]0..20)
+        // └─ (paragraph[1]0..19)
+        //    ├─ (text[2]0..7)
+        //    ├─ (code_span[3]7..13)
+        //    │  └─ (text[4]8..12)
+        //    └─ (text[5]13..19)
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+
+        let input_str = "prefix `test` foo";
+        // (document[0]0..19)
+        // └─ (paragraph[1]0..18)
+        //    ├─ (text[2]0..7)
+        //    ├─ (code_span[3]7..13)
+        //    │  └─ (text[4]8..12)
+        //    └─ (text[5]13..18)
+
+        let input_tree = parse_markdown(input_str).unwrap();
+
+        let mut schema_cursor = schema_tree.walk();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // document -> paragraph
+        schema_cursor.goto_first_child(); // paragraph -> text (prefix)
+        input_cursor.goto_first_child(); //  paragraph -> text (prefix)
+
+        let result =
+            validate_matcher_vs_text(&input_cursor, &schema_cursor, schema_str, input_str, true);
+
+        assert_eq!(result.errors, vec![]);
+        assert_eq!(result.value, json!({}));
+        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(5, 5));
     }
 
     #[test]

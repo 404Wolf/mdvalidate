@@ -1,3 +1,5 @@
+use std::panic;
+
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
@@ -84,15 +86,26 @@ pub fn validate_textual_container_vs_textual_container(
         }
     }
 
-    let expected_input_node_count = match expected_input_nodes(&schema_cursor, schema_str) {
-        Ok(expected_input_node_count) => expected_input_node_count,
-        Err(error) => {
-            result.add_error(error);
-            return result;
-        }
+    let (expected_input_node_count, actual_input_node_count) = {
+        let mut schema_cursor = schema_cursor.clone();
+        schema_cursor.goto_first_child();
+
+        let mut input_cursor = input_cursor.clone();
+        input_cursor.goto_first_child();
+
+        let expected_input_node_count = match expected_input_nodes(&schema_cursor, schema_str) {
+            Ok(expected_input_node_count) => expected_input_node_count,
+            Err(error) => {
+                result.add_error(error);
+                return result;
+            }
+        };
+
+        let actual_input_node_count = count_siblings(&input_cursor) + 1; // including the node we are currently at
+
+        (expected_input_node_count, actual_input_node_count)
     };
 
-    let actual_input_node_count = count_siblings(&input_cursor) + 1; // including the node we are currently at
     if (actual_input_node_count != expected_input_node_count) && got_eof {
         result.add_error(ValidationError::SchemaViolation(
             SchemaViolationError::ChildrenLengthMismatch {
@@ -304,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_textual_vs_textual_with_literal_matcher() {
+    fn test_validate_textual_container_vs_textual_container_with_literal_matcher() {
         let schema_str = "`code`! test";
         let input_str = "`code` test";
 
@@ -330,7 +343,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_textual_vs_textual_header_content() {
+    fn test_validate_textual_container_vs_textual_container_header_content() {
         let schema_str = "# Test Wolf";
         // (document[0]0..12)
         // └─ (atx_heading[1]0..11)
@@ -375,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_textual_vs_textual_header_content_and_matcher() {
+    fn test_validate_textual_container_vs_textual_container_header_content_and_matcher() {
         let schema_str = "# Test `name:/[a-zA-Z]+/`";
         // (document[0]0..26)
         // └─ (atx_heading[1]0..25)
@@ -423,7 +436,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_textual_vs_textual_with_incomplete_matcher() {
+    fn test_validate_textual_container_vs_textual_container_with_incomplete_matcher() {
         let schema_str = "prefix `test:/test/`";
         // (document[0]0..21)
         // └─ (paragraph[1]0..20)

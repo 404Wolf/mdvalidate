@@ -238,7 +238,7 @@ mod tests {
         mdschema::validator::{
             errors::{ChildrenCount, SchemaViolationError, ValidationError},
             node_walker::node_vs_node::validate_node_vs_node,
-            ts_utils::parse_markdown,
+            ts_utils::parse_markdown, utils::test_logging,
         },
     };
 
@@ -263,11 +263,7 @@ mod tests {
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(
-            result.errors.is_empty(),
-            "Expected no errors, got: {:?}",
-            result.errors
-        );
+        assert_eq!(result.errors, vec![]);
 
         assert_eq!(
             result.value,
