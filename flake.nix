@@ -41,7 +41,8 @@
       {
         packages = rec {
           default = build;
-          build = pkgs.callPackage ./nix/build.nix { };
+          build = pkgs.callPackage ./nix/build { };
+          build-static = pkgs.callPackage ./nix/build { };
         };
 
         devShells.default = pkgs.mkShell {
