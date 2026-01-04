@@ -6,7 +6,8 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::matcher::matcher::{Matcher, MatcherError};
 use crate::mdschema::validator::matcher::matcher_extras::get_after_extras;
 use crate::mdschema::validator::ts_utils::{
-    both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_text_node,
+    both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_last_node,
+    is_text_node,
 };
 use crate::mdschema::validator::validator_state::NodePosPair;
 use crate::mdschema::validator::{
@@ -36,8 +37,6 @@ pub fn validate_textual_vs_textual(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
-
     // If the schema is pointed at a code node, or a text node followed by a
     // code node, validate it using `validate_matcher_vs_text`
 
@@ -145,22 +144,26 @@ pub fn validate_matcher_vs_text<'a>(
 
     let input_node = input_cursor.node();
 
-    let schema_prefix_node = {
-        if is_code_node(&schema_cursor.node()) {
-            None
-        } else if is_text_node(&schema_cursor.node()) {
-            Some(schema_cursor.node())
+    let schema_cursor_is_code_node = is_code_node(&schema_cursor.node());
+    let schema_prefix_node = if schema_cursor_is_code_node {
+        let mut prev_cursor = schema_cursor.clone();
+        if prev_cursor.goto_previous_sibling() && is_text_node(&prev_cursor.node()) {
+            Some(prev_cursor.node())
         } else {
-            unreachable!(
-                "only should be called with `code_span` or text but got {:?}",
-                schema_cursor.node()
-            )
+            None
         }
+    } else if is_text_node(&schema_cursor.node()) {
+        Some(schema_cursor.node())
+    } else {
+        unreachable!(
+            "only should be called with `code_span` or text but got {:?}",
+            schema_cursor.node()
+        )
     };
 
     let schema_suffix_node = {
-        // If there is a prefix, this comes two nodes later
-        if schema_prefix_node.is_some() {
+        // If there is a prefix and we're at the prefix, this comes two nodes later.
+        if schema_prefix_node.is_some() && !schema_cursor_is_code_node {
             get_node_n_nodes_ahead(&schema_cursor, 2)
         } else {
             get_next_node(&schema_cursor)
@@ -170,7 +173,7 @@ pub fn validate_matcher_vs_text<'a>(
     let matcher = {
         // Make sure we create the matcher when we are pointing at a `code_span`
         let mut schema_cursor = schema_cursor.clone();
-        if schema_prefix_node.is_some() {
+        if schema_prefix_node.is_some() && !schema_cursor_is_code_node {
             schema_cursor.goto_next_sibling();
         }
         Matcher::try_from_schema_cursor(&schema_cursor, schema_str)
@@ -186,6 +189,12 @@ pub fn validate_matcher_vs_text<'a>(
 
     // Preserve the cursor where it's pointing at the prefix node for error reporting
     let mut schema_cursor_at_prefix = schema_cursor.clone();
+    if schema_cursor_is_code_node {
+        let mut prev_cursor = schema_cursor.clone();
+        if prev_cursor.goto_previous_sibling() && is_text_node(&prev_cursor.node()) {
+            schema_cursor_at_prefix = prev_cursor;
+        }
+    }
     schema_cursor_at_prefix.goto_first_child();
 
     match at_text_and_next_at_literal_matcher(&schema_cursor, schema_str) {

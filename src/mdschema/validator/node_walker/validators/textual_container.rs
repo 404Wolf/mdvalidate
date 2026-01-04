@@ -126,15 +126,12 @@ pub fn validate_textual_container_vs_textual_container(
     schema_cursor.goto_first_child();
 
     loop {
-        let has_next_pair =
-            input_cursor.clone().goto_next_sibling() && schema_cursor.clone().goto_next_sibling();
-
         let pair_result = validate_textual_vs_textual(
             &input_cursor,
             &schema_cursor,
             schema_str,
             input_str,
-            has_next_pair || got_eof, // if we have more pairs, then eof=true. Otherwise, eof = got_eof
+            got_eof,
         );
 
         result.join_other_result(&pair_result);

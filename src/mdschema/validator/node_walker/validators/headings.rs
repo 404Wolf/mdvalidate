@@ -2,7 +2,6 @@ use log::trace;
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
-use crate::helpers::node_print::PrettyPrint;
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::textual_container::validate_textual_container_vs_textual_container;
