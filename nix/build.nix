@@ -1,14 +1,16 @@
-{ lib, rustPlatform }:
-rustPlatform.buildRustPackage {
+{ lib, pkgs }:
+
+pkgs.pkgsCross.musl64.rustPlatform.buildRustPackage {
   pname = "mdvalidate";
   version = "0.1.0";
 
   src = ../.;
 
-  cargoHash = "sha256-B1qv5LPlttcv7xrdHwne7j+nQc/yBhkahQThfKjfOIs=";
+  cargoHash = "sha256-HCxLc3M3Tza1pVlLOPgmiZu6Ra2oFzSCmwSSTuQW+u0=";
 
-  # TODO: for now, until we get them all passing!
-  doCheck = false;
+  env = {
+    RUSTFLAGS = "-C target-feature=+crt-static";
+  };
 
   meta = {
     description = "Markdown Schema validator";
