@@ -1047,6 +1047,51 @@ Footer: test (footer isn't validated with_list_vs_list)
     }
 
     #[test]
+    fn test_validate_list_vs_list_literal_literal_matcher_matcher_literal_literal_literal() {
+        let schema_str = r#"
+- literal1
+- literal2
+- `matcher1:/match1_\d/`{1,1}
+- `matcher2:/match2_\d/`{1,1}
+- literal3
+- literal4
+- literal5
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- literal1
+- literal2
+- match1_1
+- match2_1
+- literal3
+- literal4
+- literal5
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
+        assert_eq!(
+            result.value,
+            json!({"matcher1": ["match1_1"], "matcher2": ["match2_1"]})
+        );
+    }
+
+    #[test]
     fn test_validate_list_vs_list_literal_chunk_mismatch_before_repeated_matcher() {
         let schema_str = r#"
 - literal1
