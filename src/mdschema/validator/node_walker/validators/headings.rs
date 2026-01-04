@@ -135,7 +135,8 @@ mod tests {
         let input_tree = parse_markdown(input_str).unwrap();
         let mut input_cursor = input_tree.walk();
 
-        input_cursor.goto_first_child();
+        input_cursor.goto_first_child(); // document -> paragraph
+        input_cursor.goto_first_child(); // paragraph -> text
         assert!(is_textual_node(&input_cursor.node()));
 
         ensure_at_heading_content(&mut input_cursor).unwrap_err();
