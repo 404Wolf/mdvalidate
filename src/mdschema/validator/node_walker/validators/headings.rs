@@ -2,11 +2,12 @@ use log::trace;
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
+use crate::helpers::node_print::PrettyPrint;
 use crate::mdschema::validator::errors::ValidationError;
-use crate::mdschema::validator::node_walker::validators::textual_container::validate_textual_container_vs_textual_container;
 use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::mdschema::validator::node_walker::validators::textual_container::validate_textual_container_vs_textual_container;
 use crate::mdschema::validator::ts_utils::{
-    is_heading_node, is_marker_node, is_textual_container_node,
+    is_heading_content_node, is_heading_node, is_marker_node, is_textual_container_node,
 };
 use crate::mdschema::validator::utils::compare_node_kinds;
 
@@ -46,15 +47,23 @@ pub fn validate_heading_vs_heading(
     // Go to the actual heading content
     {
         let mut failed_to_walk_to_heading = false;
-        if let Err(error) = ensure_at_heading_content(&mut input_cursor) {
-            result.add_error(error);
-            failed_to_walk_to_heading = true;
-        }
-        if let Err(error) = ensure_at_heading_content(&mut schema_cursor) {
-            result.add_error(error);
-            failed_to_walk_to_heading = true;
-        }
-        if failed_to_walk_to_heading {
+        let input_had_heading_content = match ensure_at_heading_content(&mut input_cursor) {
+            Ok(had_content) => had_content,
+            Err(error) => {
+                result.add_error(error);
+                failed_to_walk_to_heading = true;
+                false
+            }
+        };
+        let schema_had_heading_content = match ensure_at_heading_content(&mut schema_cursor) {
+            Ok(had_content) => had_content,
+            Err(error) => {
+                result.add_error(error);
+                failed_to_walk_to_heading = true;
+                false
+            }
+        };
+        if failed_to_walk_to_heading || !(input_had_heading_content && schema_had_heading_content) {
             return result;
         }
     }
@@ -74,21 +83,23 @@ pub fn validate_heading_vs_heading(
     )
 }
 
-fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<(), ValidationError> {
+fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<bool, ValidationError> {
     // Headings look like this:
     //
     // (atx_heading)
     // │  ├─ (atx_h2_marker)
     // │  └─ (heading_content)
     // │     └─ (text)
-
     if is_heading_node(&cursor.node()) {
         cursor.goto_first_child();
         ensure_at_heading_content(cursor)
     } else if is_marker_node(&cursor.node()) {
-        cursor.goto_next_sibling();
-        debug_assert_eq!(cursor.node().kind(), "heading_content");
-        Ok(())
+        if cursor.goto_next_sibling() {
+            debug_assert!(is_heading_content_node(&cursor.node()));
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     } else {
         Err(ValidationError::InternalInvariantViolated(format!(
             "Expected to be at heading content, but found node kind: {}",
@@ -101,7 +112,9 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<(), ValidationEr
 mod tests {
     use super::*;
     use crate::mdschema::validator::{
-        errors::SchemaViolationError, node_walker::validators::textual::validate_textual_vs_textual, ts_utils::{is_textual_node, parse_markdown}, validator_state::NodePosPair
+        errors::SchemaViolationError,
+        ts_utils::{is_textual_node, parse_markdown},
+        validator_state::NodePosPair,
     };
     use serde_json::json;
 

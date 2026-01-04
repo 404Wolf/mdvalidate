@@ -137,6 +137,11 @@ pub fn is_paragraph_node(node: &Node) -> bool {
     node.kind() == "paragraph"
 }
 
+/// Check if a node is heading content.
+pub fn is_heading_content_node(node: &Node) -> bool {
+    node.kind() == "heading_content"
+}
+
 /// Check if a node is a list marker.
 pub fn is_list_marker_node(node: &Node) -> bool {
     node.kind() == "list_marker"
