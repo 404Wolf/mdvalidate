@@ -1,5 +1,3 @@
-use std::panic;
-
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 

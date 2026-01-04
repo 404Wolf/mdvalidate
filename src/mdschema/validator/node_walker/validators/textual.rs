@@ -6,8 +6,7 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::matcher::matcher::{Matcher, MatcherError};
 use crate::mdschema::validator::matcher::matcher_extras::get_after_extras;
 use crate::mdschema::validator::ts_utils::{
-    both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_last_node,
-    is_text_node,
+    both_are_textual_nodes, get_next_node, get_node_n_nodes_ahead, is_code_node, is_text_node,
 };
 use crate::mdschema::validator::validator_state::NodePosPair;
 use crate::mdschema::validator::{
@@ -519,24 +518,6 @@ pub fn validate_matcher_vs_text<'a>(
     }
 
     result
-}
-
-fn at_literal_matcher(
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-) -> Result<Option<bool>, ValidationError> {
-    if !is_code_node(&schema_cursor.node()) {
-        return Ok(None);
-    }
-
-    match Matcher::try_from_schema_cursor(schema_cursor, schema_str) {
-        Ok(_) => Ok(Some(false)),
-        Err(MatcherError::WasLiteralCode) => Ok(Some(true)),
-        Err(error) => Err(ValidationError::SchemaError(SchemaError::MatcherError {
-            error,
-            schema_index: schema_cursor.descendant_index(),
-        })),
-    }
 }
 
 fn at_text_and_next_at_literal_matcher(
