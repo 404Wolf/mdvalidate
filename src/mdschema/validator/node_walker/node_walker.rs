@@ -27,7 +27,7 @@ impl<'a> NodeWalker<'a> {
         node_walker
             .state()
             .farthest_reached_pos()
-            .walk_cursors_to_position(
+            .walk_cursors_to_pos(
                 &mut node_walker.input_cursor,
                 &mut node_walker.schema_cursor,
             );
@@ -36,13 +36,9 @@ impl<'a> NodeWalker<'a> {
     }
 
     pub fn validate(&mut self) -> ValidationResult {
-        self
-            .state()
+        self.state()
             .farthest_reached_pos()
-            .walk_cursors_to_position(
-                &mut self.input_cursor,
-                &mut self.schema_cursor,
-            );
+            .walk_cursors_to_pos(&mut self.input_cursor, &mut self.schema_cursor);
 
         let validation_result = validate_node_vs_node(
             &mut self.input_cursor,
@@ -83,7 +79,7 @@ mod tests {
 
         let (matches, errors, _) = validate_str(schema, input);
 
-        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(errors, vec![]);
         assert_eq!(matches, json!({ "item": "hello" }));
     }
 
@@ -94,7 +90,7 @@ mod tests {
 
         let (matches, errors, _) = validate_str(schema, input);
 
-        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(errors, vec![]);
         assert_eq!(matches, json!({"name": "Wolf"}));
     }
 
@@ -105,7 +101,7 @@ mod tests {
 
         let (matches, errors, _) = validate_str(schema, input);
 
-        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(errors, vec![]);
         assert_eq!(matches, json!({"name": "Wolf"}));
     }
 
@@ -123,7 +119,7 @@ mod tests {
 
         let (matches, errors, _) = validate_str(schema, input);
 
-        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(errors, vec![]);
         assert_eq!(
             matches,
             json!({
@@ -139,7 +135,7 @@ mod tests {
 
         let (matches, errors, _) = validate_str(schema, input);
 
-        assert!(errors.is_empty(), "Errors found: {:?}", errors);
+        assert_eq!(errors, vec![]);
         assert_eq!(matches, json!({"item": "hello"}));
     }
 }

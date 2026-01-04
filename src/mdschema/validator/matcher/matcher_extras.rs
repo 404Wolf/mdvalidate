@@ -7,17 +7,48 @@ static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\
 
 pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
     // We can have a ! instead of matcher extras to indicate that it is a literal match
-    LazyLock::new(|| Regex::new(r"^(([+\{\},0-9]*)|\!)$").unwrap());
+    LazyLock::new(|| Regex::new(r#"^((\!)|([+\{\},0-9]+))"#).unwrap());
 
-pub fn get_everything_after_special_chars(text: &str) -> Option<&str> {
+pub fn partition_at_special_chars(text: &str) -> Option<(&str, &str)> {
+    // TODO: does this really need to return an Option
     let captures = MATCHERS_EXTRA_PATTERN.captures(text);
     match captures {
         Some(caps) => {
             let mat = caps.get(0)?;
-            Some(&text[mat.end()..])
+            Some((&text[..mat.end()], &text[mat.end()..]))
         }
-        None => Some(text),
+        None => Some(("", text)),
     }
+}
+
+pub fn get_after_extras(text: &str) -> Option<&str> {
+    partition_at_special_chars(text).map(|(_extras, after)| after)
+}
+
+pub fn get_all_extras(text: &str) -> Result<&str, MatcherExtrasError> {
+    let (extras, _after) =
+        partition_at_special_chars(text).ok_or(MatcherExtrasError::MatcherExtrasInvalid)?;
+
+    if has_literal_within_extras(text) {
+        return Err(MatcherExtrasError::MixedLiteralAndOthers);
+    }
+
+    Ok(extras)
+}
+
+/// Our regular regex for extras will look at your extras, and if it starts with
+/// "!" ignore the rest of it and pretend that the only extras
+///
+/// If the string starts with a !, then try running get_everything_after_extras
+pub fn has_literal_within_extras(text: &str) -> bool {
+    text.starts_with('!')
+        && text.len() != 1
+        && !{
+            match partition_at_special_chars(&text[1..]) {
+                Some((extras, _after)) => extras == "",
+                None => false,
+            }
+        }
 }
 
 /// Errors specific to matcher extras construction
@@ -27,6 +58,9 @@ pub enum MatcherExtrasError {
     ///
     /// We get this if we see something like `name:/test/`$%^&*.
     MatcherExtrasInvalid,
+    /// When we have a literal extra, and any other extras. If we are literal we
+    /// can *only* be literal.
+    MixedLiteralAndOthers,
 }
 
 impl std::fmt::Display for MatcherExtrasError {
@@ -34,6 +68,9 @@ impl std::fmt::Display for MatcherExtrasError {
         match self {
             MatcherExtrasError::MatcherExtrasInvalid => {
                 write!(f, "Invalid matcher extras")
+            }
+            MatcherExtrasError::MixedLiteralAndOthers => {
+                write!(f, "Cannot mix literal extras with other extras")
             }
         }
     }
@@ -167,6 +204,67 @@ mod tests {
 
         let result = MatcherExtras::try_new(Some("bullshit"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_all_extras_repeating() {
+        let result = get_all_extras("{1,} test");
+        assert_eq!(result.unwrap(), "{1,}");
+    }
+
+    #[test]
+    fn test_get_all_extras_with_literal_too() {
+        let result = get_all_extras("!{1,} test");
+        match result.unwrap_err() {
+            MatcherExtrasError::MixedLiteralAndOthers => (),
+            error => panic!("expected MixedLiteralAndOthers, got {:?}", error),
+        }
+    }
+
+    #[test]
+    fn test_get_all_extras_no_extras() {
+        let result = get_all_extras("");
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_get_all_extras_just_literal() {
+        let result = get_after_extras("!");
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_get_all_extras_much_extra() {
+        let result = get_after_extras("! example.\n");
+        assert_eq!(result.unwrap(), " example.\n");
+    }
+
+    #[test]
+    fn test_get_after_extras_literal_then_some() {
+        let result = get_after_extras("! test");
+        assert_eq!(result, Some(" test"));
+    }
+
+    #[test]
+    fn test_get_after_extras_but_none() {
+        // If there are no extras then it's all after the extras
+        let result = get_after_extras("test");
+        assert_eq!(result, Some("test"));
+    }
+
+    #[test]
+    fn test_has_literal_within_extras() {
+        let result = has_literal_within_extras("! test");
+        assert!(!result);
+
+        let result = has_literal_within_extras("!foo");
+        assert!(!result);
+
+        let result = has_literal_within_extras("!{,}");
+        assert!(result);
+
+        let result = has_literal_within_extras("!!");
+        assert!(result);
     }
 
     #[test]

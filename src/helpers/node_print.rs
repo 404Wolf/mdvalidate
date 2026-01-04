@@ -1,7 +1,7 @@
+use ptree::{Style, TreeItem};
 use std::borrow::Cow;
 use std::io::{self, Write};
 use tree_sitter::{Node, TreeCursor};
-use ptree::{Style, TreeItem};
 
 #[allow(dead_code)]
 pub trait PrettyPrint {
@@ -18,7 +18,19 @@ impl<'a> TreeItem for NodeWrapper<'a> {
     type Child = Self;
 
     fn write_self<W: Write>(&self, f: &mut W, style: &Style) -> io::Result<()> {
-        write!(f, "{}", style.paint(format!("({}[{}])", self.cursor.node().kind(), self.cursor.descendant_index())))
+        let node = self.cursor.node();
+
+        write!(
+            f,
+            "{}",
+            style.paint(format!(
+                "({}[{}]{}..{})",
+                node.kind(),
+                self.cursor.descendant_index(),
+                node.byte_range().start,
+                node.byte_range().end
+            ))
+        )
     }
 
     fn children(&self) -> Cow<'_, [Self::Child]> {
@@ -28,11 +40,15 @@ impl<'a> TreeItem for NodeWrapper<'a> {
         // Try to go to the first child
         if cursor.goto_first_child() {
             // Add the first child
-            children.push(NodeWrapper { cursor: cursor.clone() });
+            children.push(NodeWrapper {
+                cursor: cursor.clone(),
+            });
 
             // Iterate through siblings using goto_next_sibling
             while cursor.goto_next_sibling() {
-                children.push(NodeWrapper { cursor: cursor.clone() });
+                children.push(NodeWrapper {
+                    cursor: cursor.clone(),
+                });
             }
         }
 
@@ -42,7 +58,9 @@ impl<'a> TreeItem for NodeWrapper<'a> {
 
 impl PrettyPrint for Node<'_> {
     fn pretty_print(&self) -> String {
-        let wrapper = NodeWrapper { cursor: self.walk() };
+        let wrapper = NodeWrapper {
+            cursor: self.walk(),
+        };
         let mut output = Vec::new();
 
         // Use ptree to write the tree structure
@@ -54,18 +72,19 @@ impl PrettyPrint for Node<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::mdschema::validator::ts_utils::parse_markdown;
+
+    use super::*;
 
     #[test]
     fn test_pretty_print() {
         let tree = parse_markdown("# Test").unwrap();
         let node = tree.root_node();
-        let expected = "(document[0])
-└─ (atx_heading[1])
-   ├─ (atx_h1_marker[2])
-   └─ (heading_content[3])
-      └─ (text[4])
+        let expected = "(document[0]0..6)
+└─ (atx_heading[1]0..6)
+   ├─ (atx_h1_marker[2]0..1)
+   └─ (heading_content[3]1..6)
+      └─ (text[4]1..6)
 ";
         assert_eq!(node.pretty_print(), expected);
     }
