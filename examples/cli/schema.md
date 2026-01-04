@@ -1,4 +1,4 @@
 # Test `name:/[A-Za-z]+/`
 
-- test
+- test2
 - `item:/test\d/`{,}
