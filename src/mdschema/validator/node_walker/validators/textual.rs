@@ -397,7 +397,7 @@ pub fn validate_matcher_vs_text<'a>(
         // Everything that comes after the matcher
         let schema_suffix = {
             let text_node_after_code_node_str_contents =
-                &schema_str[schema_suffix_node.byte_range()];
+                schema_suffix_node.utf8_text(schema_str.as_bytes()).unwrap();
             // All text after the matcher node and maybe the text node right after it ("extras")
             get_after_extras(text_node_after_code_node_str_contents).unwrap()
         };

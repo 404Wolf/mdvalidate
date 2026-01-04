@@ -649,6 +649,7 @@ Version: 1
             errors
         );
     }
+
     #[test]
     fn test_only_whitespace() {
         let schema = "\n\n";

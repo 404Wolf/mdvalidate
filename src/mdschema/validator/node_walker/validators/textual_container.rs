@@ -268,7 +268,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_text_vs_text_on_text() {
+    fn test_validate_textual_vs_textual_on_text() {
         let schema_str = "test";
         // (document[0]0..5)
         // └─ (paragraph[1]0..4)
@@ -304,7 +304,33 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_text_vs_text_header_content() {
+    fn test_validate_textual_vs_textual_with_literal_matcher() {
+        let schema_str = "`code`! test";
+        let input_str = "`code` test";
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        input_cursor.goto_first_child(); // document -> paragraph
+        schema_cursor.goto_first_child(); // document -> paragraph
+
+        let result = validate_textual_container_vs_textual_container(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
+
+        assert_eq!(result.errors, vec![]);
+        assert_eq!(result.value, json!({}));
+    }
+
+    #[test]
+    fn test_validate_textual_vs_textual_header_content() {
         let schema_str = "# Test Wolf";
         // (document[0]0..12)
         // └─ (atx_heading[1]0..11)
@@ -349,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_text_vs_text_header_content_and_matcher() {
+    fn test_validate_textual_vs_textual_header_content_and_matcher() {
         let schema_str = "# Test `name:/[a-zA-Z]+/`";
         // (document[0]0..26)
         // └─ (atx_heading[1]0..25)
@@ -397,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_text_vs_text_with_incomplete_matcher() {
+    fn test_validate_textual_vs_textual_with_incomplete_matcher() {
         let schema_str = "prefix `test:/test/`";
         // (document[0]0..21)
         // └─ (paragraph[1]0..20)

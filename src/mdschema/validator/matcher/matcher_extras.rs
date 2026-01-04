@@ -10,6 +10,7 @@ pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"^((\!)|([+\{\},0-9]+))"#).unwrap());
 
 pub fn partition_at_special_chars(text: &str) -> Option<(&str, &str)> {
+    // TODO: does this really need to return an Option
     let captures = MATCHERS_EXTRA_PATTERN.captures(text);
     match captures {
         Some(caps) => {
@@ -40,7 +41,14 @@ pub fn get_all_extras(text: &str) -> Result<&str, MatcherExtrasError> {
 ///
 /// If the string starts with a !, then try running get_everything_after_extras
 pub fn has_literal_within_extras(text: &str) -> bool {
-    text.starts_with('!') && text.len() != 1 && get_after_extras(&text[1..]).is_some()
+    text.starts_with('!')
+        && text.len() != 1
+        && !{
+            match partition_at_special_chars(&text[1..]) {
+                Some((extras, _after)) => extras == "",
+                None => false,
+            }
+        }
 }
 
 /// Errors specific to matcher extras construction
@@ -222,7 +230,13 @@ mod tests {
     #[test]
     fn test_get_all_extras_just_literal() {
         let result = get_after_extras("!");
-        assert_eq!(result.unwrap(), "!");
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[test]
+    fn test_get_all_extras_much_extra() {
+        let result = get_after_extras("! example.\n");
+        assert_eq!(result.unwrap(), " example.\n");
     }
 
     #[test]
@@ -236,6 +250,21 @@ mod tests {
         // If there are no extras then it's all after the extras
         let result = get_after_extras("test");
         assert_eq!(result, Some("test"));
+    }
+
+    #[test]
+    fn test_has_literal_within_extras() {
+        let result = has_literal_within_extras("! test");
+        assert!(!result);
+
+        let result = has_literal_within_extras("!foo");
+        assert!(!result);
+
+        let result = has_literal_within_extras("!{,}");
+        assert!(result);
+
+        let result = has_literal_within_extras("!!");
+        assert!(result);
     }
 
     #[test]
