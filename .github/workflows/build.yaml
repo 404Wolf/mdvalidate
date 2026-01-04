@@ -18,7 +18,11 @@ jobs:
         shell: bash
         run: |
           nix build .#build-static
+      - name: Create tar archive
+        shell: bash
+        run: |
+          tar -czf release.tar.gz -C result .
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: "result/*"
+          artifacts: "release.tar.gz"
           draft: true
