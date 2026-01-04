@@ -365,7 +365,27 @@ pub fn validate_list_vs_list(
             let remaining_schema_nodes = count_siblings(&schema_cursor);
             let remaining_input_nodes = count_siblings(&input_cursor);
 
+            let literal_chunk_count = count_next_n_literal_lists(&schema_cursor, schema_str);
             if remaining_schema_nodes != remaining_input_nodes {
+                let available_literal_items = remaining_input_nodes + 1;
+
+                if available_literal_items < literal_chunk_count {
+                    result.add_error(ValidationError::SchemaViolation(
+                        SchemaViolationError::ChildrenLengthMismatch {
+                            schema_index: at_list_schema_cursor.descendant_index(),
+                            input_index: at_list_input_cursor.descendant_index(),
+                            // +1 because we need to include this first node that we are currently on
+                            expected: ChildrenCount::from_specific(literal_chunk_count),
+                            actual: available_literal_items,
+                        },
+                    ));
+                    return result;
+                }
+            }
+
+            if remaining_schema_nodes != remaining_input_nodes
+                && literal_chunk_count == remaining_schema_nodes + 1
+            {
                 result.add_error(ValidationError::SchemaViolation(
                     SchemaViolationError::ChildrenLengthMismatch {
                         schema_index: at_list_schema_cursor.descendant_index(),
@@ -436,6 +456,26 @@ pub fn validate_list_vs_list(
     }
 
     result
+}
+
+/// Walk forward and see how many lists after this one at the same level are literal lists.
+fn count_next_n_literal_lists(schema_cursor: &TreeCursor, schema_str: &str) -> usize {
+    let mut schema_cursor = schema_cursor.clone();
+    let mut count = 0;
+    loop {
+        match extract_repeated_matcher_from_list_item(&schema_cursor, schema_str) {
+            Some(Ok(_)) | Some(Err(_)) => break,
+            None => {
+                count += 1;
+            }
+        }
+
+        if !schema_cursor.goto_next_sibling() {
+            break;
+        }
+    }
+
+    count
 }
 
 /// Validate the contents of a list item against the contents of a different
@@ -570,7 +610,10 @@ fn extract_repeated_matcher_from_list_item(
     }
     // list_item -> code_span (first item in list_item)
     list_item_cursor.goto_first_child();
-    debug_assert_eq!(list_item_cursor.node().kind(), "code_span");
+    if list_item_cursor.node().kind() != "code_span" {
+        trace!("List item code_span is not the first paragraph child");
+        return None;
+    }
 
     match try_from_code_and_text_node_cursor(&list_item_cursor, schema_str) {
         Ok(matcher) if matcher.is_repeated() => Some(Ok(matcher)),
@@ -959,6 +1002,138 @@ Footer: test (footer isn't validated with_list_vs_list)
             result.errors
         );
         assert_eq!(result.value, json!({"id": "test2"}));
+    }
+
+    #[test]
+    fn test_validate_list_vs_list_literal_then_repeated_matcher() {
+        let schema_str = r#"
+# Test `name:/[A-Za-z]+/`
+
+- test
+- `item:/test\d/`{,}
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+# Test Example
+
+- test
+- test1
+- test2
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "atx_heading");
+        assert_eq!(input_cursor.node().kind(), "atx_heading");
+
+        schema_cursor.goto_next_sibling();
+        input_cursor.goto_next_sibling();
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
+        assert_eq!(result.value, json!({"item": ["test1", "test2"]}));
+    }
+
+    #[test]
+    fn test_validate_list_vs_list_literal_literal_matcher_matcher_literal_literal_literal() {
+        let schema_str = r#"
+- literal1
+- literal2
+- `matcher1:/match1_\d/`{1,1}
+- `matcher2:/match2_\d/`{1,1}
+- literal3
+- literal4
+- literal5
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- literal1
+- literal2
+- match1_1
+- match2_1
+- literal3
+- literal4
+- literal5
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(
+            result.errors.is_empty(),
+            "Expected no errors, got: {:?}",
+            result.errors
+        );
+        assert_eq!(
+            result.value,
+            json!({"matcher1": ["match1_1"], "matcher2": ["match2_1"]})
+        );
+    }
+
+    #[test]
+    fn test_validate_list_vs_list_literal_chunk_mismatch_before_repeated_matcher() {
+        let schema_str = r#"
+- literal1
+- literal2
+- `item:/test\d/`{,}
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+
+        let input_str = r#"
+- literal1
+- test1
+- test2
+"#;
+        let input_tree = parse_markdown(input_str).unwrap();
+        let mut input_cursor = input_tree.walk();
+
+        schema_cursor.goto_first_child();
+        input_cursor.goto_first_child();
+        assert_eq!(schema_cursor.node().kind(), "tight_list");
+        assert_eq!(input_cursor.node().kind(), "tight_list");
+
+        let result =
+            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+
+        assert!(
+            !result.errors.is_empty(),
+            "Expected errors for literal chunk mismatch"
+        );
+
+        match &result.errors[0] {
+            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
+                kind: NodeContentMismatchKind::Literal,
+                expected,
+                actual,
+                ..
+            }) => {
+                assert_eq!(expected, "literal2");
+                assert_eq!(actual, "test1");
+            }
+            _ => panic!("Unexpected error type: {:?}", result.errors[0]),
+        }
     }
 
     #[test]
