@@ -35,7 +35,7 @@ path = "src/lib.rs"
 
 [package]
 name = "mdvalidate"
-version = "0.1.28"
+version = "0.1.29"
 description = "Markdown schema validation engine"
 license = "MIT"
 documentation = "https://github.com/404wolf/mdvalidate"
