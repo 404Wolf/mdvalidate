@@ -23,7 +23,7 @@ export default defineConfig({
             { label: "Literals", slug: "matchers/01-literals" },
             { label: "Matchers", slug: "matchers/02-matchers" },
             { label: "Repetition and Lists", slug: "matchers/03-lists" },
-            { label: "Code Blocks", slug: "matchers/04-code-blocks" },
+            { label: "Code Blocks", slug: "matchers/04-code" },
             { label: "Tables", slug: "matchers/05-tables" },
             { label: "HTML", slug: "matchers/06-html" },
           ],
