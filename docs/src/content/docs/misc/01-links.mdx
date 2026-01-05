@@ -1,0 +1,130 @@
+---
+title: Links and Images
+description: Validate Markdown links and image references
+order: 1
+---
+
+import SchemaAndInput from "../../../components/SchemaAndInput.astro";
+
+Links and images in Markdown can be validated using literal matching or matchers in both the text/alt text and URL portions.
+
+## Literal Link Matching
+
+Links must match exactly by default:
+
+<SchemaAndInput
+  schema={"[Click here](https://example.com)"}
+  input={"[Click here](https://example.com)"}
+  valid={true}
+/>
+
+<SchemaAndInput
+  schema={"[Click here](https://example.com)"}
+  input={"[Click here](https://different.com)"}
+  valid={false}
+/>
+
+## Literal Image Matching
+
+Images work the same way:
+
+<SchemaAndInput
+  schema={"![alt text](image.png)"}
+  input={"![alt text](image.png)"}
+  valid={true}
+/>
+
+<SchemaAndInput
+  schema={"![alt text](image.png)"}
+  input={"![different](image.png)"}
+  valid={false}
+/>
+
+## Link Text with Matchers
+
+Use matchers in the link text:
+
+<SchemaAndInput
+  schema={"[`text:/\\w+/`](https://example.com)"}
+  input={"[Hello](https://example.com)"}
+  valid={true}
+  output={'{"text":"Hello"}'}
+/>
+
+<SchemaAndInput
+  schema={"[`text:/\\w+/`](https://example.com)"}
+  input={"[123](https://example.com)"}
+  valid={true}
+  output={'{"text":"123"}'}
+/>
+
+## Link URL with Matchers
+
+Use matchers in the URL:
+
+<SchemaAndInput
+  schema={"[Click here](`url:/https?:\\/\\/.+/`)"}
+  input={"[Click here](https://example.com)"}
+  valid={true}
+  output={'{"url":"https://example.com"}'}
+/>
+
+<SchemaAndInput
+  schema={"[Documentation](`page:/\\/docs\\/.+/`)"}
+  input={"[Documentation](/docs/getting-started)"}
+  valid={true}
+  output={'{"page":"/docs/getting-started"}'}
+/>
+
+## Image Alt Text with Matchers
+
+Use matchers in image alt text:
+
+<SchemaAndInput
+  schema={"![`alt:/\\w+/`](image.png)"}
+  input={"![logo](image.png)"}
+  valid={true}
+  output={'{"alt":"logo"}'}
+/>
+
+## Image Path with Matchers
+
+Use matchers in image paths:
+
+<SchemaAndInput
+  schema={"![Logo](`img:/images\\/.+\\.png/`)"}
+  input={"![Logo](images/logo.png)"}
+  valid={true}
+  output={'{"img":"images/logo.png"}'}
+/>
+
+<SchemaAndInput
+  schema={"![Logo](`img:/images\\/.+\\.png/`)"}
+  input={"![Logo](images/icon.jpg)"}
+  valid={false}
+/>
+
+## Both Text and URL with Matchers
+
+Combine matchers in both positions:
+
+<SchemaAndInput
+  schema={"[`text:/\\w+/`](`url:/https?:\\/\\/.+/`)"}
+  input={"[Home](https://example.com)"}
+  valid={true}
+  output={'{"text":"Home","url":"https://example.com"}'}
+/>
+
+<SchemaAndInput
+  schema={"![`alt:/\\w+/`](`path:/.+\\.png/`)"}
+  input={"![icon](assets/icon.png)"}
+  valid={true}
+  output={'{"alt":"icon","path":"assets/icon.png"}'}
+/>
+
+## Notes
+
+- Links use `[text](url)` syntax
+- Images use `![alt](src)` syntax
+- Matchers work in both text/alt and URL/path positions
+- Reference-style links are also supported (e.g., `[text][ref]` with `[ref]: url`)

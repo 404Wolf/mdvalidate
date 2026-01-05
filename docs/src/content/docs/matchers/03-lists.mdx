@@ -1,0 +1,118 @@
+---
+title: Repetition and Lists
+description: Match patterns multiple times and validate list structures
+order: 3
+---
+
+import SchemaAndInput from "../../../components/SchemaAndInput.astro";
+
+## Repeating Matchers
+
+Use `{min,max}` syntax after a matcher to specify repetition constraints:
+
+### Unbounded Repetition
+
+Use `{,}` to allow unlimited repetitions:
+
+<SchemaAndInput schema={"`item:/\\w+/`{,}"} input={"one"} valid={true} output={'{"item":"one"}'} />
+
+<SchemaAndInput
+  schema={"`item:/\\w+/`{,}"}
+  input={"one two three four five"}
+  valid={true}
+  output={'{"item":"one two three four five"}'}
+/>
+
+### Exact Count
+
+<SchemaAndInput schema={"`digit:/\\d/`{3,3}"} input={"123"} valid={true} output={'{"digit":"123"}'} />
+
+<SchemaAndInput schema={"`digit:/\\d/`{3,3}"} input={"12"} valid={false} />
+
+### Range Constraints
+
+<SchemaAndInput schema={"`num:/\\d+/`{2,4}"} input={"12 34"} valid={true} output={'{"num":"12 34"}'} />
+
+<SchemaAndInput schema={"`num:/\\d+/`{2,4}"} input={"12"} valid={false} />
+
+## Lists
+
+Lists validate structured list content with support for literal items, matchers, and repetition.
+
+### Basic List Matching
+
+<SchemaAndInput
+  schema={`- Item 1\n- Item 2`}
+  input={`- Item 1\n- Item 2`}
+  valid={true}
+/>
+
+<SchemaAndInput
+  schema={`- Item 1\n- Item 2`}
+  input={`- Item 1\n- Item 3`}
+  valid={false}
+/>
+
+### List Items with Matchers
+
+<SchemaAndInput
+  schema={`- \`name:/\\w+/\`\n- \`age:/\\d+/\``}
+  input={`- Alice\n- 25`}
+  valid={true}
+  output={'{"name":"Alice","age":"25"}'}
+/>
+
+### Repeated List Items
+
+Use `{min,max}` on list item matchers to match multiple items:
+
+<SchemaAndInput
+  schema={`- \`item:/\\w+/\`{2,4}`}
+  input={`- apple\n- banana`}
+  valid={true}
+  output={'{"item":["apple","banana"]}'}
+/>
+
+<SchemaAndInput
+  schema={`- \`item:/\\w+/\`{2,4}`}
+  input={`- apple`}
+  valid={false}
+/>
+
+<SchemaAndInput
+  schema={`- \`task:/\\w+/\`{,}`}
+  input={`- work\n- study\n- exercise`}
+  valid={true}
+  output={'{"task":["work","study","exercise"]}'}
+/>
+
+### Nested Lists
+
+<SchemaAndInput
+  schema={`- Parent\n  - \`child:/\\w+/\`{1,2}`}
+  input={`- Parent\n  - child1\n  - child2`}
+  valid={true}
+  output={'{"child":["child1","child2"]}'}
+/>
+
+<SchemaAndInput
+  schema={`- Parent\n  - Child`}
+  input={`- Parent\n- Child`}
+  valid={false}
+/>
+
+### Multiple Matchers in Sequence
+
+<SchemaAndInput
+  schema={`- \`first:/test\\d/\`{2,2}\n- \`second:/foo\\d/\`{1,2}`}
+  input={`- test1\n- test2\n- foo1`}
+  valid={true}
+  output={'{"first":["test1","test2"],"second":["foo1"]}'}
+/>
+
+## Notes
+
+- Repeating matchers consume text continuously without structure
+- List matchers return arrays when repeated
+- Variable-length matchers must be at the end of a list schema
+- Indentation levels must match for nested lists

@@ -1,6 +1,6 @@
-# Markdown Schema
+# Welcome to `mdvalidate`
 
-**Very early stage work in progress!!**
+**Mdvalidat is an early stage work in progress!!**
 
 MDS is a **tiny language for describing how Markdown *should look***. With `mdvalidate`, you write *schemas* that define a shape of Markdown, and MDS checks real documents against them.
 
@@ -11,18 +11,6 @@ It's designed for validating a stream of Markdown via stdin, so you can pipe inp
 We plan to eventually support converting a Markdown schema into a JSON schema describing the shape of the output that it produces once it has validated some Markdown file.
 
 `mdvalidate` is written in 100% safe rust and is 🔥 blazingly fast 🔥.
-
----
-
-## Some examples of what you can match 
-
-- **Literal Matching:** Regular Markdown stays literal — if it says `# Title`, it must match exactly.
-- **Matchers:** Use `` `label:/regex/` `` to define rules for dynamic content.
-- **Optional or Repeated Items:** Add `?` for optional things, `+` for one or more.
-- **Lists & Sublists:** Validate nested lists with pattern control.
-- **Escaping:** Add `!` to disable regex interpretation — great for examples.
-
----
 
 ## Mini Example
 
@@ -58,6 +46,14 @@ A failing document (too many sub-notes):
   - local
   - green
 ```
+
+## Some examples of what you can match 
+
+- **Literal Matching:** By default -- if it says `# Title`, it must match exactly.
+- **Matchers:** Use `` `label:/regex/` `` to define rules for dynamic content.
+- **Optional or Repeated Items:** Add `?` for optional things, `+` for one or more.
+- **Lists & Sublists:** Validate nested lists with pattern control.
+- **Escaping:** Add `!` to disable regex interpretation -- great for examples.
 
 ---
 
@@ -131,6 +127,44 @@ We're validating:
 
 ## Get started!
 
+### Installation
+
 You can build `mdvalidate` with `nix` using `nix build github:404wolf/mdvalidate`.
 
-Alternatively download a pre-built binary from releases.
+Alternatively download a pre-built (static) binary from [releases](https://github.com/404Wolf/mdvalidate/releases) for use on x86.
+
+It is not officially supported, but you can also build directly with cargo via `cargo build --bin mdv`.
+
+### Using mdvalidate
+
+`mdvalidate` defines a very simple language for describing the *shape* of Markdown documents that looks like Markdown itself. You use `mdvalidate` via a command line tool (CLI).
+
+In every case, you have a schema, in `mdschema`, Mdvalidate's schema definition language, and an input, which may or may not conform to the schema. You can invoke `mdvalidate` by running:
+
+```bash
+mdv path/to/schema.md path/to/input.md
+echo $?
+```
+
+Which returns `0` if the validation is successful or `1` if there were errors. Errors are reported to `stderr`.
+
+You can use `-` instead of a path to use `stdio`. If you include a third positional argument, it will also extract data from documents that conform to the schema. For example,
+
+```bash
+echo "# Hi Wolf" | mdv path/to/schema.md - -
+echo $?
+```
+
+For the schema
+
+```md
+# Hi `name:/[A-Za-z]+/`
+```
+
+Will return
+
+```
+mdv examples/cli/schema.md examples/cli/input.md - 
+{"name":"Wolf"}
+0
+```

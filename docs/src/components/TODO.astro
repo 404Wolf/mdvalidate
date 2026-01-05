@@ -1,0 +1,24 @@
+---
+interface Props {
+  feature?: string;
+  notes?: string;
+}
+
+const { feature, notes } = Astro.props;
+---
+
+<div class="not-content float-right ml-4 mb-4 rounded-md border-2 border-orange-400 bg-orange-50 px-3 py-2 text-sm dark:border-orange-600 dark:bg-orange-950">
+  <div class="font-semibold text-orange-700 dark:text-orange-400">
+    🚧 Not Implemented Yet
+  </div>
+  {feature && (
+    <div class="mt-1 text-orange-600 dark:text-orange-500">
+      {feature}
+    </div>
+  )}
+  {notes && (
+    <div class="mt-1 text-orange-600 dark:text-orange-500">
+      {notes}
+    </div>
+  )}
+</div>

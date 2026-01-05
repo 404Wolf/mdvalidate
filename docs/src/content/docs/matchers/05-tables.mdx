@@ -1,0 +1,80 @@
+---
+title: Tables
+description: Validate table structures with row and column matching
+order: 5
+---
+
+import SchemaAndInput from "../../../components/SchemaAndInput.astro";
+import TODO from "../../../components/TODO.astro";
+
+<TODO feature="Tables are not yet implemented" />
+
+Tables can be validated for structure, headers, and cell content using matchers.
+
+## Basic Table Matching
+
+Tables match literally by default - headers and all rows must match exactly:
+
+<SchemaAndInput
+  schema={"| Name | Age |\n| :--- | :-- |\n| Alice | 25 |\n| Bob | 30 |"}
+  input={"| Name | Age |\n| :--- | :-- |\n| Alice | 25 |\n| Bob | 30 |"}
+  valid={true}
+/>
+
+<SchemaAndInput
+  schema={"| Name | Age |\n| :--- | :-- |\n| Alice | 25 |"}
+  input={"| Name | Age |\n| :--- | :-- |\n| Bob | 30 |"}
+  valid={false}
+/>
+
+## Table Headers
+
+Headers can use matchers to validate column names:
+
+<SchemaAndInput
+  schema={"| `col:/\\w+/` | `col:/\\w+/` |\n| :--- | :-- |\n| data | more |"}
+  input={"| Name | Age |\n| :--- | :-- |\n| data | more |"}
+  valid={true}
+  output={'{"col":["Name","Age"]}'}
+/>
+
+## Cell Content Validation
+
+Individual cells can contain matchers:
+
+<SchemaAndInput
+  schema={"| Name | Phone |\n| :--- | :---- |\n| `name:/\\w+/` | `phone:/\\d{3}-\\d{4}/` |"}
+  input={"| Name | Phone |\n| :--- | :---- |\n| Alice | 555-1234 |"}
+  valid={true}
+  output={'{"name":"Alice","phone":"555-1234"}'}
+/>
+
+## Repeated Rows
+
+Use `{min,max}` syntax on row patterns to match multiple rows:
+
+<SchemaAndInput
+  schema={"| Item | Price |\n| :--- | :---- |\n| `item:/\\w+/` | `price:/\\d+/` |{1,3}"}
+  input={"| Item | Price |\n| :--- | :---- |\n| Apple | 2 |\n| Banana | 3 |"}
+  valid={true}
+  output={'{"item":["Apple","Banana"],"price":["2","3"]}'}
+/>
+
+<SchemaAndInput
+  schema={"| Type | Number |\n| :--- | :----- |\n| `type:/\\w+/` | `number:/\\d+/` |{2,}"}
+  input={"| Type | Number |\n| :--- | :----- |\n| Backup | 212 |\n| Misc | 123 |"}
+  valid={true}
+  output={'{"type":["Backup","Misc"],"number":["212","123"]}'}
+/>
+
+<SchemaAndInput
+  schema={"| Item | Price |\n| :--- | :---- |\n| `item:/\\w+/` | `price:/\\d+/` |{1,3}"}
+  input={"| Item | Price |\n| :--- | :---- |\n| Apple | 2 |\n| Banana | 3 |\n| Cherry | 4 |\n| Date | 5 |"}
+  valid={false}
+/>
+
+## Notes
+
+- Rows return arrays when using repetition matchers
+- Headers and separator rows are required in both schema and input
+- Column count must match between schema and input
