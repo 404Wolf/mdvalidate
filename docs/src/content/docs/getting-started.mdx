@@ -1,0 +1,78 @@
+---
+title: Getting Started
+description: Get started writing `mdschema`
+---
+
+import SchemaAndInput from "../../components/SchemaAndInput.astro";
+
+**mdschema** is a schema language for validating Markdown documents. It allows you to define patterns that Markdown content must match, making it easy to validate documentation, user inputs, or structured content.
+## Quick Example
+
+Here's a simple schema and input that validates successfully:
+
+<SchemaAndInput
+  schema={`# Hello\n\nMy name is \`name:/\\w+/\``}
+  input={`# Hello\n\nMy name is Alice`}
+  valid={true}
+  output={'{"name": "Alice"}'}
+/>
+
+In this example:
+
+- `# Hello` is **literal** - it must match exactly
+- `` `name:/\w+/` `` is a **matcher** - it captures one or more word characters
+
+## Core Concepts
+
+### 1. Literals
+
+Plain Markdown text validates itself. What you write is what must match:
+
+<SchemaAndInput schema={`Hello World`} input={`Hello World`} valid={true} />
+
+<SchemaAndInput schema={`Hello World`} input={`Goodbye World`} valid={false} />
+
+### 2. Matchers
+
+Matchers use regular expressions to validate dynamic content:
+
+<SchemaAndInput
+  schema={`Age: \`age:/\\d+/\``}
+  input={`Age: 25`}
+  valid={true}
+  output={'{"age": "25"}'}
+/>
+
+Matcher syntax: `` `label:/regex-pattern/` ``
+
+### 4. Lists
+
+Use `{min,max}` to specify how many times a pattern should match. Lists can contain literals, matchers, and repetition, and can even be nested (when nested, you can continue to see where the output comes from!):
+
+<SchemaAndInput
+  schema={`- \`item:/\\w+/\`{1,3}\n  - \`detail:/\\w+/\`{1,2}`}
+  input={`- apple\n  - red\n  - sweet\n- banana\n  - yellow`}
+  valid={true}
+  output={'{"item":["apple","banana",{"detail":["yellow"]}]}'}
+/>
+
+## Validation Output
+
+When validation succeeds, captured values are returned as JSON:
+
+<SchemaAndInput
+  schema={`Name: \`name:/\\w+/\`, Age: \`age:/\\d+/\``}
+  input={`Name: Alice, Age: 30`}
+  valid={true}
+  output={'{"name": "Alice", "age": "30"}'}
+/>
+
+## Next Steps
+
+Explore the documentation to learn more:
+
+- **[Literals](./matchers/01-literals)** - Understanding literal matching
+- **[Matchers](./matchers/02-matchers)** - Regular expression patterns
+- **[Literal Code](./matchers/03-literal-code)** - Matching code blocks literally
+- **[Repeating Matchers](./matchers/04-repeating)** - Repetition with constraints
+- **[Lists](./matchers/05-lists)** - Validating list structures

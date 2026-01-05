@@ -1,0 +1,170 @@
+---
+title: Matchers
+description: Match arbitrary chunks of text with regex patterns
+order: 2
+---
+
+import SchemaAndInput from "../../../components/SchemaAndInput.astro";
+import TODO from "../../../components/TODO.astro";
+
+Matchers allow you to validate dynamic content using regular expressions. A matcher is defined using inline code syntax with a specific format: `` `label:/pattern/` ``.
+
+## Basic Syntax
+
+The basic matcher format is:
+
+```
+`label:/regex-pattern/`
+```
+
+- **label**: An identifier for the matched value (used in validation output)
+- **pattern**: A JavaScript-compatible regular expression
+
+The pattern is automatically anchored to the start (as if prefixed with `^`), so it matches from the beginning of the available text.
+
+<SchemaAndInput
+  schema={"`name:/\w+/`"}
+  input={"Alice"}
+  valid={true}
+  output={'{"name": "Alice"}'}
+/>
+
+<SchemaAndInput
+  schema={"`age:/\d+/`"}
+  input={"42"}
+  valid={true}
+  output={'{"age": "42"}'}
+/>
+
+<SchemaAndInput schema={"`name:/\w+/`"} input={"123"} valid={false} />
+
+<SchemaAndInput schema={"`age:/\d+/`"} input={"not a number"} valid={false} />
+
+## Matchers with Surrounding Text
+
+Matchers can be combined with literal text as prefixes and suffixes:
+
+<SchemaAndInput
+  schema={`Name: \`name:/\w+/\``}
+  input={"Name: Alice"}
+  valid={true}
+  output={'{"name":"Alice"}'}
+/>
+
+<SchemaAndInput
+  schema={`\`count:/\d+/\` items`}
+  input={"42 items"}
+  valid={true}
+  output={'{"count":"42"}'}
+/>
+
+<SchemaAndInput
+  schema={`User \`id:/\d+/\` logged in`}
+  input={"User 123 logged in"}
+  valid={true}
+  output={'{"id":"123"}'}
+/>
+
+<SchemaAndInput
+  schema={`Name: \`name:/\w+/\``}
+  input={"Name: "}
+  valid={false}
+/>
+
+<SchemaAndInput
+  schema={`\`count:/\d+/\` items`}
+  input={"42 things"}
+  valid={false}
+/>
+
+This also works for spanning nodes of other types, like italics and subsequent code spans via literal matchers (more on this later).
+
+<SchemaAndInput
+  schema={`User \`id:/\d+/\` logged in *this is italic*)`}
+  input={"User 123 logged in"}
+  valid={true}
+  output={'{"id":"123"}'}
+/>
+
+<SchemaAndInput
+  schema={`*test*test\`foo:/bar/\`wolf`}
+  input={"*test*testbarwolf"}
+  valid={true}
+  output={'{"foo":"bar"}'}
+/>
+
+## Empty Labels
+
+<TODO />
+
+To match without capturing a value, use an underscore (`_`) as the label:
+
+<SchemaAndInput
+  schema={"`_:/\\w+/`"}
+  input={"hello"}
+  valid={true}
+  output={"{}"}
+/>
+
+## Multiple matchers
+
+Right now, you can only have one matcher per paragraph (collection of spanning elements). So, for example, the following will not work.
+
+<SchemaAndInput
+  schema={"`_:/\w+/` `_:/\w+/`"}
+  input={"hello"}
+  valid={false}
+/>
+
+## Literal Code Blocks
+
+To match inline code blocks literally instead of treating them as matchers, add `!` after the code block:
+
+<SchemaAndInput
+  schema={"\`test\`!"}
+  input={"\`test\`"}
+  valid={true}
+/>
+
+<SchemaAndInput
+  schema={"The code is \`example\`! here"}
+  input={"The code is \`example\` here"}
+  valid={true}
+/>
+
+<SchemaAndInput
+  schema={"\`test\`!"}
+  input={"test"}
+  valid={false}
+/>
+
+### Escaping the Exclamation Mark
+
+<TODO />
+
+Use `!!` to match a literal exclamation mark after code:
+
+<SchemaAndInput
+  schema={"\`code\`!!"}
+  input={"\`code\`!"}
+  valid={true}
+/>
+
+## Execution Validation
+
+<TODO />
+
+You can validate content by running an executable. Use the syntax `label:!command`:
+
+<SchemaAndInput
+  schema={"`number:!test \\$0 -gt 0`"}
+  input={"42"}
+  valid={true}
+  output={'{"number":"42"}'}
+/>
+
+The matched content is passed to the executable:
+- As arguments (`$0`, `$1`, etc.)
+- Via stdin (if command reads from stdin)
+
+Exit code 0 means validation passes. Any other exit code indicates failure.

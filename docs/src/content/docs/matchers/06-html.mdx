@@ -1,0 +1,137 @@
+---
+title: HTML
+description: Validate HTML content embedded in Markdown
+order: 6
+---
+
+import SchemaAndInput from "../../../components/SchemaAndInput.astro";
+import TODO from "../../../components/TODO.astro";
+
+<TODO feature="HTML validation is not yet implemented" />
+
+Markdown is a superset of HTML, meaning you can embed HTML directly in Markdown documents. mdvalidate provides special matchers for validating HTML content.
+
+## Basic HTML Matching
+
+Use the `html` matcher type to match any HTML content inside tags:
+
+<SchemaAndInput
+  schema={"`some_html:html`"}
+  input={"<image src=\"./hello.png\" />"}
+  valid={true}
+  output={'{"some_html":"<image src=\\"./hello.png\\" />"}'}
+/>
+
+<SchemaAndInput
+  schema={"`some_html:html`"}
+  input={"this is text"}
+  valid={false}
+/>
+
+Note: Plain text (not in tags) does not match `html`, even though it's technically valid HTML.
+
+## Nested HTML
+
+The `html` matcher matches arbitrarily nested HTML:
+
+<SchemaAndInput
+  schema={"`some_html:html`"}
+  input={"<div>\n  <image src=\"./hello.png\" />\n</div>"}
+  valid={true}
+  output={'{"some_html":"<div>\\n  <image src=\\"./hello.png\\" />\\n</div>"}'}
+/>
+
+## Depth Constraints
+
+Specify maximum nesting depth using the `dn` suffix (where n is the depth):
+
+<SchemaAndInput
+  schema={"`some_html:html`d2"}
+  input={"<div>\n  <image src=\"./hello.png\" />\n</div>"}
+  valid={true}
+  output={'{"some_html":"<div>\\n  <image src=\\"./hello.png\\" />\\n</div>"}'}
+/>
+
+<SchemaAndInput
+  schema={"`some_html:html`d2"}
+  input={"<div>\n  <div>\n    <div>\n      <image src=\"./hello.png\" />\n    </div>\n  </div>\n</div>"}
+  valid={false}
+/>
+
+## HTML with Execution Validation
+
+<TODO />
+
+Combine the `html` matcher with execution validation to validate HTML content:
+
+<SchemaAndInput
+  schema={"`valid_html:html!tidy -q -e`"}
+  input={"<div>\n  <p>Valid HTML</p>\n</div>"}
+  valid={true}
+  output={'{"valid_html":"<div>\\n  <p>Valid HTML</p>\\n</div>"}'}
+/>
+
+<SchemaAndInput
+  schema={"`valid_html:html!tidy -q -e`"}
+  input={"<div>\n  <p>Unclosed tag\n</div>"}
+  valid={false}
+/>
+
+This example uses `tidy` to validate HTML syntax. The HTML content is passed to the executable via stdin.
+
+## XML Schema Validation
+
+For precise validation, use W3C XML Schema in a code block with `mds` language:
+
+<SchemaAndInput
+  schema={"\`\`\`mds\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">\n  <xs:element name=\"h1\" type=\"xs:string\"/>\n</xs:schema>\n\`\`\`"}
+  input={"<h1> Hello, world! </h1>"}
+  valid={true}
+/>
+
+<SchemaAndInput
+  schema={"\`\`\`mds\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">\n  <xs:element name=\"h1\" type=\"xs:string\"/>\n</xs:schema>\n\`\`\`"}
+  input={"<h2> Hello, world! </h2>"}
+  valid={false}
+/>
+
+## Markdown to HTML Equivalence
+
+<TODO notes={"This will eventually be something you can configure. Right now it is not implemented at all, and they do not match."}/>
+
+Markdown elements match their HTML equivalents automatically:
+
+<SchemaAndInput
+  schema={"# Hi\n\nText"}
+  input={"<h1> Hi </h1>\n\nText"}
+  valid={true}
+/>
+
+This works for all standard Markdown elements like headings, lists, emphasis, etc.
+
+## Comments
+
+HTML-style comments are supported in Markdown but are not validated by schemas:
+
+```markdown
+Some markdown content.
+
+<!-- This is a comment. -->
+
+Some more markdown content.
+```
+
+Alternative comment syntax using reference-style links is also not validated:
+
+```markdown
+[This is a comment that will be hidden.]: #
+```
+
+This is an intentional limitation - comments are for human readers and don't require schema enforcement.
+
+## Notes
+
+- Only HTML inside tags matches the `html` matcher
+- XML Schema provides the most precise validation but is more complex
+- Prefer Markdown equivalents over raw HTML when possible
+- Comments are intentionally not validated

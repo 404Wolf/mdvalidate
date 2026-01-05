@@ -54,19 +54,16 @@
               typst
               mermaid-cli
               fira-mono
-              git-cliff
               cargo-release
-              ruff
-              black
               stdenv.cc.cc.lib
+              bun
+              just
             ])
             ++ [
               toolchain.defaultToolchain
             ];
           shellHook = ''
             export PATH=$PATH:target/debug
-            export LLVM_COV=${pkgs.llvmPackages_latest.llvm}/bin/llvm-cov
-            export LLVM_PROFDATA=${pkgs.llvmPackages_latest.llvm}/bin/llvm-profdata
             export LD_LIBRARY_PATH=${pkgs.stdenv.cc.cc.lib}/lib:$LD_LIBRARY_PATH
           '';
         };

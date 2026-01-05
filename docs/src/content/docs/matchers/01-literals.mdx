@@ -1,0 +1,15 @@
+---
+title: Literal
+description: Literal markdown matches itself
+order: 1
+---
+
+import SchemaAndInput from "../../../components/SchemaAndInput.astro";
+
+The most basic kind of match you can do in a schema is just plain text. Literal text always validates itself.
+
+<SchemaAndInput schema={`Hello World`} input={`Hello World`} valid={true} />
+<SchemaAndInput schema={`# Hi`} input={`# Hi`} valid={true} />
+
+<SchemaAndInput schema={`Hello World`} input={`Hello World`} valid={false} />
+<SchemaAndInput schema={`# Hi`} input={`## Hi`} valid={false} />

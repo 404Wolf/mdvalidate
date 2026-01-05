@@ -1,0 +1,133 @@
+---
+title: Code Blocks
+description: Validate fenced code blocks with language and content matching
+order: 4
+---
+
+import SchemaAndInput from "../../../components/SchemaAndInput.astro";
+import TODO from "../../../components/TODO.astro";
+
+Fenced code blocks can be validated for both their language specifier and content.
+
+## Literal Matching
+
+Code blocks match literally by default - both language and content must be identical.
+This is similar to how literal matchers in general work.
+
+<SchemaAndInput
+  schema={"\`\`\`rust\nfn main() {}\n\`\`\`"}
+  input={"\`\`\`rust\nfn main() {}\n\`\`\`"}
+  valid={true}
+/>
+
+<SchemaAndInput
+  schema={"\`\`\`rust\nfn main() {}\n\`\`\`"}
+  input={"\`\`\`python\nfn main() {}\n\`\`\`"}
+  valid={false}
+/>
+
+<SchemaAndInput
+  schema={"\`\`\`rust\nfn main() {}\n\`\`\`"}
+  input={"\`\`\`rust\nprint('hello')\n\`\`\`"}
+  valid={false}
+/>
+
+## Language Matcher
+
+Use `{label:/pattern/}` in the language position to match language specifiers:
+<SchemaAndInput
+  schema={"\`\`\`{lang:/\w+/}\nfn main() {}\n\`\`\`"}
+  input={"\`\`\`rust\nfn main() {}\n\`\`\`"}
+  valid={true}
+  output={'{"lang":"rust"}'}
+/>
+
+<SchemaAndInput
+  schema={"\`\`\`{lang:/\w+/}\nfn main() {}\n\`\`\`"}
+  input={"\`\`\`javascript\nfn main() {}\n\`\`\`"}
+  valid={true}
+  output={'{"lang":"javascript"}'}
+/>
+
+<SchemaAndInput
+  schema={"\`\`\`{lang:/\w+/}\nfn main() {}\n\`\`\`"}
+  input={"\`\`\`rust\nprint('hello')\n\`\`\`"}
+  valid={false}
+/>
+
+## Content Capture
+
+Use `{id}` in the code content to capture the entire code block without validation:
+
+<SchemaAndInput
+  schema={"\`\`\`rust\n{code}\n\`\`\`"}
+  input={"\`\`\`rust\nprint('hello')\n\`\`\`"}
+  valid={true}
+  output={'{"code":"print(\'hello\')"}'}
+/>
+
+## Content Validation
+
+You can validate code block content by specifying an executable to run. The code content is passed via stdin to the executable.
+
+Use the syntax `{id:!executable}` to validate and capture code content:
+
+<SchemaAndInput
+  schema={"\`\`\`python\n{code:!python -m py_compile -}\n\`\`\`"}
+  input={"\`\`\`python\nprint('hello')\n\`\`\`"}
+  valid={true}
+  output={'{"code":"print(\'hello\')"}'}
+/>
+
+<SchemaAndInput
+  schema={"\`\`\`python\n{code:!python -m py_compile -}\n\`\`\`"}
+  input={"\`\`\`python\nthis is invalid python\n\`\`\`"}
+  valid={false}
+/>
+
+The executable receives the code content via stdin. If the executable exits with code 0, the validation passes. Any other exit code indicates validation failure.
+
+## Combined Language and Content
+
+Match language with a pattern and capture content:
+
+<SchemaAndInput
+  schema={"\`\`\`{lang:/\w+/}\n{code}\n\`\`\`"}
+  input={"\`\`\`python\nprint('hello')\n\`\`\`"}
+  valid={true}
+  output={'{"lang":"python","code":"print(\'hello\')"}'}
+/>
+
+<SchemaAndInput
+  schema={"\`\`\`{lang:/\w+/}\n{code}\n\`\`\`"}
+  input={"\`\`\`rust\nfn main() {}\n\`\`\`"}
+  valid={true}
+  output={'{"lang":"rust","code":"fn main() {}"}'}
+/>
+
+## Execution Validation
+
+<TODO />
+
+You can validate code block content using the same execution validation pattern as inline matchers. Use `{id:!executable}`:
+
+<SchemaAndInput
+  schema={"\`\`\`python\n{code:!python -m py_compile -}\n\`\`\`"}
+  input={"\`\`\`python\nprint('hello')\n\`\`\`"}
+  valid={true}
+  output={'{"code":"print(\'hello\')"}'}
+/>
+
+<SchemaAndInput
+  schema={"\`\`\`python\n{code:!python -m py_compile -}\n\`\`\`"}
+  input={"\`\`\`python\nthis is invalid python\n\`\`\`"}
+  valid={false}
+/>
+
+The code content is passed via stdin to the executable. Exit code 0 means validation passes.
+
+## Notes
+
+- Language matchers support the same regex patterns as inline matchers
+- Content can only be captured with `{id}`, not validated with regex
+- Both language and content are optional in the schema and input
