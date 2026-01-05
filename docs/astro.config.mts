@@ -4,6 +4,8 @@ import { defineConfig } from "astro/config";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
+  site: "https://404wolf.github.io",
+  base: "/mdvalidate/",
   integrations: [
     starlight({
       title: "mdvalidate docs",
