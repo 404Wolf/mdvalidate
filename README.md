@@ -12,6 +12,8 @@ We plan to eventually support converting a Markdown schema into a JSON schema de
 
 `mdvalidate` is written in 100% safe rust and is 🔥 blazingly fast 🔥.
 
+You can find the full docs [here](https://404wolf.github.io/mdvalidate/)!
+
 ## Mini Example
 
 Here’s a simple schema that will validate all grocery lists of a specific shape.
