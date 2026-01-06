@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
-use tree_sitter_markdown::language;
+use tree_sitter_markdown::LANGUAGE;
 
 use crate::mdschema::validator::errors::ValidationError;
 
@@ -77,7 +77,7 @@ pub fn has_subsequent_node_of_kind(cursor: &TreeCursor, kind: &str) -> bool {
 /// Create a new Tree-sitter parser for Markdown.
 pub fn new_markdown_parser() -> Parser {
     let mut parser = Parser::new();
-    parser.set_language(&language()).unwrap();
+    parser.set_language(&LANGUAGE.into()).unwrap();
     parser
 }
 
@@ -129,6 +129,7 @@ pub fn is_text_node(node: &Node) -> bool {
 
 /// Check if a node is specifically a code node.
 pub fn is_code_node(node: &Node) -> bool {
+    dbg!(node.parent().unwrap().to_sexp());
     node.kind() == "code_span"
 }
 

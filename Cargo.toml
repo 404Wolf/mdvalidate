@@ -3,11 +3,6 @@ name = "mdv"
 path = "src/main.rs"
 publish = true
 
-[[bin]]
-name = "tree_inspector"
-path = "src/helpers/tree_inspector.rs"
-publish = false
-
 [dependencies]
 ariadne = "0.5.1"
 clap = {version = "4.5.48", features = ["derive"]}
@@ -35,7 +30,7 @@ path = "src/lib.rs"
 
 [package]
 name = "mdvalidate"
-version = "0.1.29"
+version = "0.1.28"
 description = "Markdown schema validation engine"
 license = "MIT"
 documentation = "https://github.com/404wolf/mdvalidate"

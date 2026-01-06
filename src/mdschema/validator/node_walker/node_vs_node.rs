@@ -234,7 +234,6 @@ mod tests {
     use serde_json::json;
 
     use crate::{
-        helpers::node_print::PrettyPrint,
         mdschema::validator::{
             errors::{ChildrenCount, SchemaViolationError, ValidationError},
             node_walker::node_vs_node::validate_node_vs_node,
@@ -435,8 +434,6 @@ mod tests {
 
         let schema_cursor = schema.walk();
         let input_cursor = input.walk();
-        eprintln!("{}", input_cursor.node().pretty_print());
-        eprintln!("{}", schema_cursor.node().pretty_print());
 
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
