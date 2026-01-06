@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
-use tree_sitter_markdown::LANGUAGE;
+use tree_sitter_markdown::language;
 
 use crate::mdschema::validator::errors::ValidationError;
 
@@ -77,7 +77,7 @@ pub fn has_subsequent_node_of_kind(cursor: &TreeCursor, kind: &str) -> bool {
 /// Create a new Tree-sitter parser for Markdown.
 pub fn new_markdown_parser() -> Parser {
     let mut parser = Parser::new();
-    parser.set_language(&LANGUAGE.into()).unwrap();
+    parser.set_language(&language()).unwrap();
     parser
 }
 

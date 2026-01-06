@@ -10,14 +10,14 @@ const __dirname = dirname(__filename);
 const inputPath = join(__dirname, "./input.md");
 const stream = createReadStream(inputPath, {
   encoding: "utf8",
-  highWaterMark: 2,
+  highWaterMark: 7,
 });
 
 stream.on("data", (chunk) => {
   process.stdout.write(chunk);
   console.error(chunk);
   stream.pause();
-  setTimeout(() => stream.resume(), 30);
+  setTimeout(() => stream.resume(), 80);
 });
 
 stream.on("end", () => {

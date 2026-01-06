@@ -1,1 +1,1 @@
-*test*test`foo:/bar/`wolf
+- `item:/[^w]*/`{1,9}
