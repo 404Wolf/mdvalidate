@@ -1,6 +1,5 @@
 use log::trace;
 use serde_json::json;
-use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
@@ -8,7 +7,10 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError},
     node_walker::{
         ValidationResult,
-        validators::textual_container::validate_textual_container_vs_textual_container,
+        validators::{
+            Validator, ValidatorImpl,
+            textual_container::validate_textual_container_vs_textual_container,
+        },
     },
     ts_utils::{
         count_siblings, get_node_and_next_node, has_single_code_child, has_subsequent_node_of_kind,
@@ -72,11 +74,31 @@ use crate::mdschema::validator::{
 ///
 /// Note that a limitation here is that you cannot have a variable-length list
 /// that is not the final list in your schema.
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
-), ret)]
 pub fn validate_list_vs_list(
+    input_cursor: &TreeCursor,
+    schema_cursor: &TreeCursor,
+    schema_str: &str,
+    input_str: &str,
+    got_eof: bool,
+) -> ValidationResult {
+    ListVsListValidator::validate(input_cursor, schema_cursor, schema_str, input_str, got_eof)
+}
+
+struct ListVsListValidator;
+
+impl ValidatorImpl for ListVsListValidator {
+    fn validate_impl(
+        input_cursor: &TreeCursor,
+        schema_cursor: &TreeCursor,
+        schema_str: &str,
+        input_str: &str,
+        got_eof: bool,
+    ) -> ValidationResult {
+        validate_list_vs_list_impl(input_cursor, schema_cursor, schema_str, input_str, got_eof)
+    }
+}
+
+fn validate_list_vs_list_impl(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
     schema_str: &str,
@@ -640,14 +662,28 @@ mod tests {
 
     use serde_json::json;
 
+    use super::ListVsListValidator;
     use crate::mdschema::validator::{
         errors::{ChildrenCount, NodeContentMismatchKind, SchemaViolationError, ValidationError},
+        node_walker::ValidationResult,
         node_walker::validators::lists::{
             ensure_at_first_list_item, extract_repeated_matcher_from_list_item,
             validate_list_vs_list,
         },
-        ts_utils::parse_markdown,
+        node_walker::validators::test_utils::ValidatorTester,
+        ts_utils::{is_list_node, parse_markdown},
     };
+
+    fn validate_lists(schema_str: &str, input_str: &str, got_eof: bool) -> ValidationResult {
+        ValidatorTester::<ListVsListValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(i, s)| {
+                assert!(is_list_node(i));
+                assert!(is_list_node(s));
+            })
+            .validate(got_eof)
+    }
 
     #[test]
     fn test_ensure_at_first_list_item() {
@@ -799,21 +835,12 @@ mod tests {
     #[test]
     fn test_validate_list_vs_list_literal_list_items_matching() {
         let schema_str = "- test1\n- test2";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "- test1\n- test2";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
+        let result = validate_lists(schema_str, input_str, false);
 
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
-
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -822,18 +849,8 @@ mod tests {
     #[test]
     fn test_validate_list_vs_list_literal_list_items_different() {
         let input_str = "- test1\n- different";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
         let schema_str = "- test1\n- test2";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_lists(schema_str, input_str, false);
 
         assert!(!result.errors.is_empty());
         match &result.errors[0] {
@@ -860,18 +877,8 @@ mod tests {
         //             └─ (paragraph[9]12..19)
         //                └─ (text[10]12..19)
 
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "- test1\n  - nested_different";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_lists(schema_str, input_str, false);
 
         assert!(
             !result.errors.is_empty(),
@@ -911,18 +918,8 @@ mod tests {
         //       └─ (paragraph[13]22..27)
         //          └─ (text[14]22..27)
 
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "- test1\n  - nested1\n- test3";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_lists(schema_str, input_str, false);
 
         assert!(
             !result.errors.is_empty(),
@@ -959,8 +956,9 @@ mod tests {
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors with nested literal items, got: {:?}",
             result.errors
         );
@@ -996,8 +994,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1038,8 +1037,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1080,8 +1080,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1297,8 +1298,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1332,8 +1334,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1448,8 +1451,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1488,8 +1492,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1549,8 +1554,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1647,8 +1653,9 @@ Footer: test (footer isn't validated with_list_vs_list)
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
         // Should stop at max (3) and not validate the 4th item
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Should not error when max is reached, just stop validating"
         );
 
@@ -1684,8 +1691,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors for valid non-nested list"
         );
         assert_eq!(result.value, json!({"test": ["test1", "test2", "test3"]}));
@@ -1768,8 +1776,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Should not error when got_eof is false, just stop at max"
         );
         assert_eq!(result.value, json!({"test": ["test1", "test2"]}));
@@ -1823,8 +1832,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors when list meets minimum"
         );
         assert_eq!(
@@ -1887,8 +1897,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors for unlimited matcher"
         );
         assert_eq!(
@@ -2008,7 +2019,7 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result =
             validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(result.errors.is_empty());
+        assert_eq!(result.errors, vec![]);
     }
 
     #[test]

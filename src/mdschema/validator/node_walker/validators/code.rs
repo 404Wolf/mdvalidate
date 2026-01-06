@@ -2,13 +2,15 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 use serde_json::json;
-use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     errors::{NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError},
     matcher::matcher::{Matcher, MatcherError},
-    node_walker::ValidationResult,
+    node_walker::{
+        ValidationResult,
+        validators::{Validator, ValidatorImpl},
+    },
     ts_utils::extract_codeblock_contents,
 };
 
@@ -44,11 +46,32 @@ use crate::mdschema::validator::{
 ///
 /// Note you cannot yet enforce regex on the actual code content.
 /// ```
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str), level = "debug", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
-), ret)]
 pub fn validate_code_vs_code(
+    input_cursor: &TreeCursor,
+    schema_cursor: &TreeCursor,
+    schema_str: &str,
+    input_str: &str,
+    got_eof: bool,
+) -> ValidationResult {
+    CodeVsCodeValidator::validate(input_cursor, schema_cursor, schema_str, input_str, got_eof)
+}
+
+struct CodeVsCodeValidator;
+
+impl ValidatorImpl for CodeVsCodeValidator {
+    fn validate_impl(
+        input_cursor: &TreeCursor,
+        schema_cursor: &TreeCursor,
+        schema_str: &str,
+        input_str: &str,
+        got_eof: bool,
+    ) -> ValidationResult {
+        let _got_eof = got_eof;
+        validate_code_vs_code_impl(input_cursor, schema_cursor, schema_str, input_str)
+    }
+}
+
+fn validate_code_vs_code_impl(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
     schema_str: &str,
@@ -202,7 +225,8 @@ fn extract_id_from_curly_braces(input: &str) -> Option<&str> {
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::ts_utils::parse_markdown;
+    use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
+    use crate::mdschema::validator::ts_utils::is_codeblock_node;
 
     use super::*;
 
@@ -241,47 +265,36 @@ mod tests {
     fn test_validate_code_vs_code_literal_same() {
         // positive case: input and schema are identical
         let input_str = "```rust\nfn main() {}\n```";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-        assert!(input_cursor.goto_first_child()); // move to fenced_code_block
-
         let schema_str = "```rust\nfn main() {}\n```";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        assert!(schema_cursor.goto_first_child()); // move to fenced_code_block
 
-        let result = validate_code_vs_code(
-            &mut input_cursor,
-            &mut schema_cursor,
-            schema_str.into(),
-            input_str.into(),
-        );
-        assert!(
-            result.errors.is_empty(),
-            "Expected no errors, got {:?}",
-            result.errors
-        );
-        assert_eq!(result.value, json!({}));
+        let (value, errors, _farthest_reached_pos) =
+            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| {
+                    assert!(is_codeblock_node(i));
+                    assert!(is_codeblock_node(s));
+                })
+                .validate(true)
+                .destruct();
+
+        assert_eq!(errors, vec![], "Expected no errors, got {:?}", errors);
+        assert_eq!(value, json!({}));
 
         // negative case: change input so it is not the same as the schema
         let input_str_negative = "```rust\nfn main() { println!(\"hi\"); }\n```";
-        let input_tree_negative = parse_markdown(input_str_negative).unwrap();
-        let mut input_cursor_negative = input_tree_negative.walk();
-        assert!(input_cursor_negative.goto_first_child()); // move to fenced_code_block
+        let (_value, errors, _farthest_reached_pos) =
+            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str_negative)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| {
+                    assert!(is_codeblock_node(i));
+                    assert!(is_codeblock_node(s));
+                })
+                .validate(true)
+                .destruct();
 
-        // Recreate schema cursor to ensure it's at the correct position
-        let schema_tree_again = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor_again = schema_tree_again.walk();
-        assert!(schema_cursor_again.goto_first_child()); // move to fenced_code_block
-
-        let result_negative = validate_code_vs_code(
-            &mut input_cursor_negative,
-            &mut schema_cursor_again,
-            schema_str.into(),
-            input_str_negative.into(),
-        );
-
-        assert!(!result_negative.errors.is_empty());
+        assert!(!errors.is_empty());
     }
 
     #[test]
@@ -289,21 +302,22 @@ mod tests {
         let schema_str = r#"```{lang:/\w+/}
 fn main() {}
 ```"#;
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        assert!(schema_cursor.goto_first_child()); // move to fenced_code_block
-
         let input_str = r#"```rust
 fn main() {}
 ```"#;
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-        assert!(input_cursor.goto_first_child()); // move to fenced_code_block
+        let (value, errors, _farthest_reached_pos) =
+            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| {
+                    assert!(is_codeblock_node(i));
+                    assert!(is_codeblock_node(s));
+                })
+                .validate(true)
+                .destruct();
 
-        let result =
-            validate_code_vs_code(&mut input_cursor, &mut schema_cursor, schema_str, input_str);
-        assert!(result.errors.is_empty());
-        assert_eq!(result.value, json!({ "lang": "rust" }))
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({ "lang": "rust" }));
     }
 
     #[test]
@@ -311,23 +325,21 @@ fn main() {}
         let schema_str = r#"```{lang:/\w+/}
 {code}
 ```"#;
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-        assert!(schema_cursor.goto_first_child()); // move to fenced_code_block
-
         let input_str = r#"```rust
 fn main() {}
 ```"#;
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-        assert!(input_cursor.goto_first_child()); // move to fenced_code_block
+        let (value, errors, _farthest_reached_pos) =
+            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| {
+                    assert!(is_codeblock_node(i));
+                    assert!(is_codeblock_node(s));
+                })
+                .validate(true)
+                .destruct();
 
-        let result =
-            validate_code_vs_code(&mut input_cursor, &mut schema_cursor, schema_str, input_str);
-        assert!(result.errors.is_empty());
-        assert_eq!(
-            result.value,
-            json!({ "lang": "rust", "code": "fn main() {}" })
-        )
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({ "lang": "rust", "code": "fn main() {}" }))
     }
 }

@@ -1,9 +1,11 @@
+[dependencies]
+ptree = "0.5.2"
+tree-sitter = "0.25.10"
+
+[lib]
+path = "src/lib.rs"
+
 [package]
-name = "mdv"
+name = "mdv-utils"
 version = "0.1.0"
 edition = "2024"
-
-[dependencies]
-ptree = "0.4"
-tree-sitter = "0.19.5"
-tree-sitter-markdown = "0.7"

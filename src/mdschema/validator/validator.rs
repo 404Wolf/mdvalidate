@@ -289,8 +289,9 @@ mod tests {
         let input = "# Test\n\n\nfooobar\n\n\n\ntest\n\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -368,8 +369,9 @@ fooobar
 ";
 
         let (errors, matches) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "expected no errors, but found {:?}",
             errors
         );
@@ -395,8 +397,9 @@ fooobar
         let input = "# Hi Wolf\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -423,8 +426,9 @@ fooobar
         let input = "Hello Wolf there!\n";
 
         let (errors, matches) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -440,8 +444,9 @@ Version: `ver:/[0-9]+\.[0-9]+\.[0-9]+/`
         let input = "Hello Wolf there!\n\nVersion: 1.2.3\n";
 
         let (errors, matches) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -463,8 +468,9 @@ Version: 1
 "#;
 
         let (errors, matches) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -490,8 +496,9 @@ Version: 1
         let input = "# Assignment 1 test\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -509,8 +516,9 @@ Version: 1
 ";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -539,8 +547,9 @@ Version: 1
         let input = "# Heading 1\n\n## Heading 2\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -552,8 +561,9 @@ Version: 1
         let input = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -578,8 +588,9 @@ Version: 1
         let input = "> This is a blockquote\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -593,8 +604,9 @@ Version: 1
         let input = "[Link text](https://example.com)\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -619,8 +631,9 @@ Version: 1
         let input = "";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -632,8 +645,9 @@ Version: 1
         let input = "# Assignment 7\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -645,8 +659,9 @@ Version: 1
         let input = "This is a `code` example.\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -658,8 +673,9 @@ Version: 1
         let input = "\n\n\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -681,9 +697,10 @@ Version: 1
             .expect("Failed to read input");
 
         validator.validate();
-        let errors: Vec<_> = validator.errors_so_far().collect();
-        assert!(
-            errors.is_empty(),
+        let errors: Vec<_> = validator.errors_so_far().cloned().collect();
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -718,9 +735,10 @@ Paragraph text
             .read_input("# Title\n\nParagraph text\n", true)
             .unwrap();
         validator.validate();
-        let errors: Vec<_> = validator.errors_so_far().collect();
-        assert!(
-            errors.is_empty(),
+        let errors: Vec<_> = validator.errors_so_far().cloned().collect();
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no errors but found {:?}",
             errors
         );
@@ -745,8 +763,9 @@ Paragraph text
         let input = "Hello is the first word\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -758,8 +777,9 @@ Paragraph text
         let input = "The last word is Hello\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -780,8 +800,9 @@ Paragraph text
         let input = "Wolf Mermelstein\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -793,8 +814,9 @@ Paragraph text
         let input = "This is the entire line content\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -806,8 +828,9 @@ Paragraph text
         let input = "Wolf Mermelstein\n";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -988,14 +1011,14 @@ Content for section 3."#;
         for (i, chunk) in chunks.iter().enumerate() {
             let is_eof = i == chunks.len() - 1;
 
-            let indices_before = validator.state().farthest_reached_pos().to_pos_tuple();
+            let indices_before = validator.state().farthest_reached_pos().to_pos();
 
             validator
                 .read_input(chunk, is_eof)
                 .expect("Failed to read input");
             validator.validate();
 
-            let indices_after = validator.state().farthest_reached_pos().to_pos_tuple();
+            let indices_after = validator.state().farthest_reached_pos().to_pos();
 
             // Indices should advance (or stay the same if nothing new to validate)
             // They should NOT reset to 0
@@ -1022,8 +1045,9 @@ Content for section 3."#;
         let input = "# Title\n\nSome content with a ruler below:\n\n---\n\nMore content.";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );
@@ -1035,8 +1059,9 @@ Content for section 3."#;
         let input = "# Title\n\nContent above rulers.\n\n***\n\nMore content.\n\n___\n\nEnd content.\n\n---";
 
         let (errors, _) = do_validate(schema, input, true);
-        assert!(
-            errors.is_empty(),
+        assert_eq!(
+            errors,
+            vec![],
             "Expected no validation errors but found {:?}",
             errors
         );

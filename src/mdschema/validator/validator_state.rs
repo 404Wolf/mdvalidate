@@ -33,7 +33,7 @@ impl NodePosPair {
     }
 
     /// Convert the `NodePosPair` to a tuple of input and schema indexes.
-    pub fn to_pos_tuple(&self) -> (usize, usize) {
+    pub fn to_pos(&self) -> (usize, usize) {
         (self.input_index, self.schema_index)
     }
 
@@ -50,7 +50,7 @@ impl NodePosPair {
         input_cursor: &mut TreeCursor,
         schema_cursor: &mut TreeCursor,
     ) {
-        let (input_pos, schema_pos) = self.to_pos_tuple();
+        let (input_pos, schema_pos) = self.to_pos();
 
         input_cursor.goto_descendant(input_pos);
         schema_cursor.goto_descendant(schema_pos);

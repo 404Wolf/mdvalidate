@@ -1,10 +1,7 @@
-#[cfg(test)]
 use serde_json::Value;
 
-#[cfg(test)]
 use crate::mdschema::validator::{errors::ValidationError, validator_state::ValidatorState};
 
-#[cfg(test)]
 pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, ValidatorState) {
     use crate::mdschema::validator::ts_utils::new_markdown_parser;
     use crate::mdschema::validator::validator_state::ValidatorState;

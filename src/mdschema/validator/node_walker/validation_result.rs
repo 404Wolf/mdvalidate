@@ -107,6 +107,12 @@ impl ValidationResult {
     pub fn farthest_reached_pos_mut(&mut self) -> &mut NodePosPair {
         &mut self.farthest_reached_pos
     }
+
+    /// Destruct the result into (value, errors, farthest_reached_pos).
+    pub fn destruct(self) -> (Value, Vec<ValidationError>, NodePosPair) {
+        (self.value, self.errors, self.farthest_reached_pos)
+    }
+
 }
 
 impl Default for ValidationResult {
@@ -132,7 +138,7 @@ mod tests {
         result.join_other_result(&ValidationResult::from_descendant_indexes(1, 1));
         result.add_error(ValidationError::ValidatorCreationFailed);
 
-        assert_eq!(result.farthest_reached_pos().to_pos_tuple(), (1, 1)); // the farther!
+        assert_eq!(result.farthest_reached_pos().to_pos(), (1, 1)); // the farther!
         assert_eq!(result.value, json!({"id": "value"}));
 
         assert_eq!(result.errors.len(), 1);
@@ -150,7 +156,7 @@ mod tests {
         result.set_match("id", json!("value"));
         result.join_other_result(&other);
 
-        assert_eq!(result.farthest_reached_pos().to_pos_tuple(), (1, 1));
+        assert_eq!(result.farthest_reached_pos().to_pos(), (1, 1));
         assert_eq!(result.value, json!({"id": "value"}));
         assert_eq!(result.errors.len(), 0);
     }

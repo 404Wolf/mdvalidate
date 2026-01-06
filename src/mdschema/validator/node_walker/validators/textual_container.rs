@@ -1,4 +1,3 @@
-use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
@@ -8,8 +7,9 @@ use crate::mdschema::validator::{
         matcher_extras::get_all_extras,
     },
     node_walker::{
-        ValidationResult, helpers::expected_input_nodes::expected_input_nodes,
-        validators::textual::validate_textual_vs_textual,
+        ValidationResult,
+        helpers::expected_input_nodes::expected_input_nodes,
+        validators::{Validator, ValidatorImpl, textual::validate_textual_vs_textual},
     },
     ts_utils::{
         both_are_textual_containers, count_siblings, get_next_node, is_code_node, is_text_node,
@@ -48,11 +48,43 @@ use crate::mdschema::validator::{
 ///      check that there is a text node in the input, maybe error, and if there is,
 ///      validate that the contents of the rest of it is the same.
 ///    - Then move to the next node pair, hopping two nodes at once for the schema node.
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
-), ret)]
 pub fn validate_textual_container_vs_textual_container(
+    input_cursor: &TreeCursor,
+    schema_cursor: &TreeCursor,
+    schema_str: &str,
+    input_str: &str,
+    got_eof: bool,
+) -> ValidationResult {
+    TextualContainerVsTextualContainerValidator::validate(
+        input_cursor,
+        schema_cursor,
+        schema_str,
+        input_str,
+        got_eof,
+    )
+}
+
+struct TextualContainerVsTextualContainerValidator;
+
+impl ValidatorImpl for TextualContainerVsTextualContainerValidator {
+    fn validate_impl(
+        input_cursor: &TreeCursor,
+        schema_cursor: &TreeCursor,
+        schema_str: &str,
+        input_str: &str,
+        got_eof: bool,
+    ) -> ValidationResult {
+        validate_textual_container_vs_textual_container_impl(
+            input_cursor,
+            schema_cursor,
+            schema_str,
+            input_str,
+            got_eof,
+        )
+    }
+}
+
+fn validate_textual_container_vs_textual_container_impl(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
     schema_str: &str,
@@ -211,17 +243,16 @@ fn count_non_literal_matchers_in_children(
 mod tests {
     use serde_json::json;
 
+    use super::TextualContainerVsTextualContainerValidator;
     use crate::mdschema::validator::{
         errors::{SchemaError, ValidationError},
         matcher::matcher::MatcherError,
+        node_walker::validators::test_utils::ValidatorTester,
         node_walker::validators::{
             textual::validate_textual_vs_textual,
-            textual_container::{
-                count_non_literal_matchers_in_children,
-                validate_textual_container_vs_textual_container,
-            },
+            textual_container::count_non_literal_matchers_in_children,
         },
-        ts_utils::parse_markdown,
+        ts_utils::{is_heading_content_node, is_textual_container_node, parse_markdown},
         validator_state::NodePosPair,
     };
 
@@ -316,22 +347,18 @@ mod tests {
         let schema_str = "`code`! test";
         let input_str = "`code` test";
 
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        input_cursor.goto_first_child(); // document -> paragraph
-        schema_cursor.goto_first_child(); // document -> paragraph
-
-        let result = validate_textual_container_vs_textual_container(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
+        let result = ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
+            schema_str, input_str,
+        )
+        .walk()
+        .goto_first_child_then_unwrap()
+        .peek_nodes(|(input, schema)| {
+            let n = input;
+            assert!(is_textual_container_node(n));
+            let n = schema;
+            assert!(is_textual_container_node(n));
+        })
+        .validate(true);
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({}));
@@ -340,39 +367,21 @@ mod tests {
     #[test]
     fn test_validate_textual_container_vs_textual_container_header_content() {
         let schema_str = "# Test Wolf";
-        // (document[0]0..12)
-        // └─ (atx_heading[1]0..11)
-        //    ├─ (atx_h1_marker[2]0..1)
-        //    └─ (heading_content[3]1..11)
-        //       └─ (text[4]1..11)
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "# Test Wolf";
-        // (document[0]0..12)
-        // └─ (atx_heading[1]0..11)
-        //    ├─ (atx_h1_marker[2]0..1)
-        //    └─ (heading_content[3]1..11)
-        //       └─ (text[4]1..11)
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_next_sibling();
-        schema_cursor.goto_next_sibling();
-        assert_eq!(input_cursor.node().kind(), "heading_content");
-        assert_eq!(schema_cursor.node().kind(), "heading_content");
-
-        let result = validate_textual_container_vs_textual_container(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
+        let result = ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
+            schema_str, input_str,
+        )
+        .walk()
+        .goto_first_child_then_unwrap()
+        .goto_first_child_then_unwrap()
+        .goto_next_sibling_then_unwrap()
+        .peek_nodes(|(input, schema)| {
+            let n = input;
+            assert!(is_heading_content_node(n));
+            let n = schema;
+            assert!(is_heading_content_node(n));
+        })
+        .validate(true);
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -385,42 +394,22 @@ mod tests {
     #[test]
     fn test_validate_textual_container_vs_textual_container_header_content_and_matcher() {
         let schema_str = "# Test `name:/[a-zA-Z]+/`";
-        // (document[0]0..26)
-        // └─ (atx_heading[1]0..25)
-        //    ├─ (atx_h1_marker[2]0..1)
-        //    └─ (heading_content[3]1..25)
-        //       ├─ (text[4]1..7)
-        //       └─ (code_span[5]7..25)
-        //          └─ (text[6]8..24)
-
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "# Test Wolf";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-        // (document[0])
-        // └─ (atx_heading[1])
-        //    ├─ (atx_h1_marker[2])
-        //    └─ (heading_content[3])
-        //       └─ (text[4])
 
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_next_sibling();
-        schema_cursor.goto_next_sibling();
-        assert_eq!(input_cursor.node().kind(), "heading_content");
-        assert_eq!(schema_cursor.node().kind(), "heading_content");
-
-        let result = validate_textual_container_vs_textual_container(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
+        let result = ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
+            schema_str, input_str,
+        )
+        .walk()
+        .goto_first_child_then_unwrap()
+        .goto_first_child_then_unwrap()
+        .goto_next_sibling_then_unwrap()
+        .peek_nodes(|(input, schema)| {
+            let n = input;
+            assert!(is_heading_content_node(n));
+            let n = schema;
+            assert!(is_heading_content_node(n));
+        })
+        .validate(true);
 
         let errors = result.errors.clone();
         let value = result.value.clone();
@@ -433,34 +422,20 @@ mod tests {
     #[test]
     fn test_validate_textual_container_vs_textual_container_with_incomplete_matcher() {
         let schema_str = "prefix `test:/test/`";
-        // (document[0]0..21)
-        // └─ (paragraph[1]0..20)
-        //    ├─ (text[2]0..7)
-        //    └─ (code_span[3]7..20)
-        //       └─ (text[4]8..19)
-
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "prefix `test:/te";
-        // (document[0]0..17)
-        // └─ (paragraph[1]0..16)
-        //    └─ (text[2]0..16)
 
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        schema_cursor.goto_first_child(); // document -> paragraph
-
-        input_cursor.goto_first_child(); // document -> paragraph
-
-        let result = validate_textual_container_vs_textual_container(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            false, // we are allowed to have a broken matcher if it is the last com
-        );
+        let result = ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
+            schema_str, input_str,
+        )
+        .walk()
+        .goto_first_child_then_unwrap()
+        .peek_nodes(|(input, schema)| {
+            let n = input;
+            assert!(is_textual_container_node(n));
+            let n = schema;
+            assert!(is_textual_container_node(n));
+        })
+        .validate(false);
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({}));

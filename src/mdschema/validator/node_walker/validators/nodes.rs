@@ -63,7 +63,13 @@ pub fn validate_node_vs_node(
     if both_are_codeblocks(&input_node, &schema_node) {
         trace!("Both are container nodes, validating container vs container");
 
-        return validate_code_vs_code(&input_cursor, &schema_cursor, schema_str, input_str);
+        return validate_code_vs_code(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            got_eof,
+        );
     }
 
     // Both are textual containers
@@ -124,7 +130,13 @@ pub fn validate_node_vs_node(
     if both_are_rulers(&input_node, &schema_node) {
         trace!("Both are rulers, validating ruler vs ruler");
 
-        return validate_ruler_vs_ruler(&input_cursor, &schema_cursor);
+        return validate_ruler_vs_ruler(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            got_eof,
+        );
     }
 
     // Both are heading nodes or document nodes
@@ -236,7 +248,7 @@ mod tests {
     use crate::{
         mdschema::validator::{
             errors::{ChildrenCount, SchemaViolationError, ValidationError},
-            node_walker::node_vs_node::validate_node_vs_node,
+            node_walker::validators::nodes::validate_node_vs_node,
             ts_utils::parse_markdown,
         },
     };
@@ -289,7 +301,7 @@ mod tests {
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, false);
 
-        assert!(result.errors.is_empty());
+        assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({}));
 
         let schema_str2 = "This is *bold* text.";
@@ -325,8 +337,9 @@ mod tests {
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -346,8 +359,9 @@ mod tests {
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -367,8 +381,9 @@ mod tests {
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -438,8 +453,9 @@ mod tests {
         let result =
             validate_node_vs_node(&input_cursor, &schema_cursor, schema_str, input_str, true);
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );

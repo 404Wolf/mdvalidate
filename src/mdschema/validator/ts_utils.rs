@@ -129,7 +129,6 @@ pub fn is_text_node(node: &Node) -> bool {
 
 /// Check if a node is specifically a code node.
 pub fn is_code_node(node: &Node) -> bool {
-    dbg!(node.parent().unwrap().to_sexp());
     node.kind() == "code_span"
 }
 
