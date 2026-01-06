@@ -1,0 +1,9 @@
+[package]
+name = "mdv"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ptree = "0.4"
+tree-sitter = "0.19.5"
+tree-sitter-markdown = "0.7"
