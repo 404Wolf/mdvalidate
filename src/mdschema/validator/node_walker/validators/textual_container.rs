@@ -1,4 +1,3 @@
-use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
@@ -8,13 +7,19 @@ use crate::mdschema::validator::{
         matcher_extras::get_all_extras,
     },
     node_walker::{
-        ValidationResult, helpers::expected_input_nodes::expected_input_nodes,
-        validators::textual::validate_textual_vs_textual,
+        ValidationResult,
+        helpers::expected_input_nodes::expected_input_nodes,
+        validators::{
+            Validator, ValidatorImpl, links::LinkVsLinkValidator,
+            textual::TextualVsTextualValidator,
+        },
     },
     ts_utils::{
-        both_are_textual_containers, count_siblings, get_next_node, is_code_node, is_text_node,
+        both_are_image_nodes, both_are_link_nodes, both_are_textual_containers, count_siblings,
+        get_next_node, is_code_node, is_text_node,
     },
 };
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate a textual region of input against a textual region of schema.
 ///
@@ -48,23 +53,35 @@ use crate::mdschema::validator::{
 ///      check that there is a text node in the input, maybe error, and if there is,
 ///      validate that the contents of the rest of it is the same.
 ///    - Then move to the next node pair, hopping two nodes at once for the schema node.
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
-), ret)]
-pub fn validate_textual_container_vs_textual_container(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
+pub(super) struct TextualContainerVsTextualContainerValidator;
+
+impl ValidatorImpl for TextualContainerVsTextualContainerValidator {
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        validate_textual_container_vs_textual_container_impl(walker, got_eof)
+    }
+}
+
+fn validate_textual_container_vs_textual_container_impl(
+    walker: &ValidatorWalker,
     got_eof: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+    let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
-    debug_assert!(both_are_textual_containers(
-        &schema_cursor.node(),
-        &input_cursor.node()
-    ));
+    let schema_str = walker.schema_str();
+    let _input_str = walker.input_str();
+
+    let mut input_cursor = walker.input_cursor().clone();
+    let mut schema_cursor = walker.schema_cursor().clone();
+
+    if !both_are_textual_containers(&schema_cursor.node(), &input_cursor.node()) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "expected textual container nodes"
+        );
+        return result;
+    }
 
     match count_non_literal_matchers_in_children(&schema_cursor, schema_str) {
         Ok(non_repeating_matchers_count) if non_repeating_matchers_count > 1 && got_eof => result
@@ -115,22 +132,25 @@ pub fn validate_textual_container_vs_textual_container(
         ));
     }
 
-    let mut input_cursor = input_cursor.clone();
-    let mut schema_cursor = schema_cursor.clone();
-
     // Go from the container to the first child in the container, and then
     // iterate over the siblings at the same rate.
     input_cursor.goto_first_child();
     schema_cursor.goto_first_child();
 
     loop {
-        let pair_result = validate_textual_vs_textual(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
+        let pair_result = if both_are_link_nodes(&input_cursor.node(), &schema_cursor.node())
+            || both_are_image_nodes(&input_cursor.node(), &schema_cursor.node())
+        {
+            LinkVsLinkValidator::validate(
+                &walker.with_cursors(&input_cursor, &schema_cursor),
+                got_eof,
+            )
+        } else {
+            TextualVsTextualValidator::validate(
+                &walker.with_cursors(&input_cursor, &schema_cursor),
+                got_eof,
+            )
+        };
 
         result.join_other_result(&pair_result);
         result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
@@ -211,18 +231,15 @@ fn count_non_literal_matchers_in_children(
 mod tests {
     use serde_json::json;
 
+    use super::TextualContainerVsTextualContainerValidator;
     use crate::mdschema::validator::{
         errors::{SchemaError, ValidationError},
         matcher::matcher::MatcherError,
+        node_pos_pair::NodePosPair,
         node_walker::validators::{
-            textual::validate_textual_vs_textual,
-            textual_container::{
-                count_non_literal_matchers_in_children,
-                validate_textual_container_vs_textual_container,
-            },
+            test_utils::ValidatorTester, textual_container::count_non_literal_matchers_in_children,
         },
-        ts_utils::parse_markdown,
-        validator_state::NodePosPair,
+        ts_utils::{is_heading_content_node, parse_markdown},
     };
 
     #[test]
@@ -276,194 +293,82 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_textual_vs_textual_on_text() {
-        let schema_str = "test";
-        // (document[0]0..5)
-        // └─ (paragraph[1]0..4)
-        //    └─ (text[2]0..4)
+    fn test_validate_textual_container_vs_textual_container_with_content_and_link() {
+        let schema_str = "# Test Wolf [hi](https://example.com)";
+        let input_str = "# Test Wolf [hi](https://foobar.com)";
 
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
+        let (value, errors, _) =
+            ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
+                schema_str, input_str,
+            )
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .goto_next_sibling_then_unwrap()
+            .peek_nodes(|(input, schema)| {
+                let n = input;
+                assert!(is_heading_content_node(n));
+                let n = schema;
+                assert!(is_heading_content_node(n));
+            })
+            .validate_complete()
+            .destruct();
 
-        let input_str = "test";
-        // (document[0]0..5)
-        // └─ (paragraph[1]0..4)
-        //    └─ (text[2]0..4)
-
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        input_cursor.goto_first_child(); // document -> paragraph
-        schema_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // paragraph -> text
-        schema_cursor.goto_first_child(); // paragraph -> text
-
-        let result = validate_textual_vs_textual(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            false,
-        );
-
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(2, 2));
-    }
-
-    #[test]
-    fn test_validate_textual_container_vs_textual_container_with_literal_matcher() {
-        let schema_str = "`code`! test";
-        let input_str = "`code` test";
-
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        input_cursor.goto_first_child(); // document -> paragraph
-        schema_cursor.goto_first_child(); // document -> paragraph
-
-        let result = validate_textual_container_vs_textual_container(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
-
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({}));
+        assert!(!errors.is_empty());
+        assert_eq!(value, json!({}));
     }
 
     #[test]
     fn test_validate_textual_container_vs_textual_container_header_content() {
         let schema_str = "# Test Wolf";
-        // (document[0]0..12)
-        // └─ (atx_heading[1]0..11)
-        //    ├─ (atx_h1_marker[2]0..1)
-        //    └─ (heading_content[3]1..11)
-        //       └─ (text[4]1..11)
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "# Test Wolf";
-        // (document[0]0..12)
-        // └─ (atx_heading[1]0..11)
-        //    ├─ (atx_h1_marker[2]0..1)
-        //    └─ (heading_content[3]1..11)
-        //       └─ (text[4]1..11)
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
 
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_next_sibling();
-        schema_cursor.goto_next_sibling();
-        assert_eq!(input_cursor.node().kind(), "heading_content");
-        assert_eq!(schema_cursor.node().kind(), "heading_content");
-
-        let result = validate_textual_container_vs_textual_container(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
-
-        let errors = result.errors.clone();
-        let value = result.value.clone();
+        let (value, errors, farthest_reached_pos) = ValidatorTester::<
+            TextualContainerVsTextualContainerValidator,
+        >::from_strs(schema_str, input_str)
+        .walk()
+        .goto_first_child_then_unwrap()
+        .goto_first_child_then_unwrap()
+        .goto_next_sibling_then_unwrap()
+        .peek_nodes(|(input, schema)| {
+            let n = input;
+            assert!(is_heading_content_node(n));
+            let n = schema;
+            assert!(is_heading_content_node(n));
+        })
+        .validate_complete()
+        .destruct();
 
         assert_eq!(errors, vec![]);
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
         assert_eq!(value, json!({}));
     }
 
     #[test]
     fn test_validate_textual_container_vs_textual_container_header_content_and_matcher() {
         let schema_str = "# Test `name:/[a-zA-Z]+/`";
-        // (document[0]0..26)
-        // └─ (atx_heading[1]0..25)
-        //    ├─ (atx_h1_marker[2]0..1)
-        //    └─ (heading_content[3]1..25)
-        //       ├─ (text[4]1..7)
-        //       └─ (code_span[5]7..25)
-        //          └─ (text[6]8..24)
-
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "# Test Wolf";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-        // (document[0])
-        // └─ (atx_heading[1])
-        //    ├─ (atx_h1_marker[2])
-        //    └─ (heading_content[3])
-        //       └─ (text[4])
 
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-        schema_cursor.goto_first_child();
-        input_cursor.goto_next_sibling();
-        schema_cursor.goto_next_sibling();
-        assert_eq!(input_cursor.node().kind(), "heading_content");
-        assert_eq!(schema_cursor.node().kind(), "heading_content");
-
-        let result = validate_textual_container_vs_textual_container(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        );
-
-        let errors = result.errors.clone();
-        let value = result.value.clone();
+        let (value, errors, farthest_reached_pos) = ValidatorTester::<
+            TextualContainerVsTextualContainerValidator,
+        >::from_strs(schema_str, input_str)
+        .walk()
+        .goto_first_child_then_unwrap()
+        .goto_first_child_then_unwrap()
+        .goto_next_sibling_then_unwrap()
+        .peek_nodes(|(input, schema)| {
+            let n = input;
+            assert!(is_heading_content_node(n));
+            let n = schema;
+            assert!(is_heading_content_node(n));
+        })
+        .validate_complete()
+        .destruct();
 
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"name": "Wolf"}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(6, 4));
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 4));
     }
 
-    #[test]
-    fn test_validate_textual_container_vs_textual_container_with_incomplete_matcher() {
-        let schema_str = "prefix `test:/test/`";
-        // (document[0]0..21)
-        // └─ (paragraph[1]0..20)
-        //    ├─ (text[2]0..7)
-        //    └─ (code_span[3]7..20)
-        //       └─ (text[4]8..19)
-
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
-        let input_str = "prefix `test:/te";
-        // (document[0]0..17)
-        // └─ (paragraph[1]0..16)
-        //    └─ (text[2]0..16)
-
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        schema_cursor.goto_first_child(); // document -> paragraph
-
-        input_cursor.goto_first_child(); // document -> paragraph
-
-        let result = validate_textual_container_vs_textual_container(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            false, // we are allowed to have a broken matcher if it is the last com
-        );
-
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(2, 2)) // no movement yet
-    }
+    // Tests for TextualVsTextualValidator live in textual.rs.
 }

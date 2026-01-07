@@ -17,7 +17,7 @@ jobs:
       - name: Build Project
         shell: bash
         run: |
-          nix build .#build-static
+          nix build
       - name: Create tar archive
         shell: bash
         run: |

@@ -417,7 +417,7 @@ impl fmt::Display for Matcher {
 pub enum ExtractorError {
     MatcherError(MatcherError),
     UTF8Error(std::str::Utf8Error),
-    InvariantError,
+    InvariantError(String),
 }
 
 /// For a cursor pointed at a code node, extract the matcher with potential extras.
@@ -432,7 +432,17 @@ pub enum ExtractorError {
 /// We require that the cursor is pointed at a code node, potentially followed by text.
 pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, ExtractorError> {
     // The first node must be a code node
-    debug_assert!(cursor.node().kind() == "code_span");
+    if cursor.node().kind() != "code_span" {
+        return Err(ExtractorError::InvariantError(
+            crate::invariant_violation!(
+                cursor,
+                cursor,
+                "extract_text_matcher expects code_span, got {}",
+                cursor.node().kind()
+            )
+            .to_string(),
+        ));
+    }
     // We don't need to know anything about the next node
 
     let node_and_next_node = get_node_and_next_node(cursor);
@@ -452,7 +462,15 @@ pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, E
             Matcher::try_from_pattern_and_suffix_str(node_text, None)
                 .map_err(ExtractorError::MatcherError)
         }
-        _ => Err(ExtractorError::InvariantError),
+        _ => Err(ExtractorError::InvariantError(
+            crate::invariant_violation!(
+                cursor,
+                cursor,
+                "extract_text_matcher expects code_span, got {}",
+                cursor.node().kind()
+            )
+            .to_string(),
+        )),
     }
 }
 

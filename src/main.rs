@@ -5,7 +5,6 @@ use tracing_subscriber::EnvFilter;
 
 pub mod cmd;
 pub mod env;
-mod helpers;
 pub mod mdschema;
 mod path_or_stdio;
 
