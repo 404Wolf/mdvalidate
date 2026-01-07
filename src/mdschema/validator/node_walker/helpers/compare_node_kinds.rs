@@ -123,7 +123,7 @@ macro_rules! compare_node_kinds_check {
         $schema_str:expr,
         $result:expr
     ) => {
-        if let Some(error) = crate::mdschema::validator::node_walker::helpers::node_kinds::compare_node_kinds(
+        if let Some(error) = crate::mdschema::validator::node_walker::helpers::compare_node_kinds::compare_node_kinds(
             &$schema_cursor,
             &$input_cursor,
             $input_str,
@@ -133,4 +133,79 @@ macro_rules! compare_node_kinds_check {
             return $result;
         }
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mdschema::validator::ts_utils::parse_markdown;
+
+    use super::*;
+
+    #[test]
+    fn test_compare_node_kinds_list_same_marker() {
+        let input_1 = " - test1";
+        let input_1_tree = parse_markdown(input_1).unwrap();
+        let mut input_1_cursor = input_1_tree.walk();
+
+        let input_2 = " - test2";
+        let input_2_tree = parse_markdown(input_2).unwrap();
+        let mut input_2_cursor = input_2_tree.walk();
+
+        input_1_cursor.goto_first_child();
+        input_2_cursor.goto_first_child();
+
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        assert!(result.is_none(), "Same list markers should match");
+    }
+
+    #[test]
+    fn test_compare_node_kinds_list_different_unordered_markers() {
+        let input_1 = " - test1";
+        let input_1_tree = parse_markdown(input_1).unwrap();
+        let mut input_1_cursor = input_1_tree.walk();
+
+        let input_2 = " * test1";
+        let input_2_tree = parse_markdown(input_2).unwrap();
+        let mut input_2_cursor = input_2_tree.walk();
+
+        input_1_cursor.goto_first_child();
+        input_2_cursor.goto_first_child();
+
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        assert!(result.is_none(), "Different unordered markers should match");
+    }
+
+    #[test]
+    fn test_compare_node_kinds_headings_same_level() {
+        let input_1 = "# test1";
+        let input_1_tree = parse_markdown(input_1).unwrap();
+        let mut input_1_cursor = input_1_tree.walk();
+
+        let input_2 = "# test2";
+        let input_2_tree = parse_markdown(input_2).unwrap();
+        let mut input_2_cursor = input_2_tree.walk();
+
+        input_1_cursor.goto_first_child();
+        input_2_cursor.goto_first_child();
+
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        assert!(result.is_none(), "Same heading levels should match");
+    }
+
+    #[test]
+    fn test_compare_node_kinds_headings_different_level() {
+        let input_1 = "# test1";
+        let input_1_tree = parse_markdown(input_1).unwrap();
+        let mut input_1_cursor = input_1_tree.walk();
+
+        let input_2 = "## test2";
+        let input_2_tree = parse_markdown(input_2).unwrap();
+        let mut input_2_cursor = input_2_tree.walk();
+
+        input_1_cursor.goto_first_child();
+        input_2_cursor.goto_first_child();
+
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        assert!(result.is_some(), "Different heading levels should not match");
+    }
 }

@@ -11,7 +11,7 @@ use crate::mdschema::validator::{
     node_walker::{ValidationResult, validators::Validator},
     ts_utils::waiting_at_end,
 };
-use crate::mdschema::validator::node_walker::helpers::text_contents::compare_text_contents;
+use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::compare_node_kinds_check;
 
 /// Validate two textual elements.

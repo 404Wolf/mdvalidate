@@ -8,11 +8,11 @@ use crate::mdschema::validator::matcher::matcher::MatcherError;
 use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::curly_matchers::extract_matcher_from_curly_delineated_text;
+use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
     is_image_node, is_link_destination_node, is_link_node, waiting_at_end,
 };
-use crate::mdschema::validator::utils::compare_text_contents;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 // Use the macro from node_walker module

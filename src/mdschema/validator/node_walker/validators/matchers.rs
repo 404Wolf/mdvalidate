@@ -16,7 +16,7 @@ use crate::mdschema::validator::ts_utils::{
     get_next_node, get_node_n_nodes_ahead, is_inline_code_node, is_text_node, waiting_at_end,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::mdschema::validator::node_walker::helpers::text_contents::compare_text_contents;
+use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 
 use super::textual::validate_textual_vs_textual_direct;
 

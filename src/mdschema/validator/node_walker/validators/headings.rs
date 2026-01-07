@@ -129,7 +129,7 @@ mod tests {
         errors::SchemaViolationError,
         node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
-        ts_utils::{both_are_codeblocks, both_are_headings, is_heading_node, parse_markdown},
+        ts_utils::{both_are_headings, is_heading_node, parse_markdown},
     };
     use serde_json::json;
 
