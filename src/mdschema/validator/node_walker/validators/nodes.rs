@@ -15,9 +15,8 @@ use crate::mdschema::validator::ts_utils::{
     both_are_textual_nodes, is_heading_node,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::mdschema::validator::{
-    node_walker::ValidationResult, utils::compare_node_children_lengths,
-};
+use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::compare_node_children_lengths_check;
 
 /// Validate two arbitrary nodes against each other.
 ///
@@ -150,11 +149,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         trace!("Both are heading nodes or document nodes. Recursing into sibling pairs.");
 
         // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
-        if let Some(error) = compare_node_children_lengths(&schema_cursor, &input_cursor, got_eof) {
-            result.add_error(error);
-
-            return result;
-        }
+        compare_node_children_lengths_check!(schema_cursor, input_cursor, got_eof, result);
 
         // Now actually go down to the children
         if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {

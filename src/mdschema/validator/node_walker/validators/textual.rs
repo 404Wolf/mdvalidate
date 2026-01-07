@@ -10,8 +10,9 @@ use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     node_walker::{ValidationResult, validators::Validator},
     ts_utils::waiting_at_end,
-    utils::{compare_node_kinds, compare_text_contents},
 };
+use crate::mdschema::validator::node_walker::helpers::text_contents::compare_text_contents;
+use crate::compare_node_kinds_check;
 
 /// Validate two textual elements.
 ///
@@ -85,11 +86,7 @@ pub(super) fn validate_textual_vs_textual_direct(
         );
     }
 
-    if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
-        result.add_error(error);
-
-        return result;
-    }
+    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
 
     let is_partial_match = waiting_at_end(got_eof, input_str, &input_cursor);
     if let Some(error) = compare_text_contents(

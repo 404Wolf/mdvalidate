@@ -8,8 +8,8 @@ use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorIm
 use crate::mdschema::validator::ts_utils::{
     is_heading_content_node, is_heading_node, is_marker_node, is_textual_container_node,
 };
-use crate::mdschema::validator::utils::compare_node_kinds;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use crate::compare_node_kinds_check;
 
 /// Validate two headings.
 ///
@@ -40,15 +40,8 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         }
 
         // This also checks the *type* of heading that they are at
-        if let Some(error) =
-            compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str)
-        {
-            trace!("Node kinds mismatched");
-
-            result.add_error(error);
-
-            return result;
-        }
+        compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
+        trace!("Node kinds mismatched");
 
         // Go to the actual heading content
         {
