@@ -7,7 +7,7 @@ use crate::mdschema::validator::{
     node_pos_pair::NodePosPair,
     node_walker::{
         ValidationResult,
-        validators::{nodes::NodeVsNodeValidator, Validator as ValidatorTrait},
+        validators::{Validator as ValidatorTrait, nodes::NodeVsNodeValidator},
     },
     ts_utils::new_markdown_parser,
     utils::join_values,
@@ -91,14 +91,6 @@ impl Validator {
         (self.errors_so_far(), self.matches_so_far())
     }
 
-    pub fn errors_so_far(&self) -> std::slice::Iter<'_, ValidationError> {
-        self.errors_so_far.iter()
-    }
-
-    pub fn matches_so_far(&self) -> &Value {
-        &self.matches_so_far
-    }
-
     /// Read new input. Updates the input tree with a new input tree for the full new input.
     ///
     /// Does not update the schema tree or change the descendant indices. You will still
@@ -155,10 +147,6 @@ impl Validator {
         }
     }
 
-    pub fn last_input_str(&self) -> &str {
-        &self.last_input_str
-    }
-
     pub fn read_final_input(&mut self, input: &str) -> Result<(), ValidationError> {
         self.read_input(input, true)
     }
@@ -184,8 +172,7 @@ impl Validator {
             let mut schema_cursor = self.schema_tree.walk();
             farthest_reached_pos.walk_cursors_to_pos(&mut input_cursor, &mut schema_cursor);
 
-            let walker =
-                ValidatorWalker::new(input_cursor, schema_cursor, &schema_str, &input_str);
+            let walker = ValidatorWalker::new(input_cursor, schema_cursor, &schema_str, &input_str);
             NodeVsNodeValidator::validate(&walker, got_eof)
         };
 
@@ -199,54 +186,6 @@ impl Validator {
             &self.schema_str,
             &self.last_input_str,
         )
-    }
-
-    pub fn got_eof(&self) -> bool {
-        self.got_eof
-    }
-
-    pub fn set_got_eof(&mut self, got_eof: bool) {
-        self.got_eof = got_eof;
-    }
-
-    pub fn schema_str(&self) -> &str {
-        &self.schema_str
-    }
-
-    pub fn set_last_input_str(&mut self, new_input: String) {
-        self.last_input_str = new_input;
-    }
-
-    /// Join a set of matches into ours.
-    pub fn join_new_matches(&mut self, new_matches: Value) {
-        let joined = &mut self.matches_so_far.clone();
-        join_values(joined, new_matches);
-        self.matches_so_far = joined.clone();
-    }
-
-    /// Unpacks a ValidationResult and adds its matches and errors to the state.
-    pub fn push_validation_result(&mut self, result: ValidationResult) {
-        let result_descendant_index_pair = result.farthest_reached_pos();
-        self.join_new_matches(result.value);
-        self.errors_so_far.extend(result.errors);
-        self.farthest_reached_pos = result_descendant_index_pair;
-    }
-
-    /// Our farthest reached position.
-    pub fn farthest_reached_pos(&self) -> NodePosPair {
-        self.farthest_reached_pos
-    }
-
-    pub fn set_farthest_reached_pos(&mut self, farthest_reached_pos: NodePosPair) {
-        self.farthest_reached_pos = farthest_reached_pos;
-    }
-
-    pub fn input_tree(&self) -> &Tree {
-        &self.input_tree
-    }
-
-    pub fn schema_tree(&self) -> &Tree {
-        &self.schema_tree
     }
 }
 
@@ -308,6 +247,7 @@ impl ValidatorState for Validator {
         self.farthest_reached_pos = farthest_reached_pos;
     }
 }
+```
 
 #[cfg(test)]
 mod tests {
