@@ -30,6 +30,10 @@ pub fn is_unordered_list_marker(marker: &str) -> bool {
     UNORDERED_LIST_MARKER_REGEX.is_match(marker)
 }
 
+/// Walk to the root of the tree
+pub fn walk_to_root<'a>(cursor: &mut TreeCursor<'a>) {
+    while cursor.goto_parent() {}
+}
 /// Get the current treesitter node for a cursor, and the subsequent sibling.
 pub fn get_node_and_next_node<'a>(cursor: &TreeCursor<'a>) -> Option<(Node<'a>, Option<Node<'a>>)> {
     let mut input_cursor = cursor.clone();
@@ -132,6 +136,16 @@ pub fn is_code_node(node: &Node) -> bool {
     node.kind() == "code_span"
 }
 
+/// Check if a node is a link.
+pub fn is_link_node(node: &Node) -> bool {
+    node.kind() == "link"
+}
+
+/// Check if a node is an image.
+pub fn is_image_node(node: &Node) -> bool {
+    node.kind() == "image"
+}
+
 /// Check if a node is a paragraph.
 pub fn is_paragraph_node(node: &Node) -> bool {
     node.kind() == "paragraph"
@@ -208,13 +222,23 @@ pub fn waiting_at_end(got_eof: bool, last_input_str: &str, input_cursor: &TreeCu
 /// Extract the list marker from a tight_list node
 ///
 /// TODO: Handle UTF8 errors properly instead of unwrapping
-pub fn extract_list_marker<'a>(cursor: &TreeCursor<'a>, schema_str: &'a str) -> &'a str {
+pub fn extract_list_marker<'a>(
+    cursor: &TreeCursor<'a>,
+    schema_str: &'a str,
+) -> Result<&'a str, ValidationError> {
     let mut cursor = cursor.clone();
-    cursor.goto_first_child(); // Go to first list_item
-    cursor.goto_first_child(); // Go to list_marker
-    debug_assert!(is_marker_node(&cursor.node()));
+    if !cursor.goto_first_child() || !cursor.goto_first_child() || !is_marker_node(&cursor.node())
+    {
+        return Err(crate::invariant_violation!(
+            cursor,
+            cursor,
+            "expected list_marker when extracting list marker"
+        ));
+    }
     let marker = cursor.node();
-    marker.utf8_text(schema_str.as_bytes()).unwrap()
+    marker
+        .utf8_text(schema_str.as_bytes())
+        .map_err(|_| ValidationError::InvalidUTF8)
 }
 
 /// Check if both nodes are rulers.
@@ -230,6 +254,16 @@ pub fn both_are_headings(input_node: &Node, schema_node: &Node) -> bool {
 /// Check if both nodes are textual nodes.
 pub fn both_are_textual_nodes(input_node: &Node, schema_node: &Node) -> bool {
     is_textual_node(&input_node) && is_textual_node(&schema_node)
+}
+
+/// Check if both nodes are link nodes.
+pub fn both_are_link_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_link_node(&input_node) && is_link_node(&schema_node)
+}
+
+/// Check if both nodes are image nodes.
+pub fn both_are_image_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_image_node(&input_node) && is_image_node(&schema_node)
 }
 
 /// Check if both nodes are text nodes.
@@ -283,12 +317,17 @@ pub fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) 
 //
 // You can call `get_heading_kind` when you are at an `atx_heading` to extract
 // the literal kind, `atx_xx_marker`.
-pub fn get_heading_kind<'a>(cursor: &TreeCursor<'a>) -> &'a str {
+pub fn get_heading_kind<'a>(cursor: &TreeCursor<'a>) -> Result<&'a str, ValidationError> {
     let mut cursor = cursor.clone();
 
-    cursor.goto_first_child(); // atx_heading -> atx_h2_marker
-    debug_assert!(cursor.node().kind().ends_with("marker"));
-    cursor.node().kind()
+    if !cursor.goto_first_child() || !cursor.node().kind().ends_with("marker") {
+        return Err(crate::invariant_violation!(
+            cursor,
+            cursor,
+            "expected heading marker for atx_heading"
+        ));
+    }
+    Ok(cursor.node().kind())
 }
 
 /// Check if the treesitter schema node has a single code_span child (indicating
@@ -325,7 +364,7 @@ pub fn has_single_code_child(schema_cursor: &TreeCursor) -> bool {
 pub fn extract_codeblock_contents(
     cursor: &TreeCursor,
     src: &str,
-) -> Option<(Option<(String, usize)>, (String, usize))> {
+) -> Result<Option<(Option<(String, usize)>, (String, usize))>, ValidationError> {
     // A codeblock looks like this:
     //
     // └── (fenced_code_block)
@@ -340,12 +379,12 @@ pub fn extract_codeblock_contents(
 
     let mut cursor = cursor.clone();
     if cursor.node().kind() != "fenced_code_block" {
-        return None;
+        return Ok(None);
     }
 
     // Move to the first child and determine if it's an info_string or the content
     if !cursor.goto_first_child() {
-        return None;
+        return Ok(None);
     }
 
     let mut language: Option<(String, usize)> = None;
@@ -353,37 +392,49 @@ pub fn extract_codeblock_contents(
     if cursor.node().kind() == "info_string" {
         // Extract language from info_string -> text
         if !cursor.goto_first_child() || cursor.node().kind() != "text" {
-            return None;
+            return Ok(None);
         }
         language = Some((
-            cursor.node().utf8_text(src.as_bytes()).ok()?.to_string(),
+            cursor
+                .node()
+                .utf8_text(src.as_bytes())
+                .map_err(|_| ValidationError::InvalidUTF8)?
+                .to_string(),
             cursor.descendant_index(),
         ));
 
         // Go back to info_string, then to its sibling: code_fence_content
         if !cursor.goto_parent() || !cursor.goto_next_sibling() {
-            return None;
+            return Ok(None);
         }
     } else if cursor.node().kind() != "code_fence_content" {
         // First child is neither info_string nor code_fence_content -> invalid layout
-        return None;
+        return Ok(None);
     }
 
     // At this point, cursor must be at code_fence_content
-    debug_assert_eq!(cursor.node().kind(), "code_fence_content");
+    if cursor.node().kind() != "code_fence_content" {
+        return Err(crate::invariant_violation!(
+            cursor,
+            cursor,
+            "expected code_fence_content while extracting code block"
+        ));
+    }
 
     // Get the full text from code_fence_content node itself, not just the first child
     let code_fence_node = cursor.node();
-    let text = code_fence_node.utf8_text(src.as_bytes()).ok()?;
+    let text = code_fence_node
+        .utf8_text(src.as_bytes())
+        .map_err(|_| ValidationError::InvalidUTF8)?;
 
     // Navigate to first text child to get its descendant_index
     if !cursor.goto_first_child() || cursor.node().kind() != "text" {
-        return None;
+        return Ok(None);
     }
 
     let body = (text.to_string(), cursor.descendant_index());
 
-    Some((language, body))
+    Ok(Some((language, body)))
 }
 
 /// Walk from a list_item node to its content paragraph.
@@ -398,13 +449,24 @@ pub fn extract_codeblock_contents(
 /// └── paragraph
 ///     └── text
 /// ```
-pub fn walk_to_list_item_content(cursor: &mut TreeCursor) {
+pub fn walk_to_list_item_content(cursor: &mut TreeCursor) -> Result<(), ValidationError> {
     // list_item -> list_marker
-    cursor.goto_first_child();
-    debug_assert_eq!(cursor.node().kind(), "list_marker");
+    if !cursor.goto_first_child() || cursor.node().kind() != "list_marker" {
+        return Err(crate::invariant_violation!(
+            cursor,
+            cursor,
+            "expected list_marker while walking to list item content"
+        ));
+    }
     // list_marker -> paragraph
-    cursor.goto_next_sibling();
-    debug_assert_eq!(cursor.node().kind(), "paragraph");
+    if !cursor.goto_next_sibling() || cursor.node().kind() != "paragraph" {
+        return Err(crate::invariant_violation!(
+            cursor,
+            cursor,
+            "expected paragraph while walking to list item content"
+        ));
+    }
+    Ok(())
 }
 
 /// Count the number of siblings a node has.
@@ -557,7 +619,7 @@ mod tests {
         cursor.goto_first_child(); // Go to tight_list
         assert_eq!(cursor.node().kind(), "tight_list");
 
-        let list_marker = extract_list_marker(&cursor, input);
+        let list_marker = extract_list_marker(&cursor, input).unwrap();
         assert_eq!(list_marker, "-");
     }
 
@@ -809,7 +871,7 @@ mod tests {
         assert_eq!(cursor.node().kind(), "list_item");
 
         // Now call walk_to_list_item_content
-        walk_to_list_item_content(&mut cursor);
+        walk_to_list_item_content(&mut cursor).unwrap();
 
         // Should now be at the paragraph node
         assert_eq!(cursor.node().kind(), "paragraph");

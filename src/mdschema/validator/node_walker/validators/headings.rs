@@ -3,7 +3,7 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::mdschema::validator::node_walker::validators::textual_container::validate_textual_container_vs_textual_container;
+use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
 use crate::mdschema::validator::ts_utils::{
     is_heading_content_node, is_heading_node, is_marker_node, is_textual_container_node,
@@ -13,18 +13,8 @@ use crate::mdschema::validator::utils::compare_node_kinds;
 /// Validate two headings.
 ///
 /// Checks that they are the same kind of heading, and and then delegates to
-/// `validate_text_vs_text`.
-pub fn validate_heading_vs_heading(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
-    got_eof: bool,
-) -> ValidationResult {
-    HeadingVsHeadingValidator::validate(input_cursor, schema_cursor, schema_str, input_str, got_eof)
-}
-
-struct HeadingVsHeadingValidator;
+/// `TextualContainerVsTextualContainerValidator::validate`.
+pub(super) struct HeadingVsHeadingValidator;
 
 impl ValidatorImpl for HeadingVsHeadingValidator {
     fn validate_impl(
@@ -40,8 +30,15 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         let mut schema_cursor = schema_cursor.clone();
 
         // Both should be the start of headings
-        debug_assert!(is_heading_node(&input_cursor.node()));
-        debug_assert!(is_heading_node(&schema_cursor.node()));
+        if !is_heading_node(&input_cursor.node()) || !is_heading_node(&schema_cursor.node()) {
+            crate::invariant_violation!(
+                result,
+                input_cursor,
+                schema_cursor,
+                "heading validation expects atx_heading nodes"
+            );
+            return result;
+        }
 
         // This also checks the *type* of heading that they are at
         if let Some(error) =
@@ -82,11 +79,20 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         result.sync_cursor_pos(&schema_cursor, &input_cursor); // save progress
 
         // Both should be at markers
-        debug_assert!(is_textual_container_node(&input_cursor.node()));
-        debug_assert!(is_textual_container_node(&schema_cursor.node()));
+        if !is_textual_container_node(&input_cursor.node())
+            || !is_textual_container_node(&schema_cursor.node())
+        {
+            crate::invariant_violation!(
+                result,
+                input_cursor,
+                schema_cursor,
+                "heading validation expects textual container nodes"
+            );
+            return result;
+        }
 
         // Now that we're at the heading content, use `validate_text_vs_text`
-        validate_textual_container_vs_textual_container(
+        TextualContainerVsTextualContainerValidator::validate(
             &input_cursor,
             &schema_cursor,
             schema_str,
@@ -108,16 +114,26 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<bool, Validation
         ensure_at_heading_content(cursor)
     } else if is_marker_node(&cursor.node()) {
         if cursor.goto_next_sibling() {
-            debug_assert!(is_heading_content_node(&cursor.node()));
+            if !is_heading_content_node(&cursor.node()) {
+                return Err(crate::invariant_violation!(
+                    cursor,
+                    cursor,
+                    "expected heading_content node"
+                ));
+            }
             Ok(true)
         } else {
             Ok(false)
         }
     } else {
-        Err(ValidationError::InternalInvariantViolated(format!(
-            "Expected to be at heading content, but found node kind: {}",
-            cursor.node().kind()
-        )))
+        Err(crate::invariant_violation!(
+            cursor,
+            cursor,
+            format!(
+                "Expected to be at heading content, but found node kind: {}",
+                cursor.node().kind()
+            )
+        ))
     }
 }
 
@@ -173,13 +189,7 @@ mod tests {
     fn test_validate_heading_vs_heading_simple_headings() {
         let schema_str = "# Heading";
         let input_str = "# Heading";
-        // (document[0])
-        // └─ (atx_heading[1])
-        //    ├─ (atx_h1_marker[2])
-        //    └─ (heading_content[3])
-        //       └─ (text[4])
 
-        let got_eof = true;
         let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
             .walk()
             .goto_first_child_then_unwrap()
@@ -187,7 +197,7 @@ mod tests {
                 assert!(is_heading_node(i));
                 assert!(is_heading_node(s));
             })
-            .validate(got_eof);
+            .validate_complete();
 
         assert_eq!(result.value, json!({})); // No real match content
         assert_eq!(result.errors, vec![]);
@@ -198,7 +208,7 @@ mod tests {
     fn test_validate_heading_vs_heading_wrong_heading_kind() {
         let schema_str = "# Heading";
         let input_str = "## Heading";
-        let got_eof = true;
+
         let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
             .walk()
             .goto_first_child_then_unwrap()
@@ -206,7 +216,7 @@ mod tests {
                 assert!(is_heading_node(i));
                 assert!(is_heading_node(s));
             })
-            .validate(got_eof);
+            .validate_complete();
         assert_eq!(result.value, json!({}));
         assert_eq!(result.errors.len(), 1);
         match &result.errors[0] {

@@ -24,7 +24,7 @@ fn main() {
 
     let mut parser = Parser::new();
     parser
-        .set_language(language())
+        .set_language(&language())
         .expect("Failed to load Markdown language");
 
     let tree = parser.parse(&input, None).expect("Failed to parse");

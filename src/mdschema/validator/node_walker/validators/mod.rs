@@ -5,6 +5,7 @@ use crate::mdschema::validator::node_walker::ValidationResult;
 
 pub(super) mod code;
 pub(super) mod headings;
+pub(super) mod links;
 pub(super) mod lists;
 pub(super) mod matchers;
 pub(super) mod nodes;
@@ -50,10 +51,11 @@ impl<T: ValidatorImpl> Validator for T {
 
 #[cfg(test)]
 mod test_utils {
-    use mdv_utils::PrettyPrint;
     use tree_sitter::{Node, Tree};
 
-    use crate::mdschema::validator::ts_utils::parse_markdown;
+    use crate::mdschema::validator::{
+        node_walker::utils::pretty_print_cursor_pair, ts_utils::parse_markdown,
+    };
 
     use super::*;
 
@@ -114,6 +116,17 @@ mod test_utils {
             )
         }
 
+        pub fn validate_complete(&mut self) -> ValidationResult {
+            self.validate(true)
+        }
+
+        pub fn validate_incomplete(&mut self) -> ValidationResult {
+            self.validate(false)
+        }
+
+        /// Peek at the nodes that our cursors are currently positioned at.
+        ///
+        /// Calls your callback with the (input_node, schema_node).
         pub fn peek_nodes<F>(&mut self, f: F) -> &mut Self
         where
             F: Fn((&Node, &Node)),
@@ -123,24 +136,10 @@ mod test_utils {
         }
 
         pub fn print(&mut self) -> &mut Self {
-            use tabled::{Table, Tabled, settings::Style};
-
-            #[derive(Tabled)]
-            struct Content {
-                #[tabled(rename = "Schema:")]
-                schema: String,
-                #[tabled(rename = "Input:")]
-                input: String,
-            }
-
-            let content = Content {
-                schema: self.schema_cursor.node().pretty_print(),
-                input: self.input_cursor.node().pretty_print(),
-            };
-
-            let table = Table::new(vec![content]).with(Style::blank()).to_string();
-
-            println!("{}", table);
+            println!(
+                "{}",
+                pretty_print_cursor_pair(&self.input_cursor, &self.schema_cursor)
+            );
             self
         }
     }

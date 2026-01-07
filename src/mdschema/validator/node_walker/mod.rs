@@ -7,5 +7,4 @@ pub(self) mod helpers;
 mod validation_result;
 mod validators;
 
-#[cfg(test)]
-mod utils;
+pub(crate) mod utils;

@@ -2,7 +2,7 @@ use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
-use crate::mdschema::validator::node_walker::validators::matchers::validate_matcher_vs_text;
+use crate::mdschema::validator::node_walker::validators::matchers::MatcherVsTextValidator;
 use crate::mdschema::validator::ts_utils::{
     both_are_textual_nodes, get_next_node, is_code_node, is_text_node,
 };
@@ -18,19 +18,9 @@ use crate::mdschema::validator::{
 ///
 /// 1. Check if the schema node is at a `code_span`, or the current node is a
 ///    text node and the next node is a `code_span`. If so, delegate to
-///    `validate_matcher_vs_text`.
+///    `MatcherVsTextValidator::validate`.
 /// 2. Otherwise, check that the node kind and text contents are the same.
-pub fn validate_textual_vs_textual(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
-    got_eof: bool,
-) -> ValidationResult {
-    TextualVsTextualValidator::validate(input_cursor, schema_cursor, schema_str, input_str, got_eof)
-}
-
-struct TextualVsTextualValidator;
+pub(super) struct TextualVsTextualValidator;
 
 impl ValidatorImpl for TextualVsTextualValidator {
     #[track_caller]
@@ -60,7 +50,7 @@ fn validate_textual_vs_textual_impl(
     got_eof: bool,
 ) -> ValidationResult {
     // If the schema is pointed at a code node, or a text node followed by a
-    // code node, validate it using `validate_matcher_vs_text`
+    // code node, validate it using `MatcherVsTextValidator::validate`
 
     let current_node_is_code_node = is_code_node(&schema_cursor.node());
     let current_node_is_text_node_and_next_node_code_node = {
@@ -70,7 +60,7 @@ fn validate_textual_vs_textual_impl(
     };
 
     if current_node_is_code_node || current_node_is_text_node_and_next_node_code_node {
-        return validate_matcher_vs_text(
+        return MatcherVsTextValidator::validate(
             &input_cursor,
             &schema_cursor,
             schema_str,
@@ -85,13 +75,13 @@ fn validate_textual_vs_textual_impl(
 /// Validate two textual elements directly without checking for matchers.
 ///
 /// This performs the actual node kind and text content comparison without
-/// delegating to `validate_matcher_vs_text`.
+/// delegating to matcher validation.
 #[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     i = %input_cursor.descendant_index(),
     s = %schema_cursor.descendant_index(),
 ), ret)]
 #[track_caller]
-pub fn validate_textual_vs_textual_direct(
+pub(super) fn validate_textual_vs_textual_direct(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
     schema_str: &str,
@@ -100,12 +90,19 @@ pub fn validate_textual_vs_textual_direct(
 ) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
-    debug_assert!(
-        both_are_textual_nodes(&schema_cursor.node(), &input_cursor.node()),
-        "got schema kind: {:?}, input kind: {:?}",
-        schema_cursor.node().kind(),
-        input_cursor.node().kind()
-    );
+    if !both_are_textual_nodes(&schema_cursor.node(), &input_cursor.node()) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            format!(
+                "expected textual nodes, got schema kind: {:?}, input kind: {:?}",
+                schema_cursor.node().kind(),
+                input_cursor.node().kind()
+            )
+        );
+        return result;
+    }
 
     if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
         result.add_error(error);

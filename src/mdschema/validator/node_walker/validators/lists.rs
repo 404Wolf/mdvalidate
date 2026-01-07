@@ -9,7 +9,7 @@ use crate::mdschema::validator::{
         ValidationResult,
         validators::{
             Validator, ValidatorImpl,
-            textual_container::validate_textual_container_vs_textual_container,
+            textual_container::TextualContainerVsTextualContainerValidator,
         },
     },
     ts_utils::{
@@ -74,17 +74,7 @@ use crate::mdschema::validator::{
 ///
 /// Note that a limitation here is that you cannot have a variable-length list
 /// that is not the final list in your schema.
-pub fn validate_list_vs_list(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
-    got_eof: bool,
-) -> ValidationResult {
-    ListVsListValidator::validate(input_cursor, schema_cursor, schema_str, input_str, got_eof)
-}
-
-struct ListVsListValidator;
+pub(super) struct ListVsListValidator;
 
 impl ValidatorImpl for ListVsListValidator {
     fn validate_impl(
@@ -119,10 +109,23 @@ fn validate_list_vs_list_impl(
     let at_list_schema_cursor = schema_cursor.clone();
     let at_list_input_cursor = input_cursor.clone();
 
-    ensure_at_first_list_item(&mut input_cursor);
-    ensure_at_first_list_item(&mut schema_cursor);
-    debug_assert_eq!(input_cursor.node().kind(), "list_item");
-    debug_assert_eq!(schema_cursor.node().kind(), "list_item");
+    if let Err(error) = ensure_at_first_list_item(&mut input_cursor) {
+        result.add_error(error);
+        return result;
+    }
+    if let Err(error) = ensure_at_first_list_item(&mut schema_cursor) {
+        result.add_error(error);
+        return result;
+    }
+    if input_cursor.node().kind() != "list_item" || schema_cursor.node().kind() != "list_item" {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "expected list_item nodes after list traversal"
+        );
+        return result;
+    }
 
     match extract_repeated_matcher_from_list_item(&schema_cursor, schema_str) {
         // We were able to find a valid repeated matcher in the schema list item.
@@ -155,8 +158,17 @@ fn validate_list_vs_list_impl(
             loop {
                 trace!("Validating list item #{}", validate_so_far + 1,);
 
-                debug_assert_eq!(input_cursor.node().kind(), "list_item");
-                debug_assert_eq!(schema_cursor.node().kind(), "list_item");
+                if input_cursor.node().kind() != "list_item"
+                    || schema_cursor.node().kind() != "list_item"
+                {
+                    crate::invariant_violation!(
+                        result,
+                        input_cursor,
+                        schema_cursor,
+                        "expected list_item nodes while validating repeated matcher"
+                    );
+                    return result;
+                }
 
                 let new_matches = validate_list_item_contents_vs_list_item_contents(
                     &input_cursor,
@@ -268,7 +280,7 @@ fn validate_list_vs_list_impl(
             // If there are more items to validate AT THE SAME LEVEL, recurse to
             // validate them. We now use the *next* schema node too.
             if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
-                let next_result = validate_list_vs_list(
+                let next_result = ListVsListValidator::validate(
                     &input_cursor,
                     &schema_cursor,
                     schema_str,
@@ -292,7 +304,7 @@ fn validate_list_vs_list_impl(
                         schema_cursor.node().kind()
                     );
 
-                    let next_result = validate_list_vs_list(
+                    let next_result = ListVsListValidator::validate(
                         &input_cursor,
                         &schema_cursor,
                         schema_str,
@@ -449,7 +461,7 @@ fn validate_list_vs_list_impl(
                     input_cursor.goto_first_child();
                     schema_cursor.goto_first_child();
 
-                    let deeper_result = validate_list_vs_list(
+                    let deeper_result = ListVsListValidator::validate(
                         &input_cursor,
                         &schema_cursor,
                         schema_str,
@@ -463,7 +475,7 @@ fn validate_list_vs_list_impl(
             // Recurse on next sibling if available!
             if input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {
                 trace!("Moving to next sibling list items for continued validation");
-                let new_matches = validate_list_vs_list(
+                let new_matches = ListVsListValidator::validate(
                     &mut input_cursor,
                     &mut schema_cursor,
                     schema_str,
@@ -518,21 +530,43 @@ fn validate_list_item_contents_vs_list_item_contents(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
+    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
     let mut schema_cursor = schema_cursor.clone();
     let mut input_cursor = input_cursor.clone();
 
-    debug_assert!(is_list_item_node(&schema_cursor.node()));
-    debug_assert!(is_list_item_node(&input_cursor.node()));
+    if !is_list_item_node(&schema_cursor.node()) || !is_list_item_node(&input_cursor.node()) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "expected list_item nodes before validating list item contents"
+        );
+        return result;
+    }
     schema_cursor.goto_first_child();
     input_cursor.goto_first_child();
-    debug_assert!(is_list_marker_node(&schema_cursor.node()));
-    debug_assert!(is_list_marker_node(&input_cursor.node()));
+    if !is_list_marker_node(&schema_cursor.node()) || !is_list_marker_node(&input_cursor.node()) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "expected list_marker nodes while validating list item contents"
+        );
+        return result;
+    }
     schema_cursor.goto_next_sibling();
     input_cursor.goto_next_sibling();
-    debug_assert!(is_paragraph_node(&schema_cursor.node()));
-    debug_assert!(is_paragraph_node(&input_cursor.node()));
+    if !is_paragraph_node(&schema_cursor.node()) || !is_paragraph_node(&input_cursor.node()) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "expected paragraph nodes while validating list item contents"
+        );
+        return result;
+    }
 
-    validate_textual_container_vs_textual_container(
+    TextualContainerVsTextualContainerValidator::validate(
         &input_cursor,
         &schema_cursor,
         schema_str,
@@ -604,7 +638,14 @@ fn extract_repeated_matcher_from_list_item(
     schema_cursor: &TreeCursor,
     schema_str: &str,
 ) -> Option<Result<Matcher, MatcherError>> {
-    debug_assert_eq!(schema_cursor.node().kind(), "list_item");
+    if schema_cursor.node().kind() != "list_item" {
+        let error = crate::invariant_violation!(
+            schema_cursor,
+            schema_cursor,
+            "expected list_item while extracting repeated matcher"
+        );
+        return Some(Err(MatcherError::InvariantViolation(error.to_string())));
+    }
 
     // If the first node in the list item is not a paragraph that starts with a
     // code node, we can't have a matcher.
@@ -649,11 +690,18 @@ fn extract_repeated_matcher_from_list_item(
 }
 
 /// Ensure that the cursor is at the first list item in the list.
-fn ensure_at_first_list_item(input_cursor: &mut TreeCursor) {
+fn ensure_at_first_list_item(input_cursor: &mut TreeCursor) -> Result<(), ValidationError> {
     if input_cursor.node().kind() == "tight_list" {
         input_cursor.goto_first_child();
-        debug_assert_eq!(input_cursor.node().kind(), "list_item");
+        if input_cursor.node().kind() != "list_item" {
+            return Err(crate::invariant_violation!(
+                input_cursor,
+                input_cursor,
+                "expected list_item while walking into list"
+            ));
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -665,12 +713,14 @@ mod tests {
     use super::ListVsListValidator;
     use crate::mdschema::validator::{
         errors::{ChildrenCount, NodeContentMismatchKind, SchemaViolationError, ValidationError},
-        node_walker::ValidationResult,
-        node_walker::validators::lists::{
-            ensure_at_first_list_item, extract_repeated_matcher_from_list_item,
-            validate_list_vs_list,
+        node_walker::{
+            ValidationResult,
+            validators::{
+                Validator,
+                lists::{ensure_at_first_list_item, extract_repeated_matcher_from_list_item},
+                test_utils::ValidatorTester,
+            },
         },
-        node_walker::validators::test_utils::ValidatorTester,
         ts_utils::{is_list_node, parse_markdown},
     };
 
@@ -695,7 +745,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
 
         // Test with - (hyphen)
@@ -706,7 +756,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
 
         // Test with + (plus)
@@ -717,7 +767,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
 
         // Test with * (asterisk)
@@ -728,7 +778,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
 
         // Test with ordered list (1.)
@@ -739,7 +789,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
     }
 
@@ -781,7 +831,7 @@ mod tests {
         let mut input_cursor = input_tree.walk();
 
         input_cursor.goto_first_child();
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
 
         let matcher = extract_repeated_matcher_from_list_item(&mut input_cursor, input_str)
             .unwrap()
@@ -953,8 +1003,13 @@ mod tests {
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -991,8 +1046,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1034,8 +1094,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1077,8 +1142,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1115,8 +1185,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1194,8 +1269,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert!(!result.errors.is_empty());
         assert_eq!(result.value, json!({}));
@@ -1244,8 +1324,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert!(!result.errors.is_empty());
         assert_eq!(result.value, json!({})); // we stop early. TODO: capture as much as we can
@@ -1295,8 +1380,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1331,8 +1421,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1398,8 +1493,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
         // even with eof=false we should know that there is an error by now
 
         assert_eq!(result.errors.len(), 1, "Expected an error");
@@ -1448,8 +1548,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1489,8 +1594,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1551,8 +1661,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1615,8 +1730,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1649,8 +1769,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         // Should stop at max (3) and not validate the 4th item
         assert_eq!(
@@ -1688,8 +1813,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1716,8 +1846,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1746,8 +1881,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({"test": ["test1", "test2"]}));
@@ -1773,8 +1913,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1784,8 +1929,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(result.value, json!({"test": ["test1", "test2"]}));
 
         // Negative case with EOF: should error when exceeding max
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1829,8 +1979,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1861,8 +2016,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1894,8 +2054,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(
             result.errors,
@@ -1923,8 +2088,13 @@ Footer: test (footer isn't validated with_list_vs_list)
 
         // Handle case where input might not have a list at all
         if input_cursor.goto_first_child() {
-            let result =
-                validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+            let result = ListVsListValidator::validate(
+                &input_cursor,
+                &schema_cursor,
+                schema_str,
+                input_str,
+                true,
+            );
 
             assert!(
                 result.errors.is_empty() || result.errors[0].to_string().contains("kind"),
@@ -1965,16 +2135,21 @@ Footer: test (footer isn't validated with_list_vs_list)
 
         // Walk to the tight_list node under the heading, then ensure we're at the first list_item
         schema_cursor.goto_first_child(); // document -> tight_list
-        ensure_at_first_list_item(&mut schema_cursor);
+        ensure_at_first_list_item(&mut schema_cursor).unwrap();
 
         input_cursor.goto_first_child(); // document -> tight_list
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
 
         assert_eq!(input_cursor.node().kind(), "list_item");
         assert_eq!(schema_cursor.node().kind(), "list_item");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert_eq!(result.errors.len(), 1);
         assert_eq!(
@@ -2007,17 +2182,22 @@ Footer: test (footer isn't validated with_list_vs_list)
         // Walk to the tight_list node under the heading, then ensure we're at the first list_item
         schema_cursor.goto_first_child(); // document -> heading
         schema_cursor.goto_next_sibling(); // heading -> tight_list
-        ensure_at_first_list_item(&mut schema_cursor);
+        ensure_at_first_list_item(&mut schema_cursor).unwrap();
 
         input_cursor.goto_first_child(); // document -> heading
         input_cursor.goto_next_sibling(); // heading -> tight_list
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
 
         assert_eq!(input_cursor.node().kind(), "list_item");
         assert_eq!(schema_cursor.node().kind(), "list_item");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert_eq!(result.errors, vec![]);
     }
@@ -2060,8 +2240,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = ListVsListValidator::validate(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert_eq!(result.errors, vec![]);
 

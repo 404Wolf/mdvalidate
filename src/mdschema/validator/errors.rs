@@ -1,8 +1,91 @@
-use crate::mdschema::validator::{matcher::{matcher::*, matcher_extras::MatcherExtrasError}, validator::Validator};
+use crate::mdschema::validator::{
+    matcher::{matcher::*, matcher_extras::MatcherExtrasError},
+    validator::Validator,
+};
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use std::fmt;
 
 use crate::mdschema::validator::ts_utils::find_node_by_index;
+#[macro_export]
+macro_rules! add_invariant_violation {
+    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $message:expr) => {{
+        let error = $crate::invariant_violation!(
+            $input_cursor,
+            $schema_cursor,
+            $message
+        );
+        #[cfg(debug_assertions)]
+        {
+            $result.add_error(error.clone());
+        }
+        error
+    }};
+    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $fmt:expr, $($args:tt)+) => {{
+        let error = $crate::invariant_violation!(
+            $input_cursor,
+            $schema_cursor,
+            $fmt,
+            $($args)+
+        );
+        #[cfg(debug_assertions)]
+        {
+            $result.add_error(error.clone());
+        }
+        error
+    }};
+}
+
+#[macro_export]
+macro_rules! invariant_violation {
+    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $message:expr) => {
+        $crate::add_invariant_violation!(
+            $result,
+            $input_cursor,
+            $schema_cursor,
+            $message
+        )
+    };
+    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $fmt:expr, $($args:tt)+) => {
+        $crate::add_invariant_violation!(
+            $result,
+            $input_cursor,
+            $schema_cursor,
+            $fmt,
+            $($args)+
+        )
+    };
+    ($input_cursor:ident, $schema_cursor:ident, $message:expr) => {{
+        use $crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair;
+
+        let message: String = $message.into();
+
+        let mut input_cursor = $input_cursor.clone();
+        $crate::mdschema::validator::ts_utils::walk_to_root(&mut input_cursor);
+
+        let mut schema_cursor = $schema_cursor.clone();
+        $crate::mdschema::validator::ts_utils::walk_to_root(&mut schema_cursor);
+
+        $crate::mdschema::validator::errors::ValidationError::InternalInvariantViolated(
+            format!(
+                "{}:{} {} i_idx={} s_idx={} {}\n{}",
+                file!(),
+                line!(),
+                module_path!(),
+                input_cursor.descendant_index(),
+                schema_cursor.descendant_index(),
+                message,
+                pretty_print_cursor_pair(&input_cursor, &schema_cursor)
+            ),
+        )
+    }};
+    ($input_cursor:ident, $schema_cursor:ident, $fmt:expr, $($args:tt)+) => {{
+        $crate::invariant_violation!(
+            $input_cursor,
+            $schema_cursor,
+            format!($fmt, $($args)+)
+        )
+    }};
+}
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -12,7 +95,13 @@ impl fmt::Display for ValidationError {
             ValidationError::SchemaViolation(e) => write!(f, "Schema violation: {}", e),
             ValidationError::SchemaError(e) => write!(f, "Schema error: {}", e),
             ValidationError::InternalInvariantViolated(msg) => {
-                write!(f, "Internal invariant violated: {} (this is a bug)", msg)
+                write!(
+                    f,
+                    "Internal invariant violated:\n{}\n\
+                     This is a bug. Internal invariant errors only show for development builds, \
+                     and result in unexpected behavior for production builds. Please report this.",
+                    msg
+                )
             }
             ValidationError::ParserError(e) => write!(f, "Parser error: {}", e),
             ValidationError::ValidatorCreationFailed => write!(f, "Failed to create validator"),

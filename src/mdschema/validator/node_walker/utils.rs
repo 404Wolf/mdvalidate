@@ -1,7 +1,13 @@
+use mdv_utils::PrettyPrint;
+use tree_sitter::TreeCursor;
+
+#[cfg(test)]
 use serde_json::Value;
 
+#[cfg(test)]
 use crate::mdschema::validator::{errors::ValidationError, validator_state::ValidatorState};
 
+#[cfg(test)]
 pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, ValidatorState) {
     use crate::mdschema::validator::ts_utils::new_markdown_parser;
     use crate::mdschema::validator::validator_state::ValidatorState;
@@ -29,4 +35,23 @@ pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, 
     let matches = new_state.matches_so_far().to_owned();
 
     (matches, errors, new_state.clone())
+}
+
+pub fn pretty_print_cursor_pair(input_cursor: &TreeCursor, schema_cursor: &TreeCursor) -> String {
+    use tabled::{Table, Tabled, settings::Style};
+
+    #[derive(Tabled)]
+    struct Content {
+        #[tabled(rename = "Schema:")]
+        schema: String,
+        #[tabled(rename = "Input:")]
+        input: String,
+    }
+
+    let content = Content {
+        schema: schema_cursor.node().pretty_print(),
+        input: input_cursor.node().pretty_print(),
+    };
+
+    Table::new(vec![content]).with(Style::blank()).to_string()
 }

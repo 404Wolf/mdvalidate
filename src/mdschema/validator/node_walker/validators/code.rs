@@ -1,15 +1,12 @@
-use std::sync::LazyLock;
-
-use regex::Regex;
 use serde_json::json;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     errors::{NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError},
-    matcher::matcher::{Matcher, MatcherError},
     node_walker::{
+        helpers::curly_matchers::{extract_id_from_curly_braces, extract_matcher_from_curly_delineated_text},
+        validators::ValidatorImpl,
         ValidationResult,
-        validators::{Validator, ValidatorImpl},
     },
     ts_utils::extract_codeblock_contents,
 };
@@ -46,17 +43,7 @@ use crate::mdschema::validator::{
 ///
 /// Note you cannot yet enforce regex on the actual code content.
 /// ```
-pub fn validate_code_vs_code(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
-    got_eof: bool,
-) -> ValidationResult {
-    CodeVsCodeValidator::validate(input_cursor, schema_cursor, schema_str, input_str, got_eof)
-}
-
-struct CodeVsCodeValidator;
+pub(super) struct CodeVsCodeValidator;
 
 impl ValidatorImpl for CodeVsCodeValidator {
     fn validate_impl(
@@ -82,11 +69,32 @@ fn validate_code_vs_code_impl(
     let input_cursor = input_cursor.clone();
     let schema_cursor = schema_cursor.clone();
 
-    debug_assert_eq!(input_cursor.node().kind(), "fenced_code_block");
-    debug_assert_eq!(schema_cursor.node().kind(), "fenced_code_block");
+    if input_cursor.node().kind() != "fenced_code_block"
+        || schema_cursor.node().kind() != "fenced_code_block"
+    {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "code validation expects fenced_code_block nodes"
+        );
+        return result;
+    }
 
-    let input_extracted = extract_codeblock_contents(&input_cursor, input_str);
-    let schema_extracted = extract_codeblock_contents(&schema_cursor, schema_str);
+    let input_extracted = match extract_codeblock_contents(&input_cursor, input_str) {
+        Ok(value) => value,
+        Err(error) => {
+            result.add_error(error);
+            return result;
+        }
+    };
+    let schema_extracted = match extract_codeblock_contents(&schema_cursor, schema_str) {
+        Ok(value) => value,
+        Err(error) => {
+            result.add_error(error);
+            return result;
+        }
+    };
 
     let (
         Some((input_lang, (input_code, input_code_descendant_index))),
@@ -95,12 +103,15 @@ fn validate_code_vs_code_impl(
     else {
         // The only reason the "entire thing" would be wrong is because we're
         // doing something wrong in our usage of it. That would be a bug!
-        result.add_error(ValidationError::InternalInvariantViolated(
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
             format!(
                 "Failed to extract code block contents from input or schema (input: {:?}, schema: {:?})",
                 input_extracted, schema_extracted
-            ),
-        ));
+            )
+        );
         return result;
     };
 
@@ -196,31 +207,6 @@ fn validate_code_vs_code_impl(
     result
 }
 
-static CURLY_MATCHER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\{(?P<inner>.+?)\}(?P<suffix>.*)?$").unwrap());
-
-static CURLY_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\{(?P<id>\w+)\}$").unwrap());
-
-fn extract_matcher_from_curly_delineated_text(
-    input: &str,
-) -> Option<Result<Matcher, MatcherError>> {
-    let caps = CURLY_MATCHER.captures(input)?;
-
-    let matcher_str = caps.name("inner").map(|m| m.as_str()).unwrap_or("").trim();
-    let suffix = caps.name("suffix").map(|m| m.as_str());
-
-    Some(Matcher::try_from_pattern_and_suffix_str(
-        &format!("`{}`{}", matcher_str, suffix.unwrap_or("")),
-        suffix,
-    ))
-}
-
-/// Extract a simple ID from curly braces like `{id}` for code content capture
-fn extract_id_from_curly_braces(input: &str) -> Option<&str> {
-    let caps = CURLY_ID.captures(input)?;
-    caps.name("id").map(|m| m.as_str())
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -229,37 +215,6 @@ mod tests {
     use crate::mdschema::validator::ts_utils::is_codeblock_node;
 
     use super::*;
-
-    #[test]
-    fn test_extract_id_from_curly_braces() {
-        let input = "{test}";
-        let result = extract_id_from_curly_braces(input).unwrap();
-        assert_eq!(result, "test");
-
-        let input = "";
-        let result = extract_id_from_curly_braces(input);
-        assert!(result.is_none());
-
-        let input = "{a}{b}{c}";
-        let result = extract_id_from_curly_braces(input);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_extract_matcher_from_curly_delineated_text() {
-        let input = "{id:/test/}{1,2}";
-        let result = extract_matcher_from_curly_delineated_text(input)
-            .unwrap()
-            .unwrap();
-        assert_eq!(result.id(), Some("id"));
-
-        // Check that the pattern displays correctly
-        assert_eq!(format!("{}", result.pattern()), "^test");
-
-        assert!(result.extras().had_min_max());
-        assert_eq!(result.extras().min_items(), Some(1));
-        assert_eq!(result.extras().max_items(), Some(2));
-    }
 
     #[test]
     fn test_validate_code_vs_code_literal_same() {
@@ -275,7 +230,7 @@ mod tests {
                     assert!(is_codeblock_node(i));
                     assert!(is_codeblock_node(s));
                 })
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![], "Expected no errors, got {:?}", errors);
@@ -291,7 +246,7 @@ mod tests {
                     assert!(is_codeblock_node(i));
                     assert!(is_codeblock_node(s));
                 })
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert!(!errors.is_empty());
@@ -313,7 +268,7 @@ fn main() {}
                     assert!(is_codeblock_node(i));
                     assert!(is_codeblock_node(s));
                 })
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -336,7 +291,7 @@ fn main() {}
                     assert!(is_codeblock_node(i));
                     assert!(is_codeblock_node(s));
                 })
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);

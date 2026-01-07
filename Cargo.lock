@@ -584,6 +584,7 @@ version = "0.1.0"
 dependencies = [
  "ptree",
  "tree-sitter",
+ "tree-sitter-markdown-fork",
 ]
 
 [[package]]

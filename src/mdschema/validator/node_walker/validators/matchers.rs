@@ -9,8 +9,8 @@ use crate::mdschema::validator::errors::{
 };
 use crate::mdschema::validator::matcher::matcher::{Matcher, MatcherError};
 use crate::mdschema::validator::matcher::matcher_extras::get_after_extras;
-use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
 use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
     get_next_node, get_node_n_nodes_ahead, is_code_node, is_text_node, waiting_at_end,
 };
@@ -18,16 +18,6 @@ use crate::mdschema::validator::utils::compare_text_contents;
 use crate::mdschema::validator::validator_state::NodePosPair;
 
 use super::textual::validate_textual_vs_textual_direct;
-
-pub fn validate_matcher_vs_text(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
-    got_eof: bool,
-) -> ValidationResult {
-    MatcherVsTextValidator::validate(input_cursor, schema_cursor, schema_str, input_str, got_eof)
-}
 
 pub(super) struct MatcherVsTextValidator;
 
@@ -495,8 +485,15 @@ pub(super) fn validate_literal_matcher_vs_textual(
     let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();
 
-    debug_assert!(is_code_node(&input_cursor.node())); // `test` | `test` more text here
-    debug_assert!(is_code_node(&schema_cursor.node())); // `test`! | `text`! more text here
+    if !is_code_node(&input_cursor.node()) || !is_code_node(&schema_cursor.node()) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "literal matcher validation expects code_span nodes"
+        );
+        return result;
+    }
 
     // Walk into the code node and do regular textual validation.
     {
@@ -505,8 +502,15 @@ pub(super) fn validate_literal_matcher_vs_textual(
         input_cursor.goto_first_child();
         schema_cursor.goto_first_child();
 
-        debug_assert!(is_text_node(&input_cursor.node()));
-        debug_assert!(is_text_node(&schema_cursor.node()));
+        if !is_text_node(&input_cursor.node()) || !is_text_node(&schema_cursor.node()) {
+            crate::invariant_violation!(
+                result,
+                input_cursor,
+                schema_cursor,
+                "literal matcher validation expects text children"
+            );
+            return result;
+        }
 
         if let Some(error) = compare_text_contents(
             schema_str,
@@ -526,11 +530,13 @@ pub(super) fn validate_literal_matcher_vs_textual(
     // at minimum contains "!" (which indicates that it is a literal matcher in
     // the first place).
     if !schema_cursor.goto_next_sibling() && is_text_node(&schema_cursor.node()) {
-        result.add_error(ValidationError::InternalInvariantViolated(
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
             "validate_literal_matcher_vs_text called with a matcher that is not literal. \
              A text node does not follow the schema."
-                .into(),
-        ));
+        );
         return result;
     }
 
@@ -545,19 +551,24 @@ pub(super) fn validate_literal_matcher_vs_textual(
     let schema_text_after_extras = match get_after_extras(schema_node_str) {
         Some(text) => text,
         None => {
-            result.add_error(ValidationError::InternalInvariantViolated(
-                "we should have had extras in the matcher string".into(),
-            ));
+            crate::invariant_violation!(
+                result,
+                input_cursor,
+                schema_cursor,
+                "we should have had extras in the matcher string"
+            );
             return result;
         }
     };
 
     if !input_cursor.goto_next_sibling() && schema_node_str_has_more_than_extras {
-        result.add_error(ValidationError::InternalInvariantViolated(
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
             "at this point we should already have counted the number of nodes, \
              factoring in literal matchers."
-                .into(),
-        ))
+        );
     }
 
     if !is_text_node(&input_cursor.node()) {
@@ -638,8 +649,10 @@ mod tests {
     use serde_json::json;
 
     use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
-    use crate::mdschema::validator::node_walker::validators::textual::validate_textual_vs_textual;
-    use crate::mdschema::validator::ts_utils::{is_paragraph_node, parse_markdown};
+    use crate::mdschema::validator::node_walker::validators::{
+        Validator, textual::TextualVsTextualValidator,
+    };
+    use crate::mdschema::validator::ts_utils::{is_code_node, is_paragraph_node, parse_markdown};
     use crate::mdschema::validator::{
         errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
         validator_state::NodePosPair,
@@ -657,7 +670,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -673,7 +686,7 @@ mod tests {
             .walk()
             .goto_first_child_then_unwrap()
             .goto_first_child_then_unwrap()
-            .validate(true);
+            .validate_complete();
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({"test": "test"}));
@@ -689,7 +702,7 @@ mod tests {
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let textual_result = validate_textual_vs_textual(
+        let textual_result = TextualVsTextualValidator::validate(
             &input_cursor,
             &schema_cursor,
             schema_str,
@@ -709,7 +722,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -727,7 +740,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -744,7 +757,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -766,7 +779,7 @@ mod tests {
                     assert!(is_paragraph_node(n));
                 })
                 .goto_first_child_then_unwrap()
-                .validate(false)
+                .validate_incomplete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -783,7 +796,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(false)
+                .validate_incomplete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -800,7 +813,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(false)
+                .validate_incomplete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -817,7 +830,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(false)
+                .validate_incomplete()
                 .destruct();
 
         assert_eq!(errors.len(), 1);
@@ -850,7 +863,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -866,7 +879,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -883,7 +896,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(false)
+                .validate_incomplete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -900,7 +913,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -916,7 +929,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -928,7 +941,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -944,8 +957,16 @@ mod tests {
             ValidatorTester::<LiteralMatcherVsTextualValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| {
+                    assert!(is_paragraph_node(i));
+                    assert!(is_paragraph_node(s));
+                })
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .peek_nodes(|(i, s)| {
+                    assert!(is_code_node(i));
+                    assert!(is_code_node(s));
+                })
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
@@ -957,7 +978,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate(true)
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![]);
