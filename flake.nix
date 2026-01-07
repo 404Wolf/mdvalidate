@@ -40,9 +40,8 @@
       in
       {
         packages = rec {
-          default = build;
-          build = pkgs.callPackage ./nix/builds { };
-          build-static = pkgs.callPackage ./nix/builds/static.nix { };
+          default = mdv;
+          mdv = pkgs.callPackage ./nix/build.nix { static = true; };
         };
 
         devShells.default = pkgs.mkShell {
