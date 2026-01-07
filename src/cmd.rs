@@ -2,7 +2,7 @@ use crate::mdschema::validator::{
     errors::{
         ParserError, PrettyPrintError, ValidationError, debug_print_error, pretty_print_error,
     },
-    validator::Validator,
+    validator::{Validator, ValidatorState},
 };
 use colored::Colorize;
 use serde_json::Value;

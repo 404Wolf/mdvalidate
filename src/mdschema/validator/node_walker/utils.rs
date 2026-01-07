@@ -9,6 +9,8 @@ use crate::mdschema::validator::{errors::ValidationError, validator::Validator};
 
 #[cfg(test)]
 pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, Validator) {
+    use crate::mdschema::validator::validator::ValidatorState;
+
     let mut validator = Validator::new_complete(schema, input).unwrap();
     validator.validate();
 

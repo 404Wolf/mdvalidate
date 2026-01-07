@@ -247,7 +247,6 @@ impl ValidatorState for Validator {
         self.farthest_reached_pos = farthest_reached_pos;
     }
 }
-```
 
 #[cfg(test)]
 mod tests {

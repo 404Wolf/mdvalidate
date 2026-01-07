@@ -3,7 +3,7 @@
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
 use tree_sitter_markdown::language;
 
-use crate::mdschema::validator::errors::ValidationError;
+use crate::mdschema::validator::{errors::ValidationError, validator::ValidatorState};
 
 use regex::Regex;
 use std::sync::LazyLock;
