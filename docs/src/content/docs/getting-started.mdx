@@ -5,87 +5,7 @@ description: Get started writing `mdschema`
 
 import SchemaAndInput from "../../components/SchemaAndInput.astro";
 
-# Get started!
-
-### Installation
-
-You can build `mdvalidate` with `nix` using `nix build github:404wolf/mdvalidate`.
-
-Alternatively download a pre-built (static) binary from [releases](https://github.com/404Wolf/mdvalidate/releases) for use on x86.
-
-It is not officially supported, but you can also build directly with cargo via `cargo build --bin mdv`.
-
-### Using mdvalidate
-
-`mdvalidate` defines a very simple language for describing the *shape* of Markdown documents that looks like Markdown itself. You use `mdvalidate` via a command line tool (CLI).
-
-In every case, you have a schema, in `mdschema`, Mdvalidate's schema definition language, and an input, which may or may not conform to the schema. You can invoke `mdvalidate` by running:
-
-```bash
-mdv path/to/schema.md path/to/input.md
-echo $?
-```
-
-Which returns `0` if the validation is successful or `1` if there were errors. Errors are reported to `stderr`.
-
-You can use `-` instead of a path to use `stdio`. If you include a third positional argument, it will also extract data from documents that conform to the schema. For example,
-
-```bash
-echo "# Hi Wolf" | mdv path/to/schema.md - -
-echo $?
-```
-
-For the schema
-
-```md
-# Hi `name:/[A-Za-z]+/`
-```
-
-Will return
-
-```
-mdv examples/cli/schema.md examples/cli/input.md -
-{"name":"Wolf"}
-0
-```
-
-### Fast fail
-
-This is one of the most powerful parts of `mdvalidate`. If you stream input into `mdvalidate`, it will automatically exit the second that your input violates your schema.
-
-We'll talk about how list matchers work later, but
-
-```md
-- `test:/foo/`{2,2}
-```
-
-Defines a matcher that matches **exactly two** list items. If we stream:
-
-```md
-- f
-```
-
-```md
-- foo
-```
-
-```md
-- foo
-- fo
-```
-
-```md
-- foo
-- fob
-```
-
-`mdvalidate` can exit early (with `1`) if you use `--fast-fail`!
-
-Of course, if you use this setting you will not be able to get errors for the rest of the input.
-
-This is super useful for cases where the input is expensive, like when you are requesting LLM tokens to feed into `mdvalidate`.
-
-## More on `mdschema`
+# More on `mdschema` language
 
 **mdschema** is a schema language for validating Markdown documents. It allows you to define patterns that Markdown content must match, making it easy to validate documentation, user inputs, or structured content.
 
@@ -150,7 +70,44 @@ When validation succeeds, captured values are returned as JSON:
   output={'{"name": "Alice", "age": "30"}'}
 />
 
-## Next Steps
+# More on streaming
+
+This is one of the most powerful parts of `mdvalidate`. If you stream input into `mdvalidate`, it will automatically exit the second that your input violates your schema.
+
+We'll talk about how list matchers work later, but
+
+```md
+- `test:/foo/`{2,2}
+```
+
+Defines a matcher that matches **exactly two** list items. If we stream:
+
+```md
+- f
+```
+
+```md
+- foo
+```
+
+```md
+- foo
+- fo
+```
+
+```md
+- foo
+- fob
+```
+
+`mdvalidate` can exit early (with `1`) if you use `--fast-fail`!
+
+Of course, if you use this setting you will not be able to get errors for the rest of the input.
+
+This is super useful for cases where the input is expensive, like when you are requesting LLM tokens to feed into `mdvalidate`.
+
+
+# Next Steps
 
 Explore the documentation to learn more:
 

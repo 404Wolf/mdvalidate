@@ -322,7 +322,6 @@ This is a shopping list:
     }
 
     #[test]
-    #[ignore]
     fn test_multiple_nodes_with_one_error_receives_one_error_once() {
         let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d+/`
 
