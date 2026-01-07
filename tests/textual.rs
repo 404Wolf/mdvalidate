@@ -5,7 +5,6 @@ mod helpers;
 
 test_case!(
     textual_literal,
-    "textual literal",
     r#"hello world"#,
     r#"hello world"#,
     json!({}),
@@ -14,7 +13,6 @@ test_case!(
 
 test_case!(
     textual_matcher,
-    "textual matcher",
     r#"hi `name:/\w+/`"#,
     r#"hi Bob"#,
     json!({"name": "Bob"}),

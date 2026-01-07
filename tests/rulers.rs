@@ -5,7 +5,6 @@ mod helpers;
 
 test_case!(
     ruler_dashes,
-    "ruler dashes",
     r#"---"#,
     r#"---"#,
     json!({}),
@@ -14,7 +13,6 @@ test_case!(
 
 test_case!(
     ruler_stars,
-    "ruler stars",
     r#"***"#,
     r#"***"#,
     json!({}),

@@ -5,7 +5,6 @@ mod helpers;
 
 test_case!(
     code_literal,
-    "code literal",
     r#"
 ```rust
 fn main() {}
@@ -22,7 +21,6 @@ fn main() {}
 
 test_case!(
     code_language_matcher,
-    "code language matcher",
     r#"
 ```{lang:/\w+/}
 fn main() {}
@@ -39,7 +37,6 @@ fn main() {}
 
 test_case!(
     code_content_capture,
-    "code content capture",
     r#"
 ```rust
 {code}

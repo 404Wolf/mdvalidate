@@ -23,7 +23,6 @@ pub fn run_test_case(
 macro_rules! test_case {
     (
         $fn_name:ident,
-        $name:literal,
         $schema:expr,
         $input:expr,
         $expected_value:expr,
@@ -32,7 +31,7 @@ macro_rules! test_case {
         #[test]
         fn $fn_name() {
             crate::helpers::run_test_case(
-                $name,
+                stringify!($fn_name),
                 $schema,
                 $input,
                 $expected_value,

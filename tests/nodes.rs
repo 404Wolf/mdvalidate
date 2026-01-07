@@ -5,7 +5,6 @@ mod helpers;
 
 test_case!(
     node_heading_and_paragraph,
-    "node heading and paragraph",
     r#"
 # Title
 
@@ -22,7 +21,6 @@ Hello
 
 test_case!(
     node_list_and_code_block,
-    "node list and code block",
     r#"
 - item
 
