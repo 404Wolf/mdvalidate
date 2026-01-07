@@ -25,3 +25,4 @@ jobs:
         with:
           artifacts: "release.tar.gz"
           draft: true
+          tag: "v${{ github.run_number }}"

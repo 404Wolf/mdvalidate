@@ -197,21 +197,21 @@ fn validate_link_destination(
     let mut schema_text_cursor = schema_cursor.clone();
     let mut input_text_cursor = input_cursor.clone();
 
-    if !schema_text_cursor.goto_first_child() || !input_text_cursor.goto_first_child() {
-        crate::invariant_violation!(
-            result,
-            input_text_cursor,
-            schema_text_cursor,
-            "link destination nodes must contain text"
-        );
+    #[cfg(debug_assertions)]
+    {
+        if !schema_text_cursor.goto_first_child() || !input_text_cursor.goto_first_child() {
+            crate::invariant_violation!(
+                result,
+                input_text_cursor,
+                schema_text_cursor,
+                "link destination nodes must contain text"
+            );
 
-        return result;
+            return result;
+        }
     }
 
-    let schema_text = match schema_text_cursor
-        .node()
-        .utf8_text(schema_str.as_bytes())
-    {
+    let schema_text = match schema_text_cursor.node().utf8_text(schema_str.as_bytes()) {
         Ok(text) => text,
         Err(_) => return result,
     };
