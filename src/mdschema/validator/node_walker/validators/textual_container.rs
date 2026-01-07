@@ -1,6 +1,7 @@
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use crate::compare_node_kinds_check;
 use crate::mdschema::validator::{
     errors::*,
     matcher::{

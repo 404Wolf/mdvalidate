@@ -12,8 +12,11 @@ use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
     is_image_node, is_link_destination_node, is_link_node, waiting_at_end,
 };
-use crate::mdschema::validator::utils::{compare_node_kinds, compare_text_contents};
+use crate::mdschema::validator::utils::compare_text_contents;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
+
+// Use the macro from node_walker module
+use crate::compare_node_kinds_check;
 
 /// Validate two link-like nodes (links or images) against each other.
 pub(super) struct LinkVsLinkValidator;
@@ -36,10 +39,7 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
 
-    if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
-        result.add_error(error);
-        return result;
-    }
+    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
 
     if let Err(error) = ensure_at_link_start(&mut input_cursor) {
         result.add_error(error);
@@ -61,10 +61,7 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         );
     }
 
-    if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
-        result.add_error(error);
-        return result;
-    }
+    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
 
     if is_link_destination_node(&schema_cursor.node()) {
         let destination_result = validate_link_destination(
@@ -103,10 +100,7 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         );
     }
 
-    if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
-        result.add_error(error);
-        return result;
-    }
+    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
 
     if is_link_destination_node(&schema_cursor.node()) {
         let destination_result = validate_link_destination(
