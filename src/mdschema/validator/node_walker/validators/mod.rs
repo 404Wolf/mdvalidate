@@ -1,61 +1,43 @@
 use tracing::instrument;
-use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::mdschema::validator::{node_walker::ValidationResult, validator_walker::ValidatorWalker};
 
 pub(super) mod code;
 pub(super) mod headings;
 pub(super) mod links;
 pub(super) mod lists;
 pub(super) mod matchers;
-pub(super) mod nodes;
+pub(crate) mod nodes;
 pub(super) mod rulers;
 pub(super) mod textual;
 pub(super) mod textual_container;
 
 pub trait ValidatorImpl {
-    fn validate_impl(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult;
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
 }
 
 pub trait Validator {
-    fn validate(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult;
+    fn validate(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
 }
 
 impl<T: ValidatorImpl> Validator for T {
     #[instrument(skip_all, level = "trace", fields(
-        i = %input_cursor.descendant_index(),
-        s = %schema_cursor.descendant_index(),
+        i = %walker.input_cursor().descendant_index(),
+        s = %walker.schema_cursor().descendant_index(),
     ), ret)]
-    fn validate(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult {
-        Self::validate_impl(input_cursor, schema_cursor, schema_str, input_str, got_eof)
+    fn validate(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        Self::validate_impl(walker, got_eof)
     }
 }
 
 #[cfg(test)]
 mod test_utils {
-    use tree_sitter::{Node, Tree};
+    use tree_sitter::{Node, Tree, TreeCursor};
 
     use crate::mdschema::validator::{
         node_walker::utils::pretty_print_cursor_pair,
         ts_utils::{parse_markdown, walk_to_root},
+        validator_walker::ValidatorWalker,
     };
 
     use super::*;
@@ -108,13 +90,13 @@ mod test_utils {
         pub fn validate(&mut self, got_eof: bool) -> ValidationResult {
             self.print();
 
-            V::validate(
+            let walker = ValidatorWalker::from_cursors(
                 &self.input_cursor,
                 &self.schema_cursor,
                 self.schema_str,
                 self.input_str,
-                got_eof,
-            )
+            );
+            V::validate(&walker, got_eof)
         }
 
         pub fn validate_complete(&mut self) -> ValidationResult {

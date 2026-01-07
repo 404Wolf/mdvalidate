@@ -1,22 +1,56 @@
 use line_col::LineColLookup;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tree_sitter::{InputEdit, Point, Tree};
 
 use crate::mdschema::validator::{
     errors::{ParserError, ValidationError},
-    node_walker::NodeWalker,
+    node_pos_pair::NodePosPair,
+    node_walker::{
+        ValidationResult,
+        validators::{nodes::NodeVsNodeValidator, Validator as ValidatorTrait},
+    },
     ts_utils::new_markdown_parser,
-    validator_state::{NodePosPair, ValidatorState},
+    utils::join_values,
+    validator_walker::ValidatorWalker,
 };
 
 /// A Validator implementation that uses a zipper tree approach to validate
 /// an input Markdown document against a markdown schema treesitter tree.
 pub struct Validator {
     /// The current input tree. When read_input is called, this is replaced with a new tree.
-    pub input_tree: Tree,
+    input_tree: Tree,
     /// The schema tree, which does not change after initialization.
-    pub schema_tree: Tree,
-    state: ValidatorState,
+    schema_tree: Tree,
+    /// The full input string as last read. Not used internally but useful for
+    /// debugging or reporting.
+    last_input_str: String,
+    /// The full schema string. Does not change.
+    schema_str: String,
+    /// Whether we have received the end of the input. This means that last
+    /// input tree descendant index is at the end of the input.
+    got_eof: bool,
+    /// Map of matches found so far.
+    matches_so_far: Value,
+    /// Any errors encountered during validation.
+    errors_so_far: Vec<ValidationError>,
+    /// Our farthest reached position.
+    farthest_reached_pos: NodePosPair,
+}
+
+pub trait ValidatorState {
+    fn got_eof(&self) -> bool;
+    fn set_got_eof(&mut self, got_eof: bool);
+    fn input_tree(&self) -> &Tree;
+    fn schema_tree(&self) -> &Tree;
+    fn schema_str(&self) -> &str;
+    fn last_input_str(&self) -> &str;
+    fn set_last_input_str(&mut self, new_input: String);
+    fn matches_so_far(&self) -> &Value;
+    fn errors_so_far(&self) -> std::slice::Iter<'_, ValidationError>;
+    fn join_new_matches(&mut self, new_matches: Value);
+    fn push_validation_result(&mut self, result: ValidationResult);
+    fn farthest_reached_pos(&self) -> NodePosPair;
+    fn set_farthest_reached_pos(&mut self, farthest_reached_pos: NodePosPair);
 }
 
 impl Validator {
@@ -28,14 +62,15 @@ impl Validator {
         let mut input_parser = new_markdown_parser();
         let input_tree = input_parser.parse(input_str, None)?;
 
-        let mut initial_state =
-            ValidatorState::from_beginning(schema_str.to_string(), input_str.to_string(), got_eof);
-        initial_state.set_got_eof(got_eof);
-
         Some(Validator {
             input_tree,
             schema_tree,
-            state: initial_state,
+            last_input_str: input_str.to_string(),
+            schema_str: schema_str.to_string(),
+            got_eof,
+            matches_so_far: Value::Object(Map::new()),
+            errors_so_far: Vec::new(),
+            farthest_reached_pos: NodePosPair::default(),
         })
     }
 
@@ -56,12 +91,12 @@ impl Validator {
         (self.errors_so_far(), self.matches_so_far())
     }
 
-    pub fn errors_so_far(&self) -> impl Iterator<Item = &ValidationError> + std::fmt::Debug {
-        self.state.errors_so_far().into_iter()
+    pub fn errors_so_far(&self) -> std::slice::Iter<'_, ValidationError> {
+        self.errors_so_far.iter()
     }
 
     pub fn matches_so_far(&self) -> &Value {
-        self.state.matches_so_far()
+        &self.matches_so_far
     }
 
     /// Read new input. Updates the input tree with a new input tree for the full new input.
@@ -72,14 +107,14 @@ impl Validator {
     #[tracing::instrument(skip(self, input))]
     fn read_input(&mut self, input: &str, got_eof: bool) -> Result<(), ValidationError> {
         // Update internal state of the last input string
-        self.state.set_last_input_str(input.to_string());
+        self.set_last_input_str(input.to_string());
 
         // If we already got EOF, do not accept more input
-        if self.state.got_eof() {
+        if self.got_eof() {
             return Err(ValidationError::ParserError(ParserError::ReadAfterEOF));
         }
 
-        self.state.set_got_eof(got_eof);
+        self.set_got_eof(got_eof);
 
         // Calculate the range of new content
         let old_len = self.input_tree.root_node().byte_range().end;
@@ -121,7 +156,7 @@ impl Validator {
     }
 
     pub fn last_input_str(&self) -> &str {
-        self.state.last_input_str()
+        &self.last_input_str
     }
 
     pub fn read_final_input(&mut self, input: &str) -> Result<(), ValidationError> {
@@ -135,19 +170,142 @@ impl Validator {
     /// Validates the input markdown against the schema by traversing both trees
     /// in parallel to the ends, starting from where we last left off.
     pub fn validate(&mut self) {
-        if self.state().got_eof() {
-            self.state.set_farthest_reached_pos(NodePosPair::default());
+        if self.got_eof() {
+            self.set_farthest_reached_pos(NodePosPair::default());
         }
-        let mut node_validator = NodeWalker::new(
-            &mut self.state,
-            self.input_tree.walk(),
-            self.schema_tree.walk(),
-        );
-        node_validator.validate();
+
+        let got_eof = self.got_eof();
+        let farthest_reached_pos = self.farthest_reached_pos();
+        let schema_str = self.schema_str.clone();
+        let input_str = self.last_input_str.clone();
+
+        let validation_result = {
+            let mut input_cursor = self.input_tree.walk();
+            let mut schema_cursor = self.schema_tree.walk();
+            farthest_reached_pos.walk_cursors_to_pos(&mut input_cursor, &mut schema_cursor);
+
+            let walker =
+                ValidatorWalker::new(input_cursor, schema_cursor, &schema_str, &input_str);
+            NodeVsNodeValidator::validate(&walker, got_eof)
+        };
+
+        self.push_validation_result(validation_result);
     }
 
-    pub fn state(&self) -> &ValidatorState {
-        &self.state
+    pub fn walk(&self) -> ValidatorWalker<'_> {
+        ValidatorWalker::new(
+            self.input_tree.walk(),
+            self.schema_tree.walk(),
+            &self.schema_str,
+            &self.last_input_str,
+        )
+    }
+
+    pub fn got_eof(&self) -> bool {
+        self.got_eof
+    }
+
+    pub fn set_got_eof(&mut self, got_eof: bool) {
+        self.got_eof = got_eof;
+    }
+
+    pub fn schema_str(&self) -> &str {
+        &self.schema_str
+    }
+
+    pub fn set_last_input_str(&mut self, new_input: String) {
+        self.last_input_str = new_input;
+    }
+
+    /// Join a set of matches into ours.
+    pub fn join_new_matches(&mut self, new_matches: Value) {
+        let joined = &mut self.matches_so_far.clone();
+        join_values(joined, new_matches);
+        self.matches_so_far = joined.clone();
+    }
+
+    /// Unpacks a ValidationResult and adds its matches and errors to the state.
+    pub fn push_validation_result(&mut self, result: ValidationResult) {
+        let result_descendant_index_pair = result.farthest_reached_pos();
+        self.join_new_matches(result.value);
+        self.errors_so_far.extend(result.errors);
+        self.farthest_reached_pos = result_descendant_index_pair;
+    }
+
+    /// Our farthest reached position.
+    pub fn farthest_reached_pos(&self) -> NodePosPair {
+        self.farthest_reached_pos
+    }
+
+    pub fn set_farthest_reached_pos(&mut self, farthest_reached_pos: NodePosPair) {
+        self.farthest_reached_pos = farthest_reached_pos;
+    }
+
+    pub fn input_tree(&self) -> &Tree {
+        &self.input_tree
+    }
+
+    pub fn schema_tree(&self) -> &Tree {
+        &self.schema_tree
+    }
+}
+
+impl ValidatorState for Validator {
+    fn got_eof(&self) -> bool {
+        self.got_eof
+    }
+
+    fn set_got_eof(&mut self, got_eof: bool) {
+        self.got_eof = got_eof;
+    }
+
+    fn input_tree(&self) -> &Tree {
+        &self.input_tree
+    }
+
+    fn schema_tree(&self) -> &Tree {
+        &self.schema_tree
+    }
+
+    fn schema_str(&self) -> &str {
+        &self.schema_str
+    }
+
+    fn last_input_str(&self) -> &str {
+        &self.last_input_str
+    }
+
+    fn set_last_input_str(&mut self, new_input: String) {
+        self.last_input_str = new_input;
+    }
+
+    fn matches_so_far(&self) -> &Value {
+        &self.matches_so_far
+    }
+
+    fn errors_so_far(&self) -> std::slice::Iter<'_, ValidationError> {
+        self.errors_so_far.iter()
+    }
+
+    fn join_new_matches(&mut self, new_matches: Value) {
+        let joined = &mut self.matches_so_far.clone();
+        join_values(joined, new_matches);
+        self.matches_so_far = joined.clone();
+    }
+
+    fn push_validation_result(&mut self, result: ValidationResult) {
+        let result_descendant_index_pair = result.farthest_reached_pos();
+        self.join_new_matches(result.value);
+        self.errors_so_far.extend(result.errors);
+        self.farthest_reached_pos = result_descendant_index_pair;
+    }
+
+    fn farthest_reached_pos(&self) -> NodePosPair {
+        self.farthest_reached_pos
+    }
+
+    fn set_farthest_reached_pos(&mut self, farthest_reached_pos: NodePosPair) {
+        self.farthest_reached_pos = farthest_reached_pos;
     }
 }
 
@@ -167,7 +325,7 @@ mod tests {
 
         (
             validator.errors_so_far().cloned().collect(),
-            validator.state.matches_so_far().clone(),
+            validator.matches_so_far().clone(),
         )
     }
 
@@ -182,20 +340,20 @@ mod tests {
         // Check that read_input updates the last_input_str correctly
         let mut validator = get_validator_for_incremental("# Schema", "Initial input", false);
 
-        assert_eq!(validator.state.last_input_str(), "Initial input");
+        assert_eq!(validator.last_input_str(), "Initial input");
 
         validator
             .read_input("Updated input", false)
             .expect("Failed to read input");
 
-        assert_eq!(validator.state.last_input_str(), "Updated input");
+        assert_eq!(validator.last_input_str(), "Updated input");
 
         // Check that it updates the tree correctly
         assert_eq!(
             validator
                 .input_tree
                 .root_node()
-                .utf8_text(&validator.state.last_input_str().as_bytes())
+                .utf8_text(&validator.last_input_str().as_bytes())
                 .expect("Failed to get input text"),
             "Updated input"
         );
@@ -369,12 +527,7 @@ fooobar
 ";
 
         let (errors, matches) = do_validate(schema, input, true);
-        assert_eq!(
-            errors,
-            vec![],
-            "expected no errors, but found {:?}",
-            errors
-        );
+        assert_eq!(errors, vec![], "expected no errors, but found {:?}", errors);
 
         // The matcher with + should collect all matches in an array
         let items = match matches.get("item") {
@@ -736,12 +889,7 @@ Paragraph text
             .unwrap();
         validator.validate();
         let errors: Vec<_> = validator.errors_so_far().cloned().collect();
-        assert_eq!(
-            errors,
-            vec![],
-            "Expected no errors but found {:?}",
-            errors
-        );
+        assert_eq!(errors, vec![], "Expected no errors but found {:?}", errors);
     }
 
     #[test]
@@ -1011,14 +1159,14 @@ Content for section 3."#;
         for (i, chunk) in chunks.iter().enumerate() {
             let is_eof = i == chunks.len() - 1;
 
-            let indices_before = validator.state().farthest_reached_pos().to_pos();
+            let indices_before = validator.farthest_reached_pos().to_pos();
 
             validator
                 .read_input(chunk, is_eof)
                 .expect("Failed to read input");
             validator.validate();
 
-            let indices_after = validator.state().farthest_reached_pos().to_pos();
+            let indices_after = validator.farthest_reached_pos().to_pos();
 
             // Indices should advance (or stay the same if nothing new to validate)
             // They should NOT reset to 0

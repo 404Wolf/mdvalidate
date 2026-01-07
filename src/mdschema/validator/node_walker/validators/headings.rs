@@ -9,6 +9,7 @@ use crate::mdschema::validator::ts_utils::{
     is_heading_content_node, is_heading_node, is_marker_node, is_textual_container_node,
 };
 use crate::mdschema::validator::utils::compare_node_kinds;
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate two headings.
 ///
@@ -17,17 +18,15 @@ use crate::mdschema::validator::utils::compare_node_kinds;
 pub(super) struct HeadingVsHeadingValidator;
 
 impl ValidatorImpl for HeadingVsHeadingValidator {
-    fn validate_impl(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult {
-        let mut result = ValidationResult::from_cursors(input_cursor, schema_cursor);
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        let mut result =
+            ValidationResult::from_cursors(walker.input_cursor(), walker.schema_cursor());
 
-        let mut input_cursor = input_cursor.clone();
-        let mut schema_cursor = schema_cursor.clone();
+        let input_str = walker.input_str();
+        let schema_str = walker.schema_str();
+
+        let mut input_cursor = walker.input_cursor().clone();
+        let mut schema_cursor = walker.schema_cursor().clone();
 
         // Both should be the start of headings
         if !is_heading_node(&input_cursor.node()) || !is_heading_node(&schema_cursor.node()) {
@@ -93,10 +92,7 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
 
         // Now that we're at the heading content, use `validate_text_vs_text`
         TextualContainerVsTextualContainerValidator::validate(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
+            &walker.with_cursors(&input_cursor, &schema_cursor),
             got_eof,
         )
     }
@@ -141,10 +137,7 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<bool, Validation
 mod tests {
     use super::*;
     use crate::mdschema::validator::{
-        errors::SchemaViolationError,
-        node_walker::validators::test_utils::ValidatorTester,
-        ts_utils::{is_heading_node, is_textual_node, parse_markdown},
-        validator_state::NodePosPair,
+        errors::SchemaViolationError, node_pos_pair::NodePosPair, node_walker::validators::test_utils::ValidatorTester, ts_utils::{is_heading_node, is_textual_node, parse_markdown}
     };
     use serde_json::json;
 

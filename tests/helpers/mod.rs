@@ -3,8 +3,7 @@ use mdvalidate::mdschema::validator::validator::Validator;
 use serde_json::Value;
 
 pub fn run_test_case(schema: &str, input: &str) -> (Vec<ValidationError>, Value) {
-    let mut validator =
-        Validator::new_complete(schema, input).expect("Failed to create validator");
+    let mut validator = Validator::new_complete(schema, input).expect("Failed to create validator");
     validator.validate();
 
     (

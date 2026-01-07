@@ -4,6 +4,7 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::is_ruler_node;
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate that both nodes are rulers (thematic breaks).
 ///
@@ -12,18 +13,9 @@ use crate::mdschema::validator::ts_utils::is_ruler_node;
 pub(super) struct RulerVsRulerValidator;
 
 impl ValidatorImpl for RulerVsRulerValidator {
-    fn validate_impl(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult {
-        let _schema_str = schema_str;
-        let _input_str = input_str;
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let _got_eof = got_eof;
-
-        validate_ruler_vs_ruler_impl(input_cursor, schema_cursor)
+        validate_ruler_vs_ruler_impl(walker.input_cursor(), walker.schema_cursor())
     }
 }
 

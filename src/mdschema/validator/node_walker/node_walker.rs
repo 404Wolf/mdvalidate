@@ -1,20 +1,26 @@
+#![allow(dead_code)]
+
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
-    node_walker::{validation_result::ValidationResult, validators::{Validator, nodes::NodeVsNodeValidator}},
-    validator_state::ValidatorState,
+    node_walker::{
+        validation_result::ValidationResult,
+        validators::{nodes::NodeVsNodeValidator, Validator as ValidatorTrait},
+    },
+    validator::ValidatorState,
+    validator_walker::ValidatorWalker,
 };
 
 /// A node validator that validates input nodes against schema nodes.
-pub struct NodeWalker<'a> {
-    state: &'a mut ValidatorState,
+pub struct NodeWalker<'a, S: ValidatorState> {
+    state: &'a mut S,
     input_cursor: TreeCursor<'a>,
     schema_cursor: TreeCursor<'a>,
 }
 
-impl<'a> NodeWalker<'a> {
+impl<'a, S: ValidatorState> NodeWalker<'a, S> {
     pub fn new(
-        state: &'a mut ValidatorState,
+        state: &'a mut S,
         input_cursor: TreeCursor<'a>,
         schema_cursor: TreeCursor<'a>,
     ) -> Self {
@@ -36,24 +42,29 @@ impl<'a> NodeWalker<'a> {
     }
 
     pub fn validate(&mut self) -> ValidationResult {
-        self.state()
-            .farthest_reached_pos()
-            .walk_cursors_to_pos(&mut self.input_cursor, &mut self.schema_cursor);
+        let schema_str = self.state.schema_str().to_string();
+        let input_str = self.state.last_input_str().to_string();
+        let got_eof = self.state.got_eof();
 
-        let validation_result = NodeVsNodeValidator::validate(
-            &mut self.input_cursor,
-            &mut self.schema_cursor,
-            self.state.schema_str(),
-            self.state.last_input_str(),
-            self.state.got_eof(),
+        let mut walker = ValidatorWalker::from_cursors(
+            &self.input_cursor,
+            &self.schema_cursor,
+            &schema_str,
+            &input_str,
         );
+        let (input_cursor, schema_cursor) = walker.cursors_mut();
+        self.state
+            .farthest_reached_pos()
+            .walk_cursors_to_pos(input_cursor, schema_cursor);
+
+        let validation_result = NodeVsNodeValidator::validate(&walker, got_eof);
 
         self.state.push_validation_result(validation_result.clone());
 
         validation_result
     }
 
-    pub fn state(&self) -> &ValidatorState {
+    pub fn state(&self) -> &S {
         self.state
     }
 }

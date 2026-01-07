@@ -66,16 +66,19 @@ macro_rules! invariant_violation {
         let mut schema_cursor = $schema_cursor.clone();
         $crate::mdschema::validator::ts_utils::walk_to_root(&mut schema_cursor);
 
+        let backtrace = std::backtrace::Backtrace::capture();
+
         $crate::mdschema::validator::errors::ValidationError::InternalInvariantViolated(
             format!(
-                "{}:{}\n{}\ninput_idx={} schema_idx={}\n{}\n{}",
+                "{}:{}\n{}\ninput_idx={} schema_idx={}\n{}\n{}\n\nStack trace:\n{}",
                 file!(),
                 line!(),
                 module_path!(),
                 input_cursor.descendant_index(),
                 schema_cursor.descendant_index(),
                 message,
-                pretty_print_cursor_pair(&input_cursor, &schema_cursor)
+                pretty_print_cursor_pair(&input_cursor, &schema_cursor),
+                backtrace
             ),
         )
     }};
@@ -87,7 +90,6 @@ macro_rules! invariant_violation {
         )
     }};
 }
-
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -510,7 +512,7 @@ fn validation_error_to_ariadne(
     buffer: &mut Vec<u8>,
 ) -> Result<(), PrettyPrintError> {
     let source_content = validator.last_input_str();
-    let tree = &validator.input_tree;
+    let tree = validator.input_tree();
 
     let report = match error {
         ValidationError::SchemaViolation(schema_err) => match schema_err {

@@ -1,5 +1,4 @@
 use serde_json::json;
-use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     errors::{NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError},
@@ -10,6 +9,7 @@ use crate::mdschema::validator::{
     },
     ts_utils::extract_codeblock_contents,
 };
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate a code block against a schema code block.
 ///
@@ -46,28 +46,19 @@ use crate::mdschema::validator::{
 pub(super) struct CodeVsCodeValidator;
 
 impl ValidatorImpl for CodeVsCodeValidator {
-    fn validate_impl(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult {
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let _got_eof = got_eof;
-        validate_code_vs_code_impl(input_cursor, schema_cursor, schema_str, input_str)
+        validate_code_vs_code_impl(walker)
     }
 }
 
-fn validate_code_vs_code_impl(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
-) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(input_cursor, input_cursor);
+fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
+    let mut result = ValidationResult::from_cursors(walker.input_cursor(), walker.input_cursor());
 
-    let input_cursor = input_cursor.clone();
-    let schema_cursor = schema_cursor.clone();
+    let input_cursor = walker.input_cursor().clone();
+    let schema_cursor = walker.schema_cursor().clone();
+    let input_str = walker.input_str();
+    let schema_str = walker.schema_str();
 
     if input_cursor.node().kind() != "fenced_code_block"
         || schema_cursor.node().kind() != "fenced_code_block"

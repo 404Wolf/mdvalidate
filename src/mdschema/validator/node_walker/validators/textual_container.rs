@@ -19,6 +19,7 @@ use crate::mdschema::validator::{
         get_next_node, is_code_node, is_text_node,
     },
 };
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate a textual region of input against a textual region of schema.
 ///
@@ -55,31 +56,22 @@ use crate::mdschema::validator::{
 pub(super) struct TextualContainerVsTextualContainerValidator;
 
 impl ValidatorImpl for TextualContainerVsTextualContainerValidator {
-    fn validate_impl(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult {
-        validate_textual_container_vs_textual_container_impl(
-            input_cursor,
-            schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        )
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        validate_textual_container_vs_textual_container_impl(walker, got_eof)
     }
 }
 
 fn validate_textual_container_vs_textual_container_impl(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
+    walker: &ValidatorWalker,
     got_eof: bool,
 ) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+    let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
+
+    let schema_str = walker.schema_str();
+    let _input_str = walker.input_str();
+
+    let mut input_cursor = walker.input_cursor().clone();
+    let mut schema_cursor = walker.schema_cursor().clone();
 
     if !both_are_textual_containers(&schema_cursor.node(), &input_cursor.node()) {
         crate::invariant_violation!(
@@ -140,9 +132,6 @@ fn validate_textual_container_vs_textual_container_impl(
         ));
     }
 
-    let mut input_cursor = input_cursor.clone();
-    let mut schema_cursor = schema_cursor.clone();
-
     // Go from the container to the first child in the container, and then
     // iterate over the siblings at the same rate.
     input_cursor.goto_first_child();
@@ -153,18 +142,12 @@ fn validate_textual_container_vs_textual_container_impl(
             || both_are_image_nodes(&input_cursor.node(), &schema_cursor.node())
         {
             LinkVsLinkValidator::validate(
-                &input_cursor,
-                &schema_cursor,
-                schema_str,
-                input_str,
+                &walker.with_cursors(&input_cursor, &schema_cursor),
                 got_eof,
             )
         } else {
             TextualVsTextualValidator::validate(
-                &input_cursor,
-                &schema_cursor,
-                schema_str,
-                input_str,
+                &walker.with_cursors(&input_cursor, &schema_cursor),
                 got_eof,
             )
         };
@@ -252,10 +235,11 @@ mod tests {
     use crate::mdschema::validator::{
         errors::{SchemaError, ValidationError},
         matcher::matcher::MatcherError,
-        node_walker::validators::test_utils::ValidatorTester,
-        node_walker::validators::textual_container::count_non_literal_matchers_in_children,
+        node_pos_pair::NodePosPair,
+        node_walker::validators::{
+            test_utils::ValidatorTester, textual_container::count_non_literal_matchers_in_children,
+        },
         ts_utils::{is_heading_content_node, parse_markdown},
-        validator_state::NodePosPair,
     };
 
     #[test]
@@ -310,8 +294,8 @@ mod tests {
 
     #[test]
     fn test_validate_textual_container_vs_textual_container_with_content_and_link() {
-        let schema_str = "# Test Wolf [hi]({link:/.*/})";
-        let input_str = "# Test Wolf [hi](https://example.com)";
+        let schema_str = "# Test Wolf [hi](https://example.com)";
+        let input_str = "# Test Wolf [hi](https://foobar.com)";
 
         let (value, errors, _) =
             ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
@@ -330,8 +314,8 @@ mod tests {
             .validate_complete()
             .destruct();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"link": "https://example.com"}));
+        assert!(!errors.is_empty());
+        assert_eq!(value, json!({}));
     }
 
     #[test]

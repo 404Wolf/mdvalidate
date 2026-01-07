@@ -141,9 +141,24 @@ pub fn is_link_node(node: &Node) -> bool {
     node.kind() == "link"
 }
 
+/// Check if a node is a link destination.
+pub fn is_link_destination_node(node: &Node) -> bool {
+    node.kind() == "link_destination"
+}
+
+/// Check if a node is link text.
+pub fn is_link_text_node(node: &Node) -> bool {
+    node.kind() == "link_text"
+}
+
 /// Check if a node is an image.
 pub fn is_image_node(node: &Node) -> bool {
     node.kind() == "image"
+}
+
+/// Check if a node is an image description.
+pub fn is_image_description_node(node: &Node) -> bool {
+    node.kind() == "image_description"
 }
 
 /// Check if a node is a paragraph.
@@ -261,9 +276,24 @@ pub fn both_are_link_nodes(input_node: &Node, schema_node: &Node) -> bool {
     is_link_node(&input_node) && is_link_node(&schema_node)
 }
 
+/// Check if both nodes are link destination nodes.
+pub fn both_are_link_destination_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_link_destination_node(&input_node) && is_link_destination_node(&schema_node)
+}
+
+/// Check if both nodes are link text nodes.
+pub fn both_are_link_text_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_link_text_node(&input_node) && is_link_text_node(&schema_node)
+}
+
 /// Check if both nodes are image nodes.
 pub fn both_are_image_nodes(input_node: &Node, schema_node: &Node) -> bool {
     is_image_node(&input_node) && is_image_node(&schema_node)
+}
+
+/// Check if both nodes are image description nodes.
+pub fn both_are_image_description_nodes(input_node: &Node, schema_node: &Node) -> bool {
+    is_image_description_node(&input_node) && is_image_description_node(&schema_node)
 }
 
 /// Check if both nodes are text nodes.
@@ -488,28 +518,17 @@ pub fn has_next_sibling(cursor: &TreeCursor) -> bool {
 
 #[allow(dead_code)]
 pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<ValidationError>) {
-    use crate::mdschema::validator::validator_state::ValidatorState;
+    use crate::mdschema::validator::validator::Validator;
 
-    let mut state = ValidatorState::from_beginning(schema.to_string(), input.to_string(), true);
+    let mut validator = Validator::new_complete(schema, input).unwrap();
+    validator.validate();
 
-    let mut parser = new_markdown_parser();
-    let schema_tree = parser.parse(schema, None).unwrap();
-    let input_tree = parser.parse(input, None).unwrap();
-
-    {
-        use crate::mdschema::validator::node_walker::NodeWalker;
-
-        let mut node_validator = NodeWalker::new(&mut state, input_tree.walk(), schema_tree.walk());
-
-        node_validator.validate();
-    }
-
-    let errors = state
+    let errors = validator
         .errors_so_far()
         .into_iter()
         .cloned()
         .collect::<Vec<ValidationError>>();
-    let matches = state.matches_so_far().clone();
+    let matches = validator.matches_so_far().clone();
 
     (matches, errors)
 }

@@ -9,75 +9,55 @@ use crate::mdschema::validator::errors::{
 };
 use crate::mdschema::validator::matcher::matcher::{Matcher, MatcherError};
 use crate::mdschema::validator::matcher::matcher_extras::get_after_extras;
+use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
     get_next_node, get_node_n_nodes_ahead, is_code_node, is_text_node, waiting_at_end,
 };
 use crate::mdschema::validator::utils::compare_text_contents;
-use crate::mdschema::validator::validator_state::NodePosPair;
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 use super::textual::validate_textual_vs_textual_direct;
 
 pub(super) struct MatcherVsTextValidator;
 
 impl ValidatorImpl for MatcherVsTextValidator {
-    fn validate_impl(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult {
-        validate_matcher_vs_text_impl(input_cursor, schema_cursor, schema_str, input_str, got_eof)
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        validate_matcher_vs_text_impl(walker, got_eof)
     }
 }
 
 pub(super) struct TextualVsMatcherValidator;
 
 impl ValidatorImpl for TextualVsMatcherValidator {
-    fn validate_impl(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult {
-        validate_matcher_vs_text_impl(input_cursor, schema_cursor, schema_str, input_str, got_eof)
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        validate_matcher_vs_text_impl(walker, got_eof)
     }
 }
 
 pub(super) struct LiteralMatcherVsTextualValidator;
 
 impl ValidatorImpl for LiteralMatcherVsTextualValidator {
-    fn validate_impl(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult {
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         validate_literal_matcher_vs_textual(
-            input_cursor,
-            schema_cursor,
-            schema_str,
-            input_str,
+            walker.input_cursor(),
+            walker.schema_cursor(),
+            walker.schema_str(),
+            walker.input_str(),
             got_eof,
         )
     }
 }
 
-fn validate_matcher_vs_text_impl(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
-    got_eof: bool,
-) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
+fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
-    let mut schema_cursor = schema_cursor.clone();
-    let mut input_cursor = input_cursor.clone();
+    let schema_str = walker.schema_str();
+    let input_str = walker.input_str();
+
+    let mut schema_cursor = walker.schema_cursor().clone();
+    let mut input_cursor = walker.input_cursor().clone();
 
     let input_node = input_cursor.node();
 
@@ -648,15 +628,16 @@ mod tests {
 
     use serde_json::json;
 
+    use crate::mdschema::validator::errors::{
+        NodeContentMismatchKind, SchemaViolationError, ValidationError,
+    };
+    use crate::mdschema::validator::node_pos_pair::NodePosPair;
     use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
     use crate::mdschema::validator::node_walker::validators::{
         Validator, textual::TextualVsTextualValidator,
     };
     use crate::mdschema::validator::ts_utils::{is_code_node, is_paragraph_node, parse_markdown};
-    use crate::mdschema::validator::{
-        errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
-        validator_state::NodePosPair,
-    };
+    use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
     use super::{LiteralMatcherVsTextualValidator, MatcherVsTextValidator};
 
@@ -705,14 +686,9 @@ mod tests {
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let (value, errors, _) = TextualVsTextualValidator::validate(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            true,
-        )
-        .destruct();
+        let walker =
+            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+        let (value, errors, _) = TextualVsTextualValidator::validate(&walker, true).destruct();
 
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"test": "test"}));

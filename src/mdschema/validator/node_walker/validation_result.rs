@@ -2,8 +2,8 @@ use serde_json::{Value, json};
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::errors::ValidationError;
+use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::utils::join_values;
-use crate::mdschema::validator::validator_state::NodePosPair;
 
 /// Validation results containing a Value with all matches, vector of all
 /// errors, and the descendant indexes after validation

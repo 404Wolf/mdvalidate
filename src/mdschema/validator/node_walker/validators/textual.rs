@@ -11,6 +11,7 @@ use crate::mdschema::validator::{
     ts_utils::waiting_at_end,
     utils::{compare_node_kinds, compare_text_contents},
 };
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate two textual elements.
 ///
@@ -24,52 +25,34 @@ pub(super) struct TextualVsTextualValidator;
 
 impl ValidatorImpl for TextualVsTextualValidator {
     #[track_caller]
-    fn validate_impl(
-        input_cursor: &TreeCursor,
-        schema_cursor: &TreeCursor,
-        schema_str: &str,
-        input_str: &str,
-        got_eof: bool,
-    ) -> ValidationResult {
-        validate_textual_vs_textual_impl(
-            input_cursor,
-            schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        )
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        validate_textual_vs_textual_impl(walker, got_eof)
     }
 }
 
 #[track_caller]
-fn validate_textual_vs_textual_impl(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
-    got_eof: bool,
-) -> ValidationResult {
+fn validate_textual_vs_textual_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
     // If the schema is pointed at a code node, or a text node followed by a
     // code node, validate it using `MatcherVsTextValidator::validate`
 
-    let current_node_is_code_node = is_code_node(&schema_cursor.node());
+    let current_node_is_code_node = is_code_node(&walker.schema_cursor().node());
     let current_node_is_text_node_and_next_node_code_node = {
-        get_next_node(&schema_cursor)
-            .map(|n| is_text_node(&schema_cursor.node()) && is_code_node(&n))
+        get_next_node(walker.schema_cursor())
+            .map(|n| is_text_node(&walker.schema_cursor().node()) && is_code_node(&n))
             .unwrap_or(false)
     };
 
     if current_node_is_code_node || current_node_is_text_node_and_next_node_code_node {
-        return MatcherVsTextValidator::validate(
-            &input_cursor,
-            &schema_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
+        return MatcherVsTextValidator::validate(walker, got_eof);
     }
 
-    validate_textual_vs_textual_direct(input_cursor, schema_cursor, schema_str, input_str, got_eof)
+    validate_textual_vs_textual_direct(
+        walker.input_cursor(),
+        walker.schema_cursor(),
+        walker.schema_str(),
+        walker.input_str(),
+        got_eof,
+    )
 }
 
 /// Validate two textual elements directly without checking for matchers.
@@ -133,9 +116,9 @@ mod tests {
 
     use super::TextualVsTextualValidator;
     use crate::mdschema::validator::{
+        node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
         ts_utils::{is_code_node, is_text_node},
-        validator_state::NodePosPair,
     };
 
     #[test]
