@@ -31,10 +31,6 @@ ptree = "0.5.2"
 [lib]
 path = "src/lib.rs"
 
-[[test]]
-name = "tests"
-path = "tests/mod.rs"
-
 [package]
 name = "mdvalidate"
 version = "0.1.28"
@@ -43,3 +39,7 @@ license = "MIT"
 documentation = "https://github.com/404wolf/mdvalidate"
 homepage = "https://github.com/404wolf/mdvalidate"
 edition = "2024"
+
+[[test]]
+name = "tests"
+path = "tests/mod.rs"

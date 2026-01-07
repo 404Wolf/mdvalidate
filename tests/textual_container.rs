@@ -3,12 +3,32 @@ use serde_json::json;
 #[macro_use]
 mod helpers;
 
+use mdvalidate::mdschema::validator::errors::{
+    NodeContentMismatchKind, SchemaViolationError, ValidationError,
+};
+
 test_case!(
     paragraph_literal,
     r#"hello **world**"#,
     r#"hello **world**"#,
     json!({}),
     vec![]
+);
+
+test_case!(
+    paragraph_content_mismatch,
+    r#"hello **world**"#,
+    r#"hello **there**"#,
+    json!({}),
+    vec![ValidationError::SchemaViolation(
+        SchemaViolationError::NodeContentMismatch {
+            schema_index: 3,
+            input_index: 3,
+            expected: "**world**".into(),
+            actual: "**there**".into(),
+            kind: NodeContentMismatchKind::Literal,
+        }
+    )]
 );
 
 test_case!(

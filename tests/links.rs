@@ -3,6 +3,10 @@ use serde_json::json;
 #[macro_use]
 mod helpers;
 
+use mdvalidate::mdschema::validator::errors::{
+    NodeContentMismatchKind, SchemaViolationError, ValidationError,
+};
+
 test_case!(
     link_literal,
     r#"[hi](https://example.com)"#,
@@ -25,4 +29,20 @@ test_case!(
     r#"![alt](image.png)"#,
     json!({}),
     vec![]
+);
+
+test_case!(
+    link_destination_mismatch,
+    r#"[hi](https://example.com)"#,
+    r#"[hi](https://different.com)"#,
+    json!({}),
+    vec![ValidationError::SchemaViolation(
+        SchemaViolationError::NodeContentMismatch {
+            schema_index: 6,
+            input_index: 6,
+            expected: "https://example.com".into(),
+            actual: "https://different.com".into(),
+            kind: NodeContentMismatchKind::Literal,
+        }
+    )]
 );

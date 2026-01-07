@@ -6,6 +6,7 @@ use ariadne::{Color, Label, Report, ReportKind, Source};
 use std::fmt;
 
 use crate::mdschema::validator::ts_utils::find_node_by_index;
+
 #[macro_export]
 macro_rules! add_invariant_violation {
     ($result:ident, $input_cursor:ident, $schema_cursor:ident, $message:expr) => {{
@@ -67,7 +68,7 @@ macro_rules! invariant_violation {
 
         $crate::mdschema::validator::errors::ValidationError::InternalInvariantViolated(
             format!(
-                "{}:{} {} i_idx={} s_idx={} {}\n{}",
+                "{}:{}\n{}\ninput_idx={} schema_idx={}\n{}\n{}",
                 file!(),
                 line!(),
                 module_path!(),
@@ -828,18 +829,8 @@ The first matcher has a specific upper bound (3), while the last one can be unbo
             }
         }
         ValidationError::InternalInvariantViolated(msg) => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("Internal invariant violated")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message(format!(
-                            "Internal invariant violated: {}. This is a bug.",
-                            msg
-                        ))
-                        .with_color(Color::Red),
-                )
-                .finish()
+            buffer.extend_from_slice(msg.as_bytes());
+            return Ok(());
         }
         ValidationError::IoError(msg) => {
             let root_range = 0..source_content.len();
