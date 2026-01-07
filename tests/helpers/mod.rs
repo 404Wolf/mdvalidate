@@ -2,22 +2,15 @@ use mdvalidate::mdschema::validator::errors::ValidationError;
 use mdvalidate::mdschema::validator::validator::Validator;
 use serde_json::Value;
 
-pub fn run_test_case(
-    name: &str,
-    schema: &str,
-    input: &str,
-    expected_value: Value,
-    expected_errors: Vec<ValidationError>,
-) {
+pub fn run_test_case(schema: &str, input: &str) -> (Vec<ValidationError>, Value) {
     let mut validator =
         Validator::new_complete(schema, input).expect("Failed to create validator");
     validator.validate();
 
-    let errors = validator.errors_so_far().cloned().collect::<Vec<_>>();
-    let value = validator.matches_so_far().clone();
-
-    assert_eq!(errors, expected_errors, "{}", name);
-    assert_eq!(value, expected_value, "{}", name);
+    (
+        validator.errors_so_far().cloned().collect::<Vec<_>>(),
+        validator.matches_so_far().clone(),
+    )
 }
 
 macro_rules! test_case {
@@ -30,13 +23,9 @@ macro_rules! test_case {
     ) => {
         #[test]
         fn $fn_name() {
-            crate::helpers::run_test_case(
-                stringify!($fn_name),
-                $schema,
-                $input,
-                $expected_value,
-                $expected_errors,
-            );
+            let (errors, value) = crate::helpers::run_test_case($schema, $input);
+            assert_eq!(errors, $expected_errors, "{}", stringify!($fn_name));
+            assert_eq!(value, $expected_value, "{}", stringify!($fn_name));
         }
     };
 }

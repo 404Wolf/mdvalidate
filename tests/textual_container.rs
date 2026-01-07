@@ -41,8 +41,8 @@ test_case!(
 
 test_case!(
     paragraph_mixed_literal,
-    r#"hello *there*"#,
-    r#"hello *there*"#,
+    r#"# hello *there*"#,
+    r#"# hello *there*"#,
     json!({}),
     vec![]
 );
