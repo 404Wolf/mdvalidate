@@ -300,7 +300,7 @@ fn link_child_pos(schema_cursor: &TreeCursor, input_cursor: &TreeCursor) -> Opti
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
+    use crate::mdschema::validator::{node_pos_pair::NodePosPair, node_walker::validators::test_utils::ValidatorTester};
 
     use super::LinkVsLinkValidator;
 
@@ -309,16 +309,25 @@ mod tests {
         let schema_str = "[hi](https://test.com)";
         let input_str = "[hi](https://test.com)";
 
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let tester = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str);
+        let mut tester_walker = tester.walk();
+        tester_walker
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap();
+
+        let (value, errors, farthest_reached_pos) = tester_walker.validate_incomplete().destruct();
 
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
+
+        // Don't go "inside" the link.
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(2, 2));
+
+        let (value, errors, farthest_reached_pos) = tester_walker.validate_complete().destruct();
+
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({}));
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(2, 2))
     }
 
     #[test]
