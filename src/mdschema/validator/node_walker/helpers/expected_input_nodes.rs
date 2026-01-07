@@ -6,7 +6,7 @@ use crate::mdschema::validator::{
         matcher::{Matcher, MatcherError},
         matcher_extras::{get_after_extras, get_all_extras},
     },
-    ts_utils::{get_next_node, is_code_node, is_text_node},
+    ts_utils::{get_next_node, is_inline_code_node, is_text_node},
 };
 
 /// Determine the number of nodes we expect in some corresponding input string.
@@ -116,7 +116,7 @@ fn next_is_non_text(schema_cursor: &TreeCursor) -> bool {
 /// ```
 fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> Result<bool, ValidationError> {
     #[cfg(feature = "invariant_violations")]
-    if !is_code_node(&schema_cursor.node()) {
+    if !is_inline_code_node(&schema_cursor.node()) {
         crate::invariant_violation!(
             schema_cursor,
             schema_cursor,
@@ -163,7 +163,7 @@ fn text_after_matcher<'a>(
     schema_str: &'a str,
 ) -> Result<&'a str, ValidationError> {
     #[cfg(feature = "invariant_violations")]
-    if !is_code_node(&schema_cursor.node()) {
+    if !is_inline_code_node(&schema_cursor.node()) {
         crate::invariant_violation!(
             schema_cursor,
             schema_cursor,
@@ -194,7 +194,7 @@ fn extras_after_matcher<'a>(
     schema_str: &'a str,
 ) -> Result<&'a str, ValidationError> {
     #[cfg(feature = "invariant_violations")]
-    if !is_code_node(&schema_cursor.node()) {
+    if !is_inline_code_node(&schema_cursor.node()) {
         crate::invariant_violation!(
             schema_cursor,
             schema_cursor,
@@ -223,7 +223,7 @@ fn at_coalescing_matcher(
     schema_cursor: &TreeCursor,
     schema_str: &str,
 ) -> Result<Option<bool>, ValidationError> {
-    if !is_code_node(&schema_cursor.node()) {
+    if !is_inline_code_node(&schema_cursor.node()) {
         return Ok(None);
     }
 
@@ -279,7 +279,7 @@ fn move_cursor_to_next_matcher(
         }
     }
 
-    Ok(is_code_node(&schema_cursor.node()))
+    Ok(is_inline_code_node(&schema_cursor.node()))
 }
 
 #[cfg(test)]

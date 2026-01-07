@@ -70,7 +70,7 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
             result,
             &input_cursor,
             &schema_cursor,
-            "code validation expects fenced_code_block nodes"
+            "code validation expects code block nodes"
         );
     }
 
@@ -95,21 +95,16 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
     ) = (&input_extracted, &schema_extracted)
     else {
         #[cfg(feature = "invariant_violations")]
-        {
-            // The only reason the "entire thing" would be wrong is because we're
-            // doing something wrong in our usage of it. That would be a bug!
-            crate::invariant_violation!(
-                result,
-                &input_cursor,
-                &schema_cursor,
-                "Failed to extract code block contents from input or schema (input: {:?}, schema: {:?})",
-                input_extracted,
-                schema_extracted
-            );
-        }
-
-        #[cfg(not(feature = "invariant_violations"))]
-        return result;
+        // The only reason the "entire thing" would be wrong is because we're
+        // doing something wrong in our usage of it. That would be a bug!
+        crate::invariant_violation!(
+            result,
+            &input_cursor,
+            &schema_cursor,
+            "Failed to extract code block contents from input or schema (input: {:?}, schema: {:?})",
+            input_extracted,
+            schema_extracted
+        );
     };
 
     // Check if schema language has a matcher pattern (like {lang:/\w*/})

@@ -53,14 +53,8 @@ pub fn compare_node_kinds(
     // which are list markers. This will indicate whether they are the same type
     // of list.
     if schema_cursor.node().kind() == "tight_list" && input_cursor.node().kind() == "tight_list" {
-        let schema_list_marker = match extract_list_marker(schema_cursor, schema_str) {
-            Ok(marker) => marker,
-            Err(error) => return Some(error),
-        };
-        let input_list_marker = match extract_list_marker(input_cursor, input_str) {
-            Ok(marker) => marker,
-            Err(error) => return Some(error),
-        };
+        let schema_list_marker = extract_list_marker(schema_cursor, schema_str);
+        let input_list_marker = extract_list_marker(input_cursor, input_str);
 
         // They must both be unordered, both be ordered, or both have the same marker
         if schema_list_marker == input_list_marker {

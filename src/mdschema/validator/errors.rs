@@ -101,7 +101,6 @@ impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ValidationError::IoError(e) => write!(f, "IO error: {}", e),
-            ValidationError::InvalidUTF8 => write!(f, "Invalid UTF-8 encoding in input"),
             ValidationError::SchemaViolation(e) => write!(f, "Schema violation: {}", e),
             ValidationError::SchemaError(e) => write!(f, "Schema error: {}", e),
             ValidationError::ParserError(e) => write!(f, "Parser error: {}", e),
@@ -118,9 +117,6 @@ impl fmt::Display for ValidationError {
 pub enum ValidationError {
     /// IO error occurred while reading input.
     IoError(String),
-
-    /// Input contains invalid UTF-8 encoding.
-    InvalidUTF8,
 
     /// Input violates the schema definition.
     SchemaViolation(SchemaViolationError),
@@ -832,17 +828,6 @@ The first matcher has a specific upper bound (3), while the last one can be unbo
                 .with_label(
                     Label::new((filename, root_range))
                         .with_message(format!("IO error: {}", msg))
-                        .with_color(Color::Red),
-                )
-                .finish()
-        }
-        ValidationError::InvalidUTF8 => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("Invalid UTF-8")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message("Input contains invalid UTF-8")
                         .with_color(Color::Red),
                 )
                 .finish()

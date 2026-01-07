@@ -13,7 +13,7 @@ use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
-    get_next_node, get_node_n_nodes_ahead, is_code_node, is_text_node, waiting_at_end,
+    get_next_node, get_node_n_nodes_ahead, is_inline_code_node, is_text_node, waiting_at_end,
 };
 use crate::mdschema::validator::utils::compare_text_contents;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
@@ -61,7 +61,7 @@ fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> Val
 
     let input_node = input_cursor.node();
 
-    let schema_cursor_is_code_node = is_code_node(&schema_cursor.node());
+    let schema_cursor_is_code_node = is_inline_code_node(&schema_cursor.node());
     let schema_prefix_node = if schema_cursor_is_code_node {
         let mut prev_cursor = schema_cursor.clone();
         if prev_cursor.goto_previous_sibling() && is_text_node(&prev_cursor.node()) {
@@ -439,7 +439,7 @@ fn at_text_and_next_at_literal_matcher(
     }
 
     let mut next_cursor = schema_cursor.clone();
-    if !next_cursor.goto_next_sibling() || !is_code_node(&next_cursor.node()) {
+    if !next_cursor.goto_next_sibling() || !is_inline_code_node(&next_cursor.node()) {
         return Ok(None);
     }
 
@@ -466,7 +466,7 @@ pub(super) fn validate_literal_matcher_vs_textual(
     let mut schema_cursor = schema_cursor.clone();
 
     #[cfg(feature = "invariant_violations")]
-    if !is_code_node(&input_cursor.node()) || !is_code_node(&schema_cursor.node()) {
+    if !is_inline_code_node(&input_cursor.node()) || !is_inline_code_node(&schema_cursor.node()) {
         crate::invariant_violation!(
             result,
             &input_cursor,
@@ -639,7 +639,7 @@ mod tests {
     use crate::mdschema::validator::node_walker::validators::{
         Validator, textual::TextualVsTextualValidator,
     };
-    use crate::mdschema::validator::ts_utils::{is_code_node, is_paragraph_node, parse_markdown};
+    use crate::mdschema::validator::ts_utils::{is_inline_code_node, is_paragraph_node, parse_markdown};
     use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
     use super::{LiteralMatcherVsTextualValidator, MatcherVsTextValidator};
@@ -947,8 +947,8 @@ mod tests {
                 })
                 .goto_first_child_then_unwrap()
                 .peek_nodes(|(i, s)| {
-                    assert!(is_code_node(i));
-                    assert!(is_code_node(s));
+                    assert!(is_inline_code_node(i));
+                    assert!(is_inline_code_node(s));
                 })
                 .validate_complete()
                 .destruct();

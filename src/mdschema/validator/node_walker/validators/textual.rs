@@ -4,7 +4,7 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::node_walker::validators::matchers::MatcherVsTextValidator;
 use crate::mdschema::validator::ts_utils::{
-    both_are_textual_nodes, get_next_node, is_code_node, is_text_node,
+    both_are_textual_nodes, get_next_node, is_inline_code_node, is_text_node,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
@@ -35,10 +35,10 @@ fn validate_textual_vs_textual_impl(walker: &ValidatorWalker, got_eof: bool) -> 
     // If the schema is pointed at a code node, or a text node followed by a
     // code node, validate it using `MatcherVsTextValidator::validate`
 
-    let current_node_is_code_node = is_code_node(&walker.schema_cursor().node());
+    let current_node_is_code_node = is_inline_code_node(&walker.schema_cursor().node());
     let current_node_is_text_node_and_next_node_code_node = {
         get_next_node(walker.schema_cursor())
-            .map(|n| is_text_node(&walker.schema_cursor().node()) && is_code_node(&n))
+            .map(|n| is_text_node(&walker.schema_cursor().node()) && is_inline_code_node(&n))
             .unwrap_or(false)
     };
 
@@ -116,7 +116,7 @@ mod tests {
     use crate::mdschema::validator::{
         node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
-        ts_utils::{is_code_node, is_text_node},
+        ts_utils::{is_inline_code_node, is_text_node},
     };
 
     #[test]
@@ -130,8 +130,8 @@ mod tests {
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
                 .peek_nodes(|(input, schema)| {
-                    assert!(is_code_node(input));
-                    assert!(is_code_node(schema));
+                    assert!(is_inline_code_node(input));
+                    assert!(is_inline_code_node(schema));
                 })
                 .validate_complete()
                 .destruct();

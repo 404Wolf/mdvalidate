@@ -17,7 +17,7 @@ use crate::mdschema::validator::{
     },
     ts_utils::{
         both_are_image_nodes, both_are_link_nodes, both_are_textual_containers, count_siblings,
-        get_next_node, is_code_node, is_text_node,
+        get_next_node, is_inline_code_node, is_text_node,
     },
 };
 
@@ -179,7 +179,7 @@ fn count_non_literal_matchers_in_children(
     cursor.goto_first_child();
 
     loop {
-        if !is_code_node(&cursor.node()) {
+        if !is_inline_code_node(&cursor.node()) {
             if !cursor.goto_next_sibling() {
                 break;
             } else {
