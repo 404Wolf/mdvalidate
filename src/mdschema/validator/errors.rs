@@ -4,108 +4,105 @@ use crate::mdschema::validator::{
 };
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use std::fmt;
+use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::ts_utils::find_node_by_index;
-
-#[macro_export]
-macro_rules! add_invariant_violation {
-    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $message:expr) => {{
-        let error = $crate::invariant_violation!(
-            $input_cursor,
-            $schema_cursor,
-            $message
-        );
-        #[cfg(debug_assertions)]
-        {
-            $result.add_error(error.clone());
-        }
-        error
-    }};
-    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $fmt:expr, $($args:tt)+) => {{
-        let error = $crate::invariant_violation!(
-            $input_cursor,
-            $schema_cursor,
-            $fmt,
-            $($args)+
-        );
-        #[cfg(debug_assertions)]
-        {
-            $result.add_error(error.clone());
-        }
-        error
-    }};
-}
+use crate::mdschema::validator::{
+    node_walker::utils::pretty_print_cursor_pair,
+    ts_utils::{find_node_by_index, walk_to_root},
+};
 
 #[macro_export]
 macro_rules! invariant_violation {
-    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $message:expr) => {
-        $crate::add_invariant_violation!(
-            $result,
-            $input_cursor,
-            $schema_cursor,
-            $message
-        )
-    };
-    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $fmt:expr, $($args:tt)+) => {
-        $crate::add_invariant_violation!(
-            $result,
-            $input_cursor,
-            $schema_cursor,
-            $fmt,
-            $($args)+
-        )
-    };
-    ($input_cursor:ident, $schema_cursor:ident, $message:expr) => {{
-        use $crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair;
-
-        let message: String = $message.into();
-
-        let mut input_cursor = $input_cursor.clone();
-        $crate::mdschema::validator::ts_utils::walk_to_root(&mut input_cursor);
-
-        let mut schema_cursor = $schema_cursor.clone();
-        $crate::mdschema::validator::ts_utils::walk_to_root(&mut schema_cursor);
-
-        let backtrace = std::backtrace::Backtrace::capture();
-
-        $crate::mdschema::validator::errors::ValidationError::InternalInvariantViolated(
-            format!(
-                "{}:{}\n{}\ninput_idx={} schema_idx={}\n{}\n{}\n\nStack trace:\n{}",
-                file!(),
-                line!(),
-                module_path!(),
-                input_cursor.descendant_index(),
-                schema_cursor.descendant_index(),
-                message,
-                pretty_print_cursor_pair(&input_cursor, &schema_cursor),
-                backtrace
-            ),
-        )
+    (result, $input_cursor:expr, $schema_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
+        $crate::invariant_violation!($input_cursor, $schema_cursor, $message $(, $($args)*)?)
     }};
-    ($input_cursor:ident, $schema_cursor:ident, $fmt:expr, $($args:tt)+) => {{
-        $crate::invariant_violation!(
-            $input_cursor,
-            $schema_cursor,
-            format!($fmt, $($args)+)
-        )
+    ($input_cursor:expr, $schema_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
+        #[cfg(feature = "invariant_violations")]
+        {
+            let error_msg = $crate::mdschema::validator::errors::invariant_violation_message(
+                Some(($input_cursor, $schema_cursor)),
+                format!($message $(, $($args)*)?),
+                module_path!(),
+            );
+            panic!("Internal invariant violated:\n{}", error_msg);
+        }
+
+        #[cfg(not(feature = "invariant_violations"))]
+        {
+            unreachable!("invariant_violation! invoked without invariant_violations feature");
+        }
+    }};
+    ($message:expr $(, $($args:tt)*)?) => {{
+        #[cfg(feature = "invariant_violations")]
+        {
+            let error_msg = $crate::mdschema::validator::errors::invariant_violation_message(
+                None,
+                format!($message $(, $($args)*)?),
+                module_path!(),
+            );
+            panic!("Internal invariant violated:\n{}", error_msg);
+        }
+
+        #[cfg(not(feature = "invariant_violations"))]
+        {
+            unreachable!("invariant_violation! invoked without invariant_violations feature");
+        }
     }};
 }
+
+#[track_caller]
+pub(crate) fn invariant_violation_message(
+    cursors: Option<(&TreeCursor, &TreeCursor)>,
+    message: String,
+    module_path: &'static str,
+) -> String {
+    let location = std::panic::Location::caller();
+    let file = location.file();
+    let line = location.line();
+
+    let backtrace = if cfg!(feature = "invariant_violations") {
+        Some(std::backtrace::Backtrace::force_capture())
+    } else {
+        None
+    };
+
+    if let Some((input_cursor, schema_cursor)) = cursors {
+        let mut input_cursor = input_cursor.clone();
+        walk_to_root(&mut input_cursor);
+
+        let mut schema_cursor = schema_cursor.clone();
+        walk_to_root(&mut schema_cursor);
+
+        let base_msg = format!(
+            "{}:{}\n{}\ninput_idx={} schema_idx={}\n{}\n{}",
+            file,
+            line,
+            module_path,
+            input_cursor.descendant_index(),
+            schema_cursor.descendant_index(),
+            message,
+            pretty_print_cursor_pair(&input_cursor, &schema_cursor)
+        );
+
+        match backtrace {
+            Some(backtrace) => format!("{base_msg}\n\nStack trace:\n{backtrace}"),
+            None => base_msg,
+        }
+    } else {
+        let base_msg = format!("{}:{}\n{}\n{}", file, line, module_path, message);
+        match backtrace {
+            Some(backtrace) => format!("{base_msg}\n\nStack trace:\n{backtrace}"),
+            None => base_msg,
+        }
+    }
+}
+
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             ValidationError::IoError(e) => write!(f, "IO error: {}", e),
-            ValidationError::InvalidUTF8 => write!(f, "Invalid UTF-8 encoding in input"),
             ValidationError::SchemaViolation(e) => write!(f, "Schema violation: {}", e),
             ValidationError::SchemaError(e) => write!(f, "Schema error: {}", e),
-            ValidationError::InternalInvariantViolated(msg) => {
-                write!(
-                    f,
-                    "Internal invariant violated:\n{}\n\
-                     This is a bug. Internal invariant errors only show for development builds, \
-                     and result in unexpected behavior for production builds. Please report this.",
-                    msg
-                )
-            }
             ValidationError::ParserError(e) => write!(f, "Parser error: {}", e),
             ValidationError::ValidatorCreationFailed => write!(f, "Failed to create validator"),
         }
@@ -121,17 +118,11 @@ pub enum ValidationError {
     /// IO error occurred while reading input.
     IoError(String),
 
-    /// Input contains invalid UTF-8 encoding.
-    InvalidUTF8,
-
     /// Input violates the schema definition.
     SchemaViolation(SchemaViolationError),
 
     /// Schema definition itself is invalid or malformed.
     SchemaError(SchemaError),
-
-    /// Internal invariant was violated (indicates a bug in the validator).
-    InternalInvariantViolated(String),
 
     /// Parser failed to process input or schema.
     ParserError(ParserError),
@@ -373,6 +364,19 @@ pub enum SchemaViolationError {
         /// Actual number of items in input.
         actual: usize,
     },
+
+    /// Malformed node structure.
+    MalformedNodeStructure {
+        schema_index: usize,
+        input_index: usize,
+        kind: MalformedStructureKind,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MalformedStructureKind {
+    MissingListItemContent,
+    HadExtraListItem,
 }
 
 impl fmt::Display for SchemaViolationError {
@@ -412,6 +416,9 @@ impl fmt::Display for SchemaViolationError {
                     (None, None) => "any number of".to_string(),
                 };
                 write!(f, "Expected {} items, found {}", range_desc, actual)
+            }
+            SchemaViolationError::MalformedNodeStructure { kind, .. } => {
+                write!(f, "Malformed node structure: {:?}", kind)
             }
         }
     }
@@ -570,27 +577,27 @@ fn validation_error_to_ariadne(
                 let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, input_range.clone()))
-                    .with_message("Non-repeating matcher in repeating context")
-                    .with_label(
-                        Label::new((filename, input_range))
-                            .with_message(
-                                "This input corresponds to a list node in the schema"
-                            )
-                            .with_color(Color::Blue),
-                    )
-                    .with_label(
-                        Label::new((filename, schema_range))
-                            .with_message(format!(
-                                "This matcher is in a list context but is not marked as repeating: '{}'",
-                                schema_content
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .with_help(r#"
+                .with_message("Non-repeating matcher in repeating context")
+                .with_label(
+                    Label::new((filename, input_range))
+                        .with_message(
+                            "This input corresponds to a list node in the schema"
+                        )
+                        .with_color(Color::Blue),
+                )
+                .with_label(
+                    Label::new((filename, schema_range))
+                        .with_message(format!(
+                            "This matcher is in a list context but is not marked as repeating: '{}'",
+                            schema_content
+                        ))
+                        .with_color(Color::Red),
+                )
+                .with_help(r#"
 You can mark a list node as repeating by adding a '{<min_count>,<max_count>} directly after the matcher, like
 - `myLabel:/foo/`{1,12}
 "#)
-                    .finish()
+                .finish()
             }
             SchemaViolationError::ChildrenLengthMismatch {
                 schema_index: _,
@@ -615,7 +622,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 if parent.kind() == "list_item" {
                     report = report.with_help(
                         "If you want to allow any number of list items, use the {min,max} syntax \
-                         (e.g., `item:/pattern/`{1,} or `item:/pattern/`{0,})",
+                     (e.g., `item:/pattern/`{1,} or `item:/pattern/`{0,})",
                     );
                 }
 
@@ -630,26 +637,26 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 let node_range = node.start_byte()..node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, node_range.clone()))
-                    .with_message("Nested list exceeds maximum depth")
-                    .with_label(
-                        Label::new((filename, node_range))
-                            .with_message(format!(
-                                "List nesting exceeds maximum depth of {} level(s).",
-                                max_depth,
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .with_help(
-                        "For schemas like:\n\
-                         - `num1:/\\d/`{1,}\n\
-                         \u{20} - `num2:/\\d/`{1,}{1,}\n\
-                         \n\
-                         You may need to adjust the repetition for the first matcher\n\
-                         to allow for the depth of the following ones. For example, you could\n\
-                         make that `num1:/\\d/`{1,}{1,}{1,} to allow for three levels of nesting (the one \
-                         below it, and the two allowed below that).",
-                    )
-                    .finish()
+                .with_message("Nested list exceeds maximum depth")
+                .with_label(
+                    Label::new((filename, node_range))
+                        .with_message(format!(
+                            "List nesting exceeds maximum depth of {} level(s).",
+                            max_depth,
+                        ))
+                        .with_color(Color::Red),
+                )
+                .with_help(
+                    "For schemas like:\n\
+                     - `num1:/\\d/`{1,}\n\
+                     \u{20} - `num2:/\\d/`{1,}{1,}\n\
+                     \n\
+                     You may need to adjust the repetition for the first matcher\n\
+                     to allow for the depth of the following ones. For example, you could\n\
+                     make that `num1:/\\d/`{1,}{1,}{1,} to allow for three levels of nesting (the one \
+                     below it, and the two allowed below that).",
+                )
+                .finish()
             }
             SchemaViolationError::WrongListCount {
                 schema_index,
@@ -686,8 +693,25 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     )
                     .with_help(
                         "The number of items in `matcher`{1,2} syntax refers to the number of \
-                         entries at the level of that matcher (deeper items are not included in \
-                         that count).",
+                     entries at the level of that matcher (deeper items are not included in \
+                     that count).",
+                    )
+                    .finish()
+            }
+            SchemaViolationError::MalformedNodeStructure {
+                schema_index: _,
+                input_index,
+                kind,
+            } => {
+                let node = find_node_by_index(tree.root_node(), *input_index);
+                let node_range = node.start_byte()..node.end_byte();
+
+                Report::build(ReportKind::Error, (filename, node_range.clone()))
+                    .with_message("Malformed node structure")
+                    .with_label(
+                        Label::new((filename, node_range))
+                            .with_message(format!("Malformed node structure: {:?}", kind))
+                            .with_color(Color::Red),
                     )
                     .finish()
             }
@@ -830,10 +854,6 @@ The first matcher has a specific upper bound (3), while the last one can be unbo
                 }
             }
         }
-        ValidationError::InternalInvariantViolated(msg) => {
-            buffer.extend_from_slice(msg.as_bytes());
-            return Ok(());
-        }
         ValidationError::IoError(msg) => {
             let root_range = 0..source_content.len();
             Report::build(ReportKind::Error, (filename, root_range.clone()))
@@ -841,17 +861,6 @@ The first matcher has a specific upper bound (3), while the last one can be unbo
                 .with_label(
                     Label::new((filename, root_range))
                         .with_message(format!("IO error: {}", msg))
-                        .with_color(Color::Red),
-                )
-                .finish()
-        }
-        ValidationError::InvalidUTF8 => {
-            let root_range = 0..source_content.len();
-            Report::build(ReportKind::Error, (filename, root_range.clone()))
-                .with_message("Invalid UTF-8")
-                .with_label(
-                    Label::new((filename, root_range))
-                        .with_message("Input contains invalid UTF-8")
                         .with_color(Color::Red),
                 )
                 .finish()

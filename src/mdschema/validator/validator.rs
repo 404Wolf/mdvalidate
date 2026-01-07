@@ -689,8 +689,6 @@ Version: 1
     }
 
     #[test]
-    #[ignore]
-    // TODO: link matchers not implemented yet
     fn test_link_validation() {
         let schema = "[Link text](https://example.com)\n";
         let input = "[Link text](https://example.com)\n";
@@ -705,7 +703,6 @@ Version: 1
     }
 
     #[test]
-    #[ignore]
     fn test_link_with_different_url_fails() {
         let schema = "[Link text](https://example.com)\n";
         let input = "[Link text](https://different.com)\n";

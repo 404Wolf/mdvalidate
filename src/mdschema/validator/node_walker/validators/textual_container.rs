@@ -1,5 +1,7 @@
 use tree_sitter::TreeCursor;
 
+use crate::invariant_violation;
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::*,
     matcher::{
@@ -16,10 +18,9 @@ use crate::mdschema::validator::{
     },
     ts_utils::{
         both_are_image_nodes, both_are_link_nodes, both_are_textual_containers, count_siblings,
-        get_next_node, is_code_node, is_text_node,
+        get_next_node, is_inline_code_node, is_text_node,
     },
 };
-use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate a textual region of input against a textual region of schema.
 ///
@@ -73,14 +74,14 @@ fn validate_textual_container_vs_textual_container_impl(
     let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
 
+    #[cfg(feature = "invariant_violations")]
     if !both_are_textual_containers(&schema_cursor.node(), &input_cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
+            &input_cursor,
+            &schema_cursor,
             "expected textual container nodes"
         );
-        return result;
     }
 
     match count_non_literal_matchers_in_children(&schema_cursor, schema_str) {
@@ -179,7 +180,7 @@ fn count_non_literal_matchers_in_children(
     cursor.goto_first_child();
 
     loop {
-        if !is_code_node(&cursor.node()) {
+        if !is_inline_code_node(&cursor.node()) {
             if !cursor.goto_next_sibling() {
                 break;
             } else {
@@ -239,7 +240,7 @@ mod tests {
         node_walker::validators::{
             test_utils::ValidatorTester, textual_container::count_non_literal_matchers_in_children,
         },
-        ts_utils::{is_heading_content_node, parse_markdown},
+        ts_utils::{both_are_list_items, both_are_paragraphs, is_heading_content_node, parse_markdown},
     };
 
     #[test]
@@ -369,6 +370,4 @@ mod tests {
         assert_eq!(value, json!({"name": "Wolf"}));
         assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 4));
     }
-
-    // Tests for TextualVsTextualValidator live in textual.rs.
 }

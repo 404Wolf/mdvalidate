@@ -5,13 +5,7 @@ mod helpers;
 
 use mdvalidate::mdschema::validator::errors::{SchemaViolationError, ValidationError};
 
-test_case!(
-    heading_literal,
-    r#"# Hi"#,
-    r#"# Hi"#,
-    json!({}),
-    vec![]
-);
+test_case!(heading_literal, r#"# Hi"#, r#"# Hi"#, json!({}), vec![]);
 
 test_case!(
     heading_matcher,

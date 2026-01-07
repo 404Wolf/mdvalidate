@@ -1,17 +1,19 @@
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::node_walker::validators::matchers::MatcherVsTextValidator;
 use crate::mdschema::validator::ts_utils::{
-    both_are_textual_nodes, get_next_node, is_code_node, is_text_node,
+    both_are_textual_nodes, get_next_node, is_inline_code_node, is_text_node,
 };
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     node_walker::{ValidationResult, validators::Validator},
     ts_utils::waiting_at_end,
-    utils::{compare_node_kinds, compare_text_contents},
 };
-use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
+use crate::compare_node_kinds_check;
 
 /// Validate two textual elements.
 ///
@@ -35,10 +37,10 @@ fn validate_textual_vs_textual_impl(walker: &ValidatorWalker, got_eof: bool) -> 
     // If the schema is pointed at a code node, or a text node followed by a
     // code node, validate it using `MatcherVsTextValidator::validate`
 
-    let current_node_is_code_node = is_code_node(&walker.schema_cursor().node());
+    let current_node_is_code_node = is_inline_code_node(&walker.schema_cursor().node());
     let current_node_is_text_node_and_next_node_code_node = {
         get_next_node(walker.schema_cursor())
-            .map(|n| is_text_node(&walker.schema_cursor().node()) && is_code_node(&n))
+            .map(|n| is_text_node(&walker.schema_cursor().node()) && is_inline_code_node(&n))
             .unwrap_or(false)
     };
 
@@ -73,25 +75,19 @@ pub(super) fn validate_textual_vs_textual_direct(
 ) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
+    #[cfg(feature = "invariant_violations")]
     if !both_are_textual_nodes(&schema_cursor.node(), &input_cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
-            format!(
-                "expected textual nodes, got schema kind: {:?}, input kind: {:?}",
-                schema_cursor.node().kind(),
-                input_cursor.node().kind()
-            )
+            &input_cursor,
+            &schema_cursor,
+            "expected textual nodes, got schema kind: {:?}, input kind: {:?}",
+            schema_cursor.node().kind(),
+            input_cursor.node().kind()
         );
-        return result;
     }
 
-    if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
-        result.add_error(error);
-
-        return result;
-    }
+    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
 
     let is_partial_match = waiting_at_end(got_eof, input_str, &input_cursor);
     if let Some(error) = compare_text_contents(
@@ -118,7 +114,7 @@ mod tests {
     use crate::mdschema::validator::{
         node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
-        ts_utils::{is_code_node, is_text_node},
+        ts_utils::{both_are_inline_code, both_are_text_nodes},
     };
 
     #[test]
@@ -131,10 +127,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(input, schema)| {
-                    assert!(is_code_node(input));
-                    assert!(is_code_node(schema));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_inline_code(i, s)))
                 .validate_complete()
                 .destruct();
 
@@ -152,10 +145,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(input, schema)| {
-                    assert!(is_text_node(input));
-                    assert!(is_text_node(schema));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_text_nodes(i, s)))
                 .validate_incomplete()
                 .destruct();
 

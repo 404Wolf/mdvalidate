@@ -7,13 +7,7 @@ use mdvalidate::mdschema::validator::errors::{
     ChildrenCount, SchemaViolationError, ValidationError,
 };
 
-test_case!(
-    ruler_dashes,
-    r#"---"#,
-    r#"---"#,
-    json!({}),
-    vec![]
-);
+test_case!(ruler_dashes, r#"---"#, r#"---"#, json!({}), vec![]);
 
 test_case!(
     ruler_missing_input,
@@ -30,10 +24,4 @@ test_case!(
     )]
 );
 
-test_case!(
-    ruler_stars,
-    r#"***"#,
-    r#"***"#,
-    json!({}),
-    vec![]
-);
+test_case!(ruler_stars, r#"***"#, r#"***"#, json!({}), vec![]);

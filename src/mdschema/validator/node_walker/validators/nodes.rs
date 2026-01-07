@@ -6,7 +6,6 @@ use crate::mdschema::validator::node_walker::validators::code::CodeVsCodeValidat
 use crate::mdschema::validator::node_walker::validators::headings::HeadingVsHeadingValidator;
 use crate::mdschema::validator::node_walker::validators::links::LinkVsLinkValidator;
 use crate::mdschema::validator::node_walker::validators::lists::ListVsListValidator;
-use crate::mdschema::validator::node_walker::validators::rulers::RulerVsRulerValidator;
 use crate::mdschema::validator::node_walker::validators::textual::TextualVsTextualValidator;
 use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
@@ -15,10 +14,9 @@ use crate::mdschema::validator::ts_utils::{
     both_are_matching_top_level_nodes, both_are_rulers, both_are_textual_containers,
     both_are_textual_nodes, is_heading_node,
 };
-use crate::mdschema::validator::{
-    node_walker::ValidationResult, utils::compare_node_children_lengths,
-};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::compare_node_children_lengths_check;
 
 /// Validate two arbitrary nodes against each other.
 ///
@@ -127,12 +125,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
     // Both are ruler nodes
     if both_are_rulers(&input_node, &schema_node) {
-        trace!("Both are rulers, validating ruler vs ruler");
-
-        return RulerVsRulerValidator::validate(
-            &walker.with_cursors(&input_cursor, &schema_cursor),
-            got_eof,
-        );
+        trace!("Both are rulers. No extra validation happens for rulers.");
     }
 
     // Both are heading nodes or document nodes
@@ -156,11 +149,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         trace!("Both are heading nodes or document nodes. Recursing into sibling pairs.");
 
         // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
-        if let Some(error) = compare_node_children_lengths(&schema_cursor, &input_cursor, got_eof) {
-            result.add_error(error);
-
-            return result;
-        }
+        compare_node_children_lengths_check!(schema_cursor, input_cursor, got_eof, result);
 
         // Now actually go down to the children
         if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {

@@ -1,6 +1,8 @@
 use tracing::instrument;
 
-use crate::mdschema::validator::{node_walker::ValidationResult, validator_walker::ValidatorWalker};
+use crate::mdschema::validator::{
+    node_walker::ValidationResult, validator_walker::ValidatorWalker,
+};
 
 pub(super) mod code;
 pub(super) mod headings;
@@ -8,7 +10,6 @@ pub(super) mod links;
 pub(super) mod lists;
 pub(super) mod matchers;
 pub(crate) mod nodes;
-pub(super) mod rulers;
 pub(super) mod textual;
 pub(super) mod textual_container;
 

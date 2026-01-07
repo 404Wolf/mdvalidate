@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::invariant_violation;
 use core::fmt;
 use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
@@ -432,16 +433,12 @@ pub enum ExtractorError {
 /// We require that the cursor is pointed at a code node, potentially followed by text.
 pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, ExtractorError> {
     // The first node must be a code node
+    #[cfg(feature = "invariant_violations")]
     if cursor.node().kind() != "code_span" {
-        return Err(ExtractorError::InvariantError(
-            crate::invariant_violation!(
-                cursor,
-                cursor,
-                "extract_text_matcher expects code_span, got {}",
-                cursor.node().kind()
-            )
-            .to_string(),
-        ));
+        invariant_violation!(
+            "extract_text_matcher expects code_span, got {}",
+            cursor.node().kind()
+        );
     }
     // We don't need to know anything about the next node
 
@@ -462,15 +459,16 @@ pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, E
             Matcher::try_from_pattern_and_suffix_str(node_text, None)
                 .map_err(ExtractorError::MatcherError)
         }
-        _ => Err(ExtractorError::InvariantError(
-            crate::invariant_violation!(
-                cursor,
-                cursor,
-                "extract_text_matcher expects code_span, got {}",
-                cursor.node().kind()
-            )
-            .to_string(),
-        )),
+        #[cfg(feature = "invariant_violations")]
+        _ => invariant_violation!(
+            "extract_text_matcher expects code_span, got {}",
+            cursor.node().kind()
+        ),
+        #[cfg(not(feature = "invariant_violations"))]
+        _ => Err(ExtractorError::InvariantError(format!(
+            "extract_text_matcher expects code_span, got {}",
+            cursor.node().kind()
+        ))),
     }
 }
 

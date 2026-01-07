@@ -1,15 +1,18 @@
 use serde_json::json;
 
+use crate::invariant_violation;
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::{NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError},
     node_walker::{
-        helpers::curly_matchers::{extract_id_from_curly_braces, extract_matcher_from_curly_delineated_text},
-        validators::ValidatorImpl,
         ValidationResult,
+        helpers::curly_matchers::{
+            extract_id_from_curly_braces, extract_matcher_from_curly_delineated_text,
+        },
+        validators::ValidatorImpl,
     },
     ts_utils::extract_codeblock_contents,
 };
-use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate a code block against a schema code block.
 ///
@@ -60,16 +63,16 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
     let input_str = walker.input_str();
     let schema_str = walker.schema_str();
 
+    #[cfg(feature = "invariant_violations")]
     if input_cursor.node().kind() != "fenced_code_block"
         || schema_cursor.node().kind() != "fenced_code_block"
     {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
-            "code validation expects fenced_code_block nodes"
+            &input_cursor,
+            &schema_cursor,
+            "code validation expects code block nodes"
         );
-        return result;
     }
 
     let input_extracted = match extract_codeblock_contents(&input_cursor, input_str) {
@@ -92,18 +95,17 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
         Some((schema_lang, (schema_code, schema_code_descendant_index))),
     ) = (&input_extracted, &schema_extracted)
     else {
+        #[cfg(feature = "invariant_violations")]
         // The only reason the "entire thing" would be wrong is because we're
         // doing something wrong in our usage of it. That would be a bug!
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
-            format!(
-                "Failed to extract code block contents from input or schema (input: {:?}, schema: {:?})",
-                input_extracted, schema_extracted
-            )
+            &input_cursor,
+            &schema_cursor,
+            "Failed to extract code block contents from input or schema (input: {:?}, schema: {:?})",
+            input_extracted,
+            schema_extracted
         );
-        return result;
     };
 
     // Check if schema language has a matcher pattern (like {lang:/\w*/})
@@ -203,7 +205,7 @@ mod tests {
     use serde_json::json;
 
     use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
-    use crate::mdschema::validator::ts_utils::is_codeblock_node;
+    use crate::mdschema::validator::ts_utils::{both_are_codeblocks};
 
     use super::*;
 
@@ -217,10 +219,7 @@ mod tests {
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_codeblock_node(i));
-                    assert!(is_codeblock_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
                 .validate_complete()
                 .destruct();
 
@@ -233,10 +232,7 @@ mod tests {
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str_negative)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_codeblock_node(i));
-                    assert!(is_codeblock_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
                 .validate_complete()
                 .destruct();
 
@@ -255,10 +251,7 @@ fn main() {}
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_codeblock_node(i));
-                    assert!(is_codeblock_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
                 .validate_complete()
                 .destruct();
 
@@ -278,10 +271,7 @@ fn main() {}
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_codeblock_node(i));
-                    assert!(is_codeblock_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
                 .validate_complete()
                 .destruct();
 

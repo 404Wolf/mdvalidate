@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::invariant_violation;
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
 use tree_sitter_markdown::language;
 
@@ -110,111 +111,52 @@ pub fn find_node_by_index(root: Node, target_index: usize) -> Node {
 }
 
 /// Check if a node is a list.
-pub fn is_list_node(node: &Node) -> bool {
-    match node.kind() {
-        "tight_list" | "loose_list" => true,
-        _ => false,
-    }
+///
+/// Macro to generate simple `is_*_node` functions that check if node.kind() equals a specific string.
+macro_rules! is_node_kind {
+    ($fn_name:ident, $($kind:expr),+) => {
+        pub fn $fn_name(node: &Node) -> bool {
+            match node.kind() {
+                $($kind)|+ => true,
+                _ => false,
+            }
+        }
+    };
 }
 
-/// Check if a node is "textual" (i.e., a text node, bold node, code node, or similar).
-pub fn is_textual_node(node: &Node) -> bool {
-    match node.kind() {
-        // TODO: does list_item belong here?
-        "text" | "emphasis" | "strong_emphasis" | "code_span" | "list_item" => true,
-        _ => false,
-    }
-}
+is_node_kind!(is_text_node, "text");
+is_node_kind!(is_inline_code_node, "code_span");
+is_node_kind!(is_block_code_node, "fenced_code_block");
+is_node_kind!(is_link_node, "link");
+is_node_kind!(is_link_destination_node, "link_destination");
+is_node_kind!(is_link_text_node, "link_text");
+is_node_kind!(is_image_node, "image");
+is_node_kind!(is_image_description_node, "image_description");
+is_node_kind!(is_paragraph_node, "paragraph");
+is_node_kind!(is_heading_content_node, "heading_content");
+is_node_kind!(is_list_marker_node, "list_marker");
+is_node_kind!(is_list_item_node, "list_item");
+is_node_kind!(is_codeblock_node, "fenced_code_block");
+is_node_kind!(is_heading_node, "atx_heading");
+is_node_kind!(is_ruler_node, "thematic_break");
+is_node_kind!(is_list_node, "tight_list", "loose_list");
+is_node_kind!(
+    is_textual_node,
+    "text",
+    "emphasis",
+    "strong_emphasis",
+    "code_span",
+    "list_item"
+);
+is_node_kind!(
+    is_textual_container_node,
+    "paragraph",
+    "heading_content",
+    "list_item"
+);
 
-/// Check if a node is specifically a text node.
-pub fn is_text_node(node: &Node) -> bool {
-    node.kind() == "text"
-}
-
-/// Check if a node is specifically a code node.
-pub fn is_code_node(node: &Node) -> bool {
-    node.kind() == "code_span"
-}
-
-/// Check if a node is a link.
-pub fn is_link_node(node: &Node) -> bool {
-    node.kind() == "link"
-}
-
-/// Check if a node is a link destination.
-pub fn is_link_destination_node(node: &Node) -> bool {
-    node.kind() == "link_destination"
-}
-
-/// Check if a node is link text.
-pub fn is_link_text_node(node: &Node) -> bool {
-    node.kind() == "link_text"
-}
-
-/// Check if a node is an image.
-pub fn is_image_node(node: &Node) -> bool {
-    node.kind() == "image"
-}
-
-/// Check if a node is an image description.
-pub fn is_image_description_node(node: &Node) -> bool {
-    node.kind() == "image_description"
-}
-
-/// Check if a node is a paragraph.
-pub fn is_paragraph_node(node: &Node) -> bool {
-    node.kind() == "paragraph"
-}
-
-/// Check if a node is heading content.
-pub fn is_heading_content_node(node: &Node) -> bool {
-    node.kind() == "heading_content"
-}
-
-/// Check if a node is a list marker.
-pub fn is_list_marker_node(node: &Node) -> bool {
-    node.kind() == "list_marker"
-}
-
-/// Check if a node is a list item.
-pub fn is_list_item_node(node: &Node) -> bool {
-    node.kind() == "list_item"
-}
-
-/// Check if a node is a "marker" (i.e., a heading marker, list marker, etc).
 pub fn is_marker_node(node: &Node) -> bool {
     node.kind().ends_with("_marker")
-}
-
-/// Check if a node is a "rule"
-pub fn is_ruler_node(node: &Node) -> bool {
-    node.kind() == "thematic_break"
-}
-
-/// Check if a node is a "textual container" (i.e., a paragraph node, list item node, or similar).
-pub fn is_textual_container_node(node: &Node) -> bool {
-    match node.kind() {
-        "paragraph" | "heading_content" | "list_item" => true,
-        _ => false,
-    }
-}
-
-/// Check whether a node is a codeblock.
-pub fn is_codeblock_node(node: &Node) -> bool {
-    match node.kind() {
-        "fenced_code_block" => true,
-        _ => false,
-    }
-}
-
-/// Check if the node is a heading.
-///
-/// TODO: write test
-pub fn is_heading_node(node: &Node) -> bool {
-    match node.kind() {
-        "atx_heading" => true,
-        _ => false,
-    }
 }
 
 pub fn ends_at_end(node: &Node, last_input_str: &str) -> bool {
@@ -235,91 +177,111 @@ pub fn waiting_at_end(got_eof: bool, last_input_str: &str, input_cursor: &TreeCu
 }
 
 /// Extract the list marker from a tight_list node
-///
-/// TODO: Handle UTF8 errors properly instead of unwrapping
-pub fn extract_list_marker<'a>(
-    cursor: &TreeCursor<'a>,
-    schema_str: &'a str,
-) -> Result<&'a str, ValidationError> {
+pub fn extract_list_marker<'a>(cursor: &TreeCursor<'a>, schema_str: &'a str) -> &'a str {
     let mut cursor = cursor.clone();
-    if !cursor.goto_first_child() || !cursor.goto_first_child() || !is_marker_node(&cursor.node())
-    {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
+
+    #[cfg(feature = "invariant_violations")]
+    if !cursor.goto_first_child() || !cursor.goto_first_child() || !is_marker_node(&cursor.node()) {
+        invariant_violation!(
+            &cursor,
+            &cursor,
             "expected list_marker when extracting list marker"
-        ));
+        );
     }
+
     let marker = cursor.node();
-    marker
-        .utf8_text(schema_str.as_bytes())
-        .map_err(|_| ValidationError::InvalidUTF8)
+    marker.utf8_text(schema_str.as_bytes()).unwrap()
 }
 
-/// Check if both nodes are rulers.
-pub fn both_are_rulers(input_node: &Node, schema_node: &Node) -> bool {
-    is_ruler_node(&input_node) && is_ruler_node(&schema_node)
+/// Macro to generate `both_are_*` functions that check if both nodes satisfy a predicate.
+macro_rules! both_are {
+    ($fn_name:ident, $predicate:ident, $doc:expr) => {
+        #[doc = $doc]
+        pub fn $fn_name(input_node: &Node, schema_node: &Node) -> bool {
+            $predicate(&input_node) && $predicate(&schema_node)
+        }
+    };
 }
 
-/// Check if both nodes are headings.
-pub fn both_are_headings(input_node: &Node, schema_node: &Node) -> bool {
-    is_heading_node(&input_node) && is_heading_node(&schema_node)
-}
-
-/// Check if both nodes are textual nodes.
-pub fn both_are_textual_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_textual_node(&input_node) && is_textual_node(&schema_node)
-}
-
-/// Check if both nodes are link nodes.
-pub fn both_are_link_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_link_node(&input_node) && is_link_node(&schema_node)
-}
-
-/// Check if both nodes are link destination nodes.
-pub fn both_are_link_destination_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_link_destination_node(&input_node) && is_link_destination_node(&schema_node)
-}
-
-/// Check if both nodes are link text nodes.
-pub fn both_are_link_text_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_link_text_node(&input_node) && is_link_text_node(&schema_node)
-}
-
-/// Check if both nodes are image nodes.
-pub fn both_are_image_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_image_node(&input_node) && is_image_node(&schema_node)
-}
-
-/// Check if both nodes are image description nodes.
-pub fn both_are_image_description_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_image_description_node(&input_node) && is_image_description_node(&schema_node)
-}
-
-/// Check if both nodes are text nodes.
-pub fn both_are_text_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_text_node(&input_node) && is_text_node(&schema_node)
-}
-
-/// Check if both nodes are paragraph nodes.
-pub fn both_are_paragraphs(input_node: &Node, schema_node: &Node) -> bool {
-    is_paragraph_node(&input_node) && is_paragraph_node(&schema_node)
-}
-
-/// Check if both nodes are textual containers.
-pub fn both_are_textual_containers(input_node: &Node, schema_node: &Node) -> bool {
-    is_textual_container_node(&input_node) && is_textual_container_node(&schema_node)
-}
-
-/// Check if both nodes are list nodes.
-pub fn both_are_list_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    is_list_node(&input_node) && is_list_node(&schema_node)
-}
-
-/// Check if both nodes are codeblock nodes.
-pub fn both_are_codeblocks(input_node: &Node, schema_node: &Node) -> bool {
-    is_codeblock_node(&input_node) && is_codeblock_node(&schema_node)
-}
+both_are!(
+    both_are_rulers,
+    is_ruler_node,
+    "Check if both nodes are rulers."
+);
+both_are!(
+    both_are_headings,
+    is_heading_node,
+    "Check if both nodes are headings."
+);
+both_are!(
+    both_are_textual_nodes,
+    is_textual_node,
+    "Check if both nodes are textual nodes."
+);
+both_are!(
+    both_are_link_nodes,
+    is_link_node,
+    "Check if both nodes are link nodes."
+);
+both_are!(
+    both_are_link_destination_nodes,
+    is_link_destination_node,
+    "Check if both nodes are link destination nodes."
+);
+both_are!(
+    both_are_link_text_nodes,
+    is_link_text_node,
+    "Check if both nodes are link text nodes."
+);
+both_are!(
+    both_are_image_nodes,
+    is_image_node,
+    "Check if both nodes are image nodes."
+);
+both_are!(
+    both_are_image_description_nodes,
+    is_image_description_node,
+    "Check if both nodes are image description nodes."
+);
+both_are!(
+    both_are_text_nodes,
+    is_text_node,
+    "Check if both nodes are text nodes."
+);
+both_are!(
+    both_are_paragraphs,
+    is_paragraph_node,
+    "Check if both nodes are paragraph nodes."
+);
+both_are!(
+    both_are_textual_containers,
+    is_textual_container_node,
+    "Check if both nodes are textual containers."
+);
+both_are!(
+    both_are_list_nodes,
+    is_list_node,
+    "Check if both nodes are list nodes."
+);
+both_are!(
+    both_are_list_items,
+    is_list_item_node,
+    "Check if both nodes are list item nodes."
+);
+both_are!(
+    both_are_codeblocks,
+    is_codeblock_node,
+    "Check if both nodes are codeblock nodes."
+);
+both_are!(
+    both_are_inline_code,
+    is_inline_code_node,
+    "Check if both nodes are inline code nodes."
+);
+both_are!(both_are_markers,
+    is_marker_node,
+    "Check if both nodes are marker nodes."
+);
 
 /// Check if both nodes are top-level nodes (document or heading).
 pub fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) -> bool {
@@ -350,12 +312,9 @@ pub fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) 
 pub fn get_heading_kind<'a>(cursor: &TreeCursor<'a>) -> Result<&'a str, ValidationError> {
     let mut cursor = cursor.clone();
 
+    #[cfg(feature = "invariant_violations")]
     if !cursor.goto_first_child() || !cursor.node().kind().ends_with("marker") {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
-            "expected heading marker for atx_heading"
-        ));
+        invariant_violation!(&cursor, &cursor, "expected heading marker for atx_heading");
     }
     Ok(cursor.node().kind())
 }
@@ -425,11 +384,7 @@ pub fn extract_codeblock_contents(
             return Ok(None);
         }
         language = Some((
-            cursor
-                .node()
-                .utf8_text(src.as_bytes())
-                .map_err(|_| ValidationError::InvalidUTF8)?
-                .to_string(),
+            cursor.node().utf8_text(src.as_bytes()).unwrap().to_string(),
             cursor.descendant_index(),
         ));
 
@@ -443,19 +398,18 @@ pub fn extract_codeblock_contents(
     }
 
     // At this point, cursor must be at code_fence_content
+    #[cfg(feature = "invariant_violations")]
     if cursor.node().kind() != "code_fence_content" {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
+        invariant_violation!(
+            &cursor,
+            &cursor,
             "expected code_fence_content while extracting code block"
-        ));
+        );
     }
 
     // Get the full text from code_fence_content node itself, not just the first child
     let code_fence_node = cursor.node();
-    let text = code_fence_node
-        .utf8_text(src.as_bytes())
-        .map_err(|_| ValidationError::InvalidUTF8)?;
+    let text = code_fence_node.utf8_text(src.as_bytes()).unwrap();
 
     // Navigate to first text child to get its descendant_index
     if !cursor.goto_first_child() || cursor.node().kind() != "text" {
@@ -481,20 +435,22 @@ pub fn extract_codeblock_contents(
 /// ```
 pub fn walk_to_list_item_content(cursor: &mut TreeCursor) -> Result<(), ValidationError> {
     // list_item -> list_marker
+    #[cfg(feature = "invariant_violations")]
     if !cursor.goto_first_child() || cursor.node().kind() != "list_marker" {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
+        invariant_violation!(
+            &cursor,
+            &cursor,
             "expected list_marker while walking to list item content"
-        ));
+        );
     }
     // list_marker -> paragraph
+    #[cfg(feature = "invariant_violations")]
     if !cursor.goto_next_sibling() || cursor.node().kind() != "paragraph" {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
+        invariant_violation!(
+            &cursor,
+            &cursor,
             "expected paragraph while walking to list item content"
-        ));
+        );
     }
     Ok(())
 }
@@ -638,7 +594,7 @@ mod tests {
         cursor.goto_first_child(); // Go to tight_list
         assert_eq!(cursor.node().kind(), "tight_list");
 
-        let list_marker = extract_list_marker(&cursor, input).unwrap();
+        let list_marker = extract_list_marker(&cursor, input);
         assert_eq!(list_marker, "-");
     }
 

@@ -18,6 +18,7 @@ export default defineConfig({
       ],
       customCss: ["./src/styles/global.css"],
       sidebar: [
+        { label: "README.md", slug: "" },
         { label: "Getting started", slug: "getting-started" },
         {
           label: "Matchers",

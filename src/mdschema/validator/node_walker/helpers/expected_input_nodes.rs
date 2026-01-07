@@ -1,12 +1,13 @@
 use tree_sitter::TreeCursor;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::{
     errors::{SchemaError, ValidationError},
     matcher::{
         matcher::{Matcher, MatcherError},
         matcher_extras::{get_after_extras, get_all_extras},
     },
-    ts_utils::{get_next_node, is_code_node, is_text_node},
+    ts_utils::{get_next_node, is_inline_code_node, is_text_node},
 };
 
 /// Determine the number of nodes we expect in some corresponding input string.
@@ -115,12 +116,13 @@ fn next_is_non_text(schema_cursor: &TreeCursor) -> bool {
 ///                 | - yes -> F
 /// ```
 fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> Result<bool, ValidationError> {
-    if !is_code_node(&schema_cursor.node()) {
-        return Err(crate::invariant_violation!(
+    #[cfg(feature = "invariant_violations")]
+    if !is_inline_code_node(&schema_cursor.node()) {
+        invariant_violation!(
             schema_cursor,
             schema_cursor,
             "expected code node when checking matcher extra text"
-        ));
+        );
     }
 
     let mut lookahead_cursor = schema_cursor.clone();
@@ -135,13 +137,12 @@ fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> Result<bool, 
             }
 
             if is_literal {
-                let next_is_literal =
-                    match at_coalescing_matcher(&lookahead_cursor, schema_str)
-                        .unwrap_or(Some(false))
-                    {
-                        Some(next_matcher_is_literal) => next_matcher_is_literal,
-                        None => false,
-                    };
+                let next_is_literal = match at_coalescing_matcher(&lookahead_cursor, schema_str)
+                    .unwrap_or(Some(false))
+                {
+                    Some(next_matcher_is_literal) => next_matcher_is_literal,
+                    None => false,
+                };
                 if !had_next_matcher {
                     return Ok(false);
                 };
@@ -162,12 +163,13 @@ fn text_after_matcher<'a>(
     schema_cursor: &TreeCursor,
     schema_str: &'a str,
 ) -> Result<&'a str, ValidationError> {
-    if !is_code_node(&schema_cursor.node()) {
-        return Err(crate::invariant_violation!(
+    #[cfg(feature = "invariant_violations")]
+    if !is_inline_code_node(&schema_cursor.node()) {
+        invariant_violation!(
             schema_cursor,
             schema_cursor,
             "expected code node when reading matcher suffix text"
-        ));
+        );
     }
 
     match get_next_node(&schema_cursor) {
@@ -192,12 +194,13 @@ fn extras_after_matcher<'a>(
     schema_cursor: &TreeCursor,
     schema_str: &'a str,
 ) -> Result<&'a str, ValidationError> {
-    if !is_code_node(&schema_cursor.node()) {
-        return Err(crate::invariant_violation!(
+    #[cfg(feature = "invariant_violations")]
+    if !is_inline_code_node(&schema_cursor.node()) {
+        invariant_violation!(
             schema_cursor,
             schema_cursor,
             "expected code node when reading matcher extras"
-        ));
+        );
     }
 
     match get_next_node(&schema_cursor) {
@@ -221,7 +224,7 @@ fn at_coalescing_matcher(
     schema_cursor: &TreeCursor,
     schema_str: &str,
 ) -> Result<Option<bool>, ValidationError> {
-    if !is_code_node(&schema_cursor.node()) {
+    if !is_inline_code_node(&schema_cursor.node()) {
         return Ok(None);
     }
 
@@ -277,7 +280,7 @@ fn move_cursor_to_next_matcher(
         }
     }
 
-    Ok(is_code_node(&schema_cursor.node()))
+    Ok(is_inline_code_node(&schema_cursor.node()))
 }
 
 #[cfg(test)]
