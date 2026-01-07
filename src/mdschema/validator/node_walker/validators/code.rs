@@ -204,7 +204,7 @@ mod tests {
     use serde_json::json;
 
     use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
-    use crate::mdschema::validator::ts_utils::is_codeblock_node;
+    use crate::mdschema::validator::ts_utils::{both_are_codeblocks};
 
     use super::*;
 
@@ -218,10 +218,7 @@ mod tests {
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_codeblock_node(i));
-                    assert!(is_codeblock_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
                 .validate_complete()
                 .destruct();
 
@@ -234,10 +231,7 @@ mod tests {
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str_negative)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_codeblock_node(i));
-                    assert!(is_codeblock_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
                 .validate_complete()
                 .destruct();
 
@@ -256,10 +250,7 @@ fn main() {}
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_codeblock_node(i));
-                    assert!(is_codeblock_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
                 .validate_complete()
                 .destruct();
 
@@ -279,10 +270,7 @@ fn main() {}
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_codeblock_node(i));
-                    assert!(is_codeblock_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
                 .validate_complete()
                 .destruct();
 

@@ -267,6 +267,11 @@ both_are!(
     is_codeblock_node,
     "Check if both nodes are codeblock nodes."
 );
+both_are!(
+    both_are_inline_code,
+    is_inline_code_node,
+    "Check if both nodes are inline code nodes."
+);
 
 /// Check if both nodes are top-level nodes (document or heading).
 pub fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) -> bool {

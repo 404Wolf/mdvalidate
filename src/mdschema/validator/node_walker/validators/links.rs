@@ -314,7 +314,7 @@ mod tests {
         let schema_str = "[hi](https://test.com)";
         let input_str = "[hi](https://test.com)";
 
-        let (value, errors, _farthest_reached_pos) =
+        let (value, errors, _) =
             ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
@@ -331,7 +331,7 @@ mod tests {
         let schema_str = "[hi](https://test.com)";
         let input_str = "[hi](https://different.com)";
 
-        let (_value, errors, _farthest_reached_pos) =
+        let (_value, errors, _) =
             ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
@@ -347,7 +347,7 @@ mod tests {
         let schema_str = "[test]({foo:/\\w+/})";
         let input_str = "[test](hello)";
 
-        let (value, errors, _farthest_reached_pos) =
+        let (value, errors, _) =
             ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
@@ -364,7 +364,7 @@ mod tests {
         let schema_str = "[test](hello)";
         let input_str = "[test]({foo:/\\w+/})";
 
-        let (value, errors, _farthest_reached_pos) =
+        let (value, errors, _) =
             ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
@@ -381,7 +381,7 @@ mod tests {
         let schema_str = "![hi](https://test.com)";
         let input_str = "![hi](https://test.com)";
 
-        let (value, errors, _farthest_reached_pos) =
+        let (value, errors, _) =
             ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
@@ -398,7 +398,7 @@ mod tests {
         let schema_str = "![hi](https://test.com)";
         let input_str = "![hi](https://different.com)";
 
-        let (_value, errors, _farthest_reached_pos) =
+        let (_value, errors, _) =
             ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()

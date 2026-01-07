@@ -136,7 +136,7 @@ mod tests {
         errors::SchemaViolationError,
         node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
-        ts_utils::{is_heading_node, parse_markdown},
+        ts_utils::{both_are_codeblocks, both_are_headings, is_heading_node, parse_markdown},
     };
     use serde_json::json;
 
@@ -175,10 +175,7 @@ mod tests {
             ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_heading_node(i));
-                    assert!(is_heading_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_headings(i, s)))
                 .validate_complete()
                 .destruct();
 
@@ -196,10 +193,7 @@ mod tests {
             ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_heading_node(i));
-                    assert!(is_heading_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_headings(i, s)))
                 .validate_complete()
                 .destruct();
 

@@ -116,7 +116,7 @@ mod tests {
     use crate::mdschema::validator::{
         node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
-        ts_utils::{is_inline_code_node, is_text_node},
+        ts_utils::{both_are_inline_code, both_are_text_nodes},
     };
 
     #[test]
@@ -129,10 +129,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(input, schema)| {
-                    assert!(is_inline_code_node(input));
-                    assert!(is_inline_code_node(schema));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_inline_code(i, s)))
                 .validate_complete()
                 .destruct();
 
@@ -150,10 +147,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(input, schema)| {
-                    assert!(is_text_node(input));
-                    assert!(is_text_node(schema));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_text_nodes(i, s)))
                 .validate_incomplete()
                 .destruct();
 

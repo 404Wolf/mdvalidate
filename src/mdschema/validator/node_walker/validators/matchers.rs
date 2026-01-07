@@ -639,7 +639,10 @@ mod tests {
     use crate::mdschema::validator::node_walker::validators::{
         Validator, textual::TextualVsTextualValidator,
     };
-    use crate::mdschema::validator::ts_utils::{is_inline_code_node, is_paragraph_node, parse_markdown};
+    use crate::mdschema::validator::ts_utils::{
+        both_are_inline_code, both_are_paragraphs, is_paragraph_node,
+        parse_markdown,
+    };
     use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
     use super::{LiteralMatcherVsTextualValidator, MatcherVsTextValidator};
@@ -941,15 +944,9 @@ mod tests {
             ValidatorTester::<LiteralMatcherVsTextualValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_paragraph_node(i));
-                    assert!(is_paragraph_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_paragraphs(i, s)))
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_inline_code_node(i));
-                    assert!(is_inline_code_node(s));
-                })
+                .peek_nodes(|(i, s)| assert!(both_are_inline_code(i, s)))
                 .validate_complete()
                 .destruct();
 
