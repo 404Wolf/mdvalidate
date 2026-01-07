@@ -465,14 +465,14 @@ pub(super) fn validate_literal_matcher_vs_textual(
     let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();
 
+    #[cfg(feature = "invariant_violations")]
     if !is_code_node(&input_cursor.node()) || !is_code_node(&schema_cursor.node()) {
         crate::invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
+            &input_cursor,
+            &schema_cursor,
             "literal matcher validation expects code_span nodes"
         );
-        return result;
     }
 
     // Walk into the code node and do regular textual validation.
@@ -482,14 +482,14 @@ pub(super) fn validate_literal_matcher_vs_textual(
         input_cursor.goto_first_child();
         schema_cursor.goto_first_child();
 
+        #[cfg(feature = "invariant_violations")]
         if !is_text_node(&input_cursor.node()) || !is_text_node(&schema_cursor.node()) {
             crate::invariant_violation!(
                 result,
-                input_cursor,
-                schema_cursor,
+                &input_cursor,
+                &schema_cursor,
                 "literal matcher validation expects text children"
             );
-            return result;
         }
 
         if let Some(error) = compare_text_contents(
@@ -509,15 +509,15 @@ pub(super) fn validate_literal_matcher_vs_textual(
     // The schema cursor definitely has a text node after the code node, which
     // at minimum contains "!" (which indicates that it is a literal matcher in
     // the first place).
+    #[cfg(feature = "invariant_violations")]
     if !schema_cursor.goto_next_sibling() && is_text_node(&schema_cursor.node()) {
         crate::invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
+            &input_cursor,
+            &schema_cursor,
             "validate_literal_matcher_vs_text called with a matcher that is not literal. \
              A text node does not follow the schema."
         );
-        return result;
     }
 
     let schema_node_str = schema_cursor
@@ -531,21 +531,24 @@ pub(super) fn validate_literal_matcher_vs_textual(
     let schema_text_after_extras = match get_after_extras(schema_node_str) {
         Some(text) => text,
         None => {
-            crate::invariant_violation!(
-                result,
-                input_cursor,
-                schema_cursor,
-                "we should have had extras in the matcher string"
-            );
-            return result;
+            #[cfg(feature = "invariant_violations")]
+            {
+                crate::invariant_violation!(
+                    result,
+                    &input_cursor,
+                    &schema_cursor,
+                    "we should have had extras in the matcher string"
+                );
+            }
         }
     };
 
+    #[cfg(feature = "invariant_violations")]
     if !input_cursor.goto_next_sibling() && schema_node_str_has_more_than_extras {
         crate::invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
+            &input_cursor,
+            &schema_cursor,
             "at this point we should already have counted the number of nodes, \
              factoring in literal matchers."
         );

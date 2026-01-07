@@ -4,92 +4,99 @@ use crate::mdschema::validator::{
 };
 use ariadne::{Color, Label, Report, ReportKind, Source};
 use std::fmt;
+use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::ts_utils::find_node_by_index;
-
-#[macro_export]
-macro_rules! add_invariant_violation {
-    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $message:expr) => {{
-        let error = $crate::invariant_violation!(
-            $input_cursor,
-            $schema_cursor,
-            $message
-        );
-        #[cfg(debug_assertions)]
-        {
-            $result.add_error(error.clone());
-        }
-        error
-    }};
-    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $fmt:expr, $($args:tt)+) => {{
-        let error = $crate::invariant_violation!(
-            $input_cursor,
-            $schema_cursor,
-            $fmt,
-            $($args)+
-        );
-        #[cfg(debug_assertions)]
-        {
-            $result.add_error(error.clone());
-        }
-        error
-    }};
-}
+use crate::mdschema::validator::{
+    node_walker::utils::pretty_print_cursor_pair,
+    ts_utils::{find_node_by_index, walk_to_root},
+};
 
 #[macro_export]
 macro_rules! invariant_violation {
-    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $message:expr) => {
-        $crate::add_invariant_violation!(
-            $result,
-            $input_cursor,
-            $schema_cursor,
-            $message
-        )
-    };
-    ($result:ident, $input_cursor:ident, $schema_cursor:ident, $fmt:expr, $($args:tt)+) => {
-        $crate::add_invariant_violation!(
-            $result,
-            $input_cursor,
-            $schema_cursor,
-            $fmt,
-            $($args)+
-        )
-    };
-    ($input_cursor:ident, $schema_cursor:ident, $message:expr) => {{
-        use $crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair;
-
-        let message: String = $message.into();
-
-        let mut input_cursor = $input_cursor.clone();
-        $crate::mdschema::validator::ts_utils::walk_to_root(&mut input_cursor);
-
-        let mut schema_cursor = $schema_cursor.clone();
-        $crate::mdschema::validator::ts_utils::walk_to_root(&mut schema_cursor);
-
-        let backtrace = std::backtrace::Backtrace::capture();
-
-        $crate::mdschema::validator::errors::ValidationError::InternalInvariantViolated(
-            format!(
-                "{}:{}\n{}\ninput_idx={} schema_idx={}\n{}\n{}\n\nStack trace:\n{}",
-                file!(),
-                line!(),
-                module_path!(),
-                input_cursor.descendant_index(),
-                schema_cursor.descendant_index(),
-                message,
-                pretty_print_cursor_pair(&input_cursor, &schema_cursor),
-                backtrace
-            ),
-        )
+    (result, $input_cursor:expr, $schema_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
+        $crate::invariant_violation!($input_cursor, $schema_cursor, $message $(, $($args)*)?)
     }};
-    ($input_cursor:ident, $schema_cursor:ident, $fmt:expr, $($args:tt)+) => {{
-        $crate::invariant_violation!(
-            $input_cursor,
-            $schema_cursor,
-            format!($fmt, $($args)+)
-        )
+    ($input_cursor:expr, $schema_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
+        #[cfg(feature = "invariant_violations")]
+        {
+            let error_msg = $crate::mdschema::validator::errors::invariant_violation_message(
+                Some(($input_cursor, $schema_cursor)),
+                format!($message $(, $($args)*)?),
+                module_path!(),
+            );
+            panic!("Internal invariant violated:\n{}", error_msg);
+        }
+
+        #[cfg(not(feature = "invariant_violations"))]
+        {
+            unreachable!("invariant_violation! invoked without invariant_violations feature");
+        }
+    }};
+    ($message:expr $(, $($args:tt)*)?) => {{
+        #[cfg(feature = "invariant_violations")]
+        {
+            let error_msg = $crate::mdschema::validator::errors::invariant_violation_message(
+                None,
+                format!($message $(, $($args)*)?),
+                module_path!(),
+            );
+            panic!("Internal invariant violated:\n{}", error_msg);
+        }
+
+        #[cfg(not(feature = "invariant_violations"))]
+        {
+            unreachable!("invariant_violation! invoked without invariant_violations feature");
+        }
     }};
 }
+
+#[track_caller]
+pub(crate) fn invariant_violation_message(
+    cursors: Option<(&TreeCursor, &TreeCursor)>,
+    message: String,
+    module_path: &'static str,
+) -> String {
+    let location = std::panic::Location::caller();
+    let file = location.file();
+    let line = location.line();
+
+    let backtrace = if cfg!(feature = "invariant_violations") {
+        Some(std::backtrace::Backtrace::force_capture())
+    } else {
+        None
+    };
+
+    if let Some((input_cursor, schema_cursor)) = cursors {
+        let mut input_cursor = input_cursor.clone();
+        walk_to_root(&mut input_cursor);
+
+        let mut schema_cursor = schema_cursor.clone();
+        walk_to_root(&mut schema_cursor);
+
+        let base_msg = format!(
+            "{}:{}\n{}\ninput_idx={} schema_idx={}\n{}\n{}",
+            file,
+            line,
+            module_path,
+            input_cursor.descendant_index(),
+            schema_cursor.descendant_index(),
+            message,
+            pretty_print_cursor_pair(&input_cursor, &schema_cursor)
+        );
+
+        match backtrace {
+            Some(backtrace) => format!("{base_msg}\n\nStack trace:\n{backtrace}"),
+            None => base_msg,
+        }
+    } else {
+        let base_msg = format!("{}:{}\n{}\n{}", file, line, module_path, message);
+        match backtrace {
+            Some(backtrace) => format!("{base_msg}\n\nStack trace:\n{backtrace}"),
+            None => base_msg,
+        }
+    }
+}
+
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -97,15 +104,6 @@ impl fmt::Display for ValidationError {
             ValidationError::InvalidUTF8 => write!(f, "Invalid UTF-8 encoding in input"),
             ValidationError::SchemaViolation(e) => write!(f, "Schema violation: {}", e),
             ValidationError::SchemaError(e) => write!(f, "Schema error: {}", e),
-            ValidationError::InternalInvariantViolated(msg) => {
-                write!(
-                    f,
-                    "Internal invariant violated:\n{}\n\
-                     This is a bug. Internal invariant errors only show for development builds, \
-                     and result in unexpected behavior for production builds. Please report this.",
-                    msg
-                )
-            }
             ValidationError::ParserError(e) => write!(f, "Parser error: {}", e),
             ValidationError::ValidatorCreationFailed => write!(f, "Failed to create validator"),
         }
@@ -129,9 +127,6 @@ pub enum ValidationError {
 
     /// Schema definition itself is invalid or malformed.
     SchemaError(SchemaError),
-
-    /// Internal invariant was violated (indicates a bug in the validator).
-    InternalInvariantViolated(String),
 
     /// Parser failed to process input or schema.
     ParserError(ParserError),
@@ -829,10 +824,6 @@ The first matcher has a specific upper bound (3), while the last one can be unbo
                         .finish()
                 }
             }
-        }
-        ValidationError::InternalInvariantViolated(msg) => {
-            buffer.extend_from_slice(msg.as_bytes());
-            return Ok(());
         }
         ValidationError::IoError(msg) => {
             let root_range = 0..source_content.len();

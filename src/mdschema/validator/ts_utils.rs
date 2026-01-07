@@ -242,13 +242,14 @@ pub fn extract_list_marker<'a>(
     schema_str: &'a str,
 ) -> Result<&'a str, ValidationError> {
     let mut cursor = cursor.clone();
-    if !cursor.goto_first_child() || !cursor.goto_first_child() || !is_marker_node(&cursor.node())
-    {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
+
+    #[cfg(feature = "invariant_violations")]
+    if !cursor.goto_first_child() || !cursor.goto_first_child() || !is_marker_node(&cursor.node()) {
+        crate::invariant_violation!(
+            &cursor,
+            &cursor,
             "expected list_marker when extracting list marker"
-        ));
+        );
     }
     let marker = cursor.node();
     marker
@@ -350,12 +351,13 @@ pub fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) 
 pub fn get_heading_kind<'a>(cursor: &TreeCursor<'a>) -> Result<&'a str, ValidationError> {
     let mut cursor = cursor.clone();
 
+    #[cfg(feature = "invariant_violations")]
     if !cursor.goto_first_child() || !cursor.node().kind().ends_with("marker") {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
+        crate::invariant_violation!(
+            &cursor,
+            &cursor,
             "expected heading marker for atx_heading"
-        ));
+        );
     }
     Ok(cursor.node().kind())
 }
@@ -443,12 +445,13 @@ pub fn extract_codeblock_contents(
     }
 
     // At this point, cursor must be at code_fence_content
+    #[cfg(feature = "invariant_violations")]
     if cursor.node().kind() != "code_fence_content" {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
+        crate::invariant_violation!(
+            &cursor,
+            &cursor,
             "expected code_fence_content while extracting code block"
-        ));
+        );
     }
 
     // Get the full text from code_fence_content node itself, not just the first child
@@ -481,20 +484,22 @@ pub fn extract_codeblock_contents(
 /// ```
 pub fn walk_to_list_item_content(cursor: &mut TreeCursor) -> Result<(), ValidationError> {
     // list_item -> list_marker
+    #[cfg(feature = "invariant_violations")]
     if !cursor.goto_first_child() || cursor.node().kind() != "list_marker" {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
+        crate::invariant_violation!(
+            &cursor,
+            &cursor,
             "expected list_marker while walking to list item content"
-        ));
+        );
     }
     // list_marker -> paragraph
+    #[cfg(feature = "invariant_violations")]
     if !cursor.goto_next_sibling() || cursor.node().kind() != "paragraph" {
-        return Err(crate::invariant_violation!(
-            cursor,
-            cursor,
+        crate::invariant_violation!(
+            &cursor,
+            &cursor,
             "expected paragraph while walking to list item content"
-        ));
+        );
     }
     Ok(())
 }

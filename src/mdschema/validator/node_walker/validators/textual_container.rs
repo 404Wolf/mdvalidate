@@ -1,5 +1,6 @@
 use tree_sitter::TreeCursor;
 
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::*,
     matcher::{
@@ -19,7 +20,6 @@ use crate::mdschema::validator::{
         get_next_node, is_code_node, is_text_node,
     },
 };
-use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate a textual region of input against a textual region of schema.
 ///
@@ -73,14 +73,14 @@ fn validate_textual_container_vs_textual_container_impl(
     let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
 
+    #[cfg(feature = "invariant_violations")]
     if !both_are_textual_containers(&schema_cursor.node(), &input_cursor.node()) {
         crate::invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
+            &input_cursor,
+            &schema_cursor,
             "expected textual container nodes"
         );
-        return result;
     }
 
     match count_non_literal_matchers_in_children(&schema_cursor, schema_str) {

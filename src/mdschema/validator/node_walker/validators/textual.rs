@@ -6,12 +6,12 @@ use crate::mdschema::validator::node_walker::validators::matchers::MatcherVsText
 use crate::mdschema::validator::ts_utils::{
     both_are_textual_nodes, get_next_node, is_code_node, is_text_node,
 };
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     node_walker::{ValidationResult, validators::Validator},
     ts_utils::waiting_at_end,
     utils::{compare_node_kinds, compare_text_contents},
 };
-use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate two textual elements.
 ///
@@ -73,18 +73,16 @@ pub(super) fn validate_textual_vs_textual_direct(
 ) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
+    #[cfg(feature = "invariant_violations")]
     if !both_are_textual_nodes(&schema_cursor.node(), &input_cursor.node()) {
         crate::invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
-            format!(
-                "expected textual nodes, got schema kind: {:?}, input kind: {:?}",
-                schema_cursor.node().kind(),
-                input_cursor.node().kind()
-            )
+            &input_cursor,
+            &schema_cursor,
+            "expected textual nodes, got schema kind: {:?}, input kind: {:?}",
+            schema_cursor.node().kind(),
+            input_cursor.node().kind()
         );
-        return result;
     }
 
     if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {

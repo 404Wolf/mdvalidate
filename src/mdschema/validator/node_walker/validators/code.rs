@@ -1,15 +1,17 @@
 use serde_json::json;
 
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::{NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError},
     node_walker::{
-        helpers::curly_matchers::{extract_id_from_curly_braces, extract_matcher_from_curly_delineated_text},
-        validators::ValidatorImpl,
         ValidationResult,
+        helpers::curly_matchers::{
+            extract_id_from_curly_braces, extract_matcher_from_curly_delineated_text,
+        },
+        validators::ValidatorImpl,
     },
     ts_utils::extract_codeblock_contents,
 };
-use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate a code block against a schema code block.
 ///
@@ -60,16 +62,16 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
     let input_str = walker.input_str();
     let schema_str = walker.schema_str();
 
+    #[cfg(feature = "invariant_violations")]
     if input_cursor.node().kind() != "fenced_code_block"
         || schema_cursor.node().kind() != "fenced_code_block"
     {
         crate::invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
+            &input_cursor,
+            &schema_cursor,
             "code validation expects fenced_code_block nodes"
         );
-        return result;
     }
 
     let input_extracted = match extract_codeblock_contents(&input_cursor, input_str) {
@@ -92,17 +94,21 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
         Some((schema_lang, (schema_code, schema_code_descendant_index))),
     ) = (&input_extracted, &schema_extracted)
     else {
-        // The only reason the "entire thing" would be wrong is because we're
-        // doing something wrong in our usage of it. That would be a bug!
-        crate::invariant_violation!(
-            result,
-            input_cursor,
-            schema_cursor,
-            format!(
+        #[cfg(feature = "invariant_violations")]
+        {
+            // The only reason the "entire thing" would be wrong is because we're
+            // doing something wrong in our usage of it. That would be a bug!
+            crate::invariant_violation!(
+                result,
+                &input_cursor,
+                &schema_cursor,
                 "Failed to extract code block contents from input or schema (input: {:?}, schema: {:?})",
-                input_extracted, schema_extracted
-            )
-        );
+                input_extracted,
+                schema_extracted
+            );
+        }
+
+        #[cfg(not(feature = "invariant_violations"))]
         return result;
     };
 

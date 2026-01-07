@@ -1,4 +1,4 @@
-use mdvalidate::{mdschema::validator::errors::pretty_print_error, Validator};
+use mdvalidate::{Validator, mdschema::validator::errors::pretty_print_error};
 
 fn main() {
     // Define a simple schema: a heading with a name and a list

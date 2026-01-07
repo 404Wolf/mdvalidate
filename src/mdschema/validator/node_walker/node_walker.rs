@@ -5,7 +5,7 @@ use tree_sitter::TreeCursor;
 use crate::mdschema::validator::{
     node_walker::{
         validation_result::ValidationResult,
-        validators::{nodes::NodeVsNodeValidator, Validator as ValidatorTrait},
+        validators::{Validator as ValidatorTrait, nodes::NodeVsNodeValidator},
     },
     validator::ValidatorState,
     validator_walker::ValidatorWalker,

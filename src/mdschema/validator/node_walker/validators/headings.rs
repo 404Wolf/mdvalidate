@@ -29,14 +29,14 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         let mut schema_cursor = walker.schema_cursor().clone();
 
         // Both should be the start of headings
+        #[cfg(feature = "invariant_violations")]
         if !is_heading_node(&input_cursor.node()) || !is_heading_node(&schema_cursor.node()) {
             crate::invariant_violation!(
                 result,
-                input_cursor,
-                schema_cursor,
+                &input_cursor,
+                &schema_cursor,
                 "heading validation expects atx_heading nodes"
             );
-            return result;
         }
 
         // This also checks the *type* of heading that they are at
@@ -78,16 +78,16 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         result.sync_cursor_pos(&schema_cursor, &input_cursor); // save progress
 
         // Both should be at markers
+        #[cfg(feature = "invariant_violations")]
         if !is_textual_container_node(&input_cursor.node())
             || !is_textual_container_node(&schema_cursor.node())
         {
             crate::invariant_violation!(
                 result,
-                input_cursor,
-                schema_cursor,
+                &input_cursor,
+                &schema_cursor,
                 "heading validation expects textual container nodes"
             );
-            return result;
         }
 
         // Now that we're at the heading content, use `validate_text_vs_text`
@@ -110,26 +110,22 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<bool, Validation
         ensure_at_heading_content(cursor)
     } else if is_marker_node(&cursor.node()) {
         if cursor.goto_next_sibling() {
+            #[cfg(feature = "invariant_violations")]
             if !is_heading_content_node(&cursor.node()) {
-                return Err(crate::invariant_violation!(
-                    cursor,
-                    cursor,
-                    "expected heading_content node"
-                ));
+                crate::invariant_violation!(cursor, cursor, "expected heading_content node");
             }
-            Ok(true)
+            Ok(is_heading_content_node(&cursor.node()))
         } else {
             Ok(false)
         }
     } else {
-        Err(crate::invariant_violation!(
+        #[cfg(feature = "invariant_violations")]
+        crate::invariant_violation!(
             cursor,
             cursor,
-            format!(
-                "Expected to be at heading content, but found node kind: {}",
-                cursor.node().kind()
-            )
-        ))
+            "Expected to be at heading content, but found node kind: {}",
+            cursor.node().kind()
+        );
     }
 }
 
@@ -137,7 +133,10 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<bool, Validation
 mod tests {
     use super::*;
     use crate::mdschema::validator::{
-        errors::SchemaViolationError, node_pos_pair::NodePosPair, node_walker::validators::test_utils::ValidatorTester, ts_utils::{is_heading_node, is_textual_node, parse_markdown}
+        errors::SchemaViolationError,
+        node_pos_pair::NodePosPair,
+        node_walker::validators::test_utils::ValidatorTester,
+        ts_utils::{is_heading_node, parse_markdown},
     };
     use serde_json::json;
 
@@ -152,7 +151,7 @@ mod tests {
         assert!(is_heading_node(&input_cursor.node()));
 
         ensure_at_heading_content(&mut input_cursor).unwrap();
-        assert_eq!(input_cursor.node().kind(), "heading_content");
+        assert!(is_heading_content_node(&input_cursor.node()));
 
         // Test starting from marker node
         let input_str = "## test heading";
@@ -164,18 +163,7 @@ mod tests {
         assert!(is_marker_node(&input_cursor.node()));
 
         ensure_at_heading_content(&mut input_cursor).unwrap();
-        assert_eq!(input_cursor.node().kind(), "heading_content");
-
-        // Test starting at totally wrong item
-        let input_str = "test heading";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
-        input_cursor.goto_first_child(); // document -> paragraph
-        input_cursor.goto_first_child(); // paragraph -> text
-        assert!(is_textual_node(&input_cursor.node()));
-
-        ensure_at_heading_content(&mut input_cursor).unwrap_err();
+        assert!(is_heading_content_node(&input_cursor.node()));
     }
 
     #[test]

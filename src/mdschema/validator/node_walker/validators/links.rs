@@ -51,15 +51,14 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         return result;
     }
 
+    #[cfg(feature = "invariant_violations")]
     if !input_cursor.goto_first_child() || !schema_cursor.goto_first_child() {
         crate::invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
+            &input_cursor,
+            &schema_cursor,
             "link nodes must have children"
         );
-
-        return result;
     }
 
     if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
@@ -94,14 +93,14 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         result.keep_farther_pos(&pos);
     }
 
+    #[cfg(feature = "invariant_violations")]
     if !input_cursor.goto_next_sibling() || !schema_cursor.goto_next_sibling() {
         crate::invariant_violation!(
             result,
-            input_cursor,
-            schema_cursor,
+            &input_cursor,
+            &schema_cursor,
             "link nodes must have a destination"
         );
-        return result;
     }
 
     if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
@@ -146,14 +145,13 @@ fn ensure_at_link_start(cursor: &mut TreeCursor) -> Result<(), ValidationError> 
         return Ok(());
     }
 
-    Err(crate::invariant_violation!(
+    #[cfg(feature = "invariant_violations")]
+    crate::invariant_violation!(
         cursor,
         cursor,
-        format!(
-            "Expected to be at link or image node, but found {}",
-            cursor.node().kind()
-        )
-    ))
+        "Expected to be at link or image node, but found {}",
+        cursor.node().kind()
+    );
 }
 
 fn compare_link_child_text(
@@ -166,12 +164,13 @@ fn compare_link_child_text(
     let mut schema_text_cursor = schema_cursor.clone();
     let mut input_text_cursor = input_cursor.clone();
 
+    #[cfg(feature = "invariant_violations")]
     if !schema_text_cursor.goto_first_child() || !input_text_cursor.goto_first_child() {
-        return Some(crate::invariant_violation!(
-            input_text_cursor,
-            schema_text_cursor,
+        crate::invariant_violation!(
+            &input_text_cursor,
+            &schema_text_cursor,
             "link child nodes must contain text"
-        ));
+        );
     }
 
     let is_partial_match = waiting_at_end(got_eof, input_str, &input_text_cursor);
@@ -197,17 +196,15 @@ fn validate_link_destination(
     let mut schema_text_cursor = schema_cursor.clone();
     let mut input_text_cursor = input_cursor.clone();
 
-    #[cfg(debug_assertions)]
+    #[cfg(feature = "invariant_violations")]
     {
         if !schema_text_cursor.goto_first_child() || !input_text_cursor.goto_first_child() {
             crate::invariant_violation!(
                 result,
-                input_text_cursor,
-                schema_text_cursor,
+                &input_text_cursor,
+                &schema_text_cursor,
                 "link destination nodes must contain text"
             );
-
-            return result;
         }
     }
 

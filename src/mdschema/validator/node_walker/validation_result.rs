@@ -112,7 +112,6 @@ impl ValidationResult {
     pub fn destruct(self) -> (Value, Vec<ValidationError>, NodePosPair) {
         (self.value, self.errors, self.farthest_reached_pos)
     }
-
 }
 
 impl Default for ValidationResult {
