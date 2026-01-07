@@ -1,6 +1,7 @@
 use serde_json::json;
 use tree_sitter::TreeCursor;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::errors::{
     NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError,
 };
@@ -53,7 +54,7 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
     #[cfg(feature = "invariant_violations")]
     if !input_cursor.goto_first_child() || !schema_cursor.goto_first_child() {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
             &input_cursor,
             &schema_cursor,
@@ -92,7 +93,7 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
     #[cfg(feature = "invariant_violations")]
     if !input_cursor.goto_next_sibling() || !schema_cursor.goto_next_sibling() {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
             &input_cursor,
             &schema_cursor,
@@ -140,7 +141,7 @@ fn ensure_at_link_start(cursor: &mut TreeCursor) -> Result<(), ValidationError> 
     }
 
     #[cfg(feature = "invariant_violations")]
-    crate::invariant_violation!(
+    invariant_violation!(
         cursor,
         cursor,
         "Expected to be at link or image node, but found {}",
@@ -160,7 +161,7 @@ fn compare_link_child_text(
 
     #[cfg(feature = "invariant_violations")]
     if !schema_text_cursor.goto_first_child() || !input_text_cursor.goto_first_child() {
-        crate::invariant_violation!(
+        invariant_violation!(
             &input_text_cursor,
             &schema_text_cursor,
             "link child nodes must contain text"
@@ -193,7 +194,7 @@ fn validate_link_destination(
     #[cfg(feature = "invariant_violations")]
     {
         if !schema_text_cursor.goto_first_child() || !input_text_cursor.goto_first_child() {
-            crate::invariant_violation!(
+            invariant_violation!(
                 result,
                 &input_text_cursor,
                 &schema_text_cursor,

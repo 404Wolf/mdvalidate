@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::invariant_violation;
 use core::fmt;
 use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
@@ -434,7 +435,7 @@ pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, E
     // The first node must be a code node
     #[cfg(feature = "invariant_violations")]
     if cursor.node().kind() != "code_span" {
-        crate::invariant_violation!(
+        invariant_violation!(
             "extract_text_matcher expects code_span, got {}",
             cursor.node().kind()
         );
@@ -459,7 +460,7 @@ pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, E
                 .map_err(ExtractorError::MatcherError)
         }
         #[cfg(feature = "invariant_violations")]
-        _ => crate::invariant_violation!(
+        _ => invariant_violation!(
             "extract_text_matcher expects code_span, got {}",
             cursor.node().kind()
         ),

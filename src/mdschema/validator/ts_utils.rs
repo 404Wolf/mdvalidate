@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::invariant_violation;
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
 use tree_sitter_markdown::language;
 
@@ -181,7 +182,7 @@ pub fn extract_list_marker<'a>(cursor: &TreeCursor<'a>, schema_str: &'a str) -> 
 
     #[cfg(feature = "invariant_violations")]
     if !cursor.goto_first_child() || !cursor.goto_first_child() || !is_marker_node(&cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             &cursor,
             &cursor,
             "expected list_marker when extracting list marker"
@@ -263,6 +264,11 @@ both_are!(
     "Check if both nodes are list nodes."
 );
 both_are!(
+    both_are_list_items,
+    is_list_item_node,
+    "Check if both nodes are list item nodes."
+);
+both_are!(
     both_are_codeblocks,
     is_codeblock_node,
     "Check if both nodes are codeblock nodes."
@@ -271,6 +277,10 @@ both_are!(
     both_are_inline_code,
     is_inline_code_node,
     "Check if both nodes are inline code nodes."
+);
+both_are!(both_are_markers,
+    is_marker_node,
+    "Check if both nodes are marker nodes."
 );
 
 /// Check if both nodes are top-level nodes (document or heading).
@@ -304,7 +314,7 @@ pub fn get_heading_kind<'a>(cursor: &TreeCursor<'a>) -> Result<&'a str, Validati
 
     #[cfg(feature = "invariant_violations")]
     if !cursor.goto_first_child() || !cursor.node().kind().ends_with("marker") {
-        crate::invariant_violation!(&cursor, &cursor, "expected heading marker for atx_heading");
+        invariant_violation!(&cursor, &cursor, "expected heading marker for atx_heading");
     }
     Ok(cursor.node().kind())
 }
@@ -390,7 +400,7 @@ pub fn extract_codeblock_contents(
     // At this point, cursor must be at code_fence_content
     #[cfg(feature = "invariant_violations")]
     if cursor.node().kind() != "code_fence_content" {
-        crate::invariant_violation!(
+        invariant_violation!(
             &cursor,
             &cursor,
             "expected code_fence_content while extracting code block"
@@ -427,7 +437,7 @@ pub fn walk_to_list_item_content(cursor: &mut TreeCursor) -> Result<(), Validati
     // list_item -> list_marker
     #[cfg(feature = "invariant_violations")]
     if !cursor.goto_first_child() || cursor.node().kind() != "list_marker" {
-        crate::invariant_violation!(
+        invariant_violation!(
             &cursor,
             &cursor,
             "expected list_marker while walking to list item content"
@@ -436,7 +446,7 @@ pub fn walk_to_list_item_content(cursor: &mut TreeCursor) -> Result<(), Validati
     // list_marker -> paragraph
     #[cfg(feature = "invariant_violations")]
     if !cursor.goto_next_sibling() || cursor.node().kind() != "paragraph" {
-        crate::invariant_violation!(
+        invariant_violation!(
             &cursor,
             &cursor,
             "expected paragraph while walking to list item content"

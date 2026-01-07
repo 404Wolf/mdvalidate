@@ -1,5 +1,6 @@
 use tree_sitter::TreeCursor;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::{
     errors::{SchemaError, ValidationError},
     matcher::{
@@ -117,7 +118,7 @@ fn next_is_non_text(schema_cursor: &TreeCursor) -> bool {
 fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> Result<bool, ValidationError> {
     #[cfg(feature = "invariant_violations")]
     if !is_inline_code_node(&schema_cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             schema_cursor,
             schema_cursor,
             "expected code node when checking matcher extra text"
@@ -164,7 +165,7 @@ fn text_after_matcher<'a>(
 ) -> Result<&'a str, ValidationError> {
     #[cfg(feature = "invariant_violations")]
     if !is_inline_code_node(&schema_cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             schema_cursor,
             schema_cursor,
             "expected code node when reading matcher suffix text"
@@ -195,7 +196,7 @@ fn extras_after_matcher<'a>(
 ) -> Result<&'a str, ValidationError> {
     #[cfg(feature = "invariant_violations")]
     if !is_inline_code_node(&schema_cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             schema_cursor,
             schema_cursor,
             "expected code node when reading matcher extras"

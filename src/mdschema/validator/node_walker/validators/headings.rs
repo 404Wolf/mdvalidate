@@ -1,6 +1,7 @@
 use log::trace;
 use tree_sitter::TreeCursor;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
@@ -31,7 +32,7 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         // Both should be the start of headings
         #[cfg(feature = "invariant_violations")]
         if !is_heading_node(&input_cursor.node()) || !is_heading_node(&schema_cursor.node()) {
-            crate::invariant_violation!(
+            invariant_violation!(
                 result,
                 &input_cursor,
                 &schema_cursor,
@@ -75,7 +76,7 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         if !is_textual_container_node(&input_cursor.node())
             || !is_textual_container_node(&schema_cursor.node())
         {
-            crate::invariant_violation!(
+            invariant_violation!(
                 result,
                 &input_cursor,
                 &schema_cursor,
@@ -105,7 +106,7 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<bool, Validation
         if cursor.goto_next_sibling() {
             #[cfg(feature = "invariant_violations")]
             if !is_heading_content_node(&cursor.node()) {
-                crate::invariant_violation!(cursor, cursor, "expected heading_content node");
+                invariant_violation!(cursor, cursor, "expected heading_content node");
             }
             Ok(is_heading_content_node(&cursor.node()))
         } else {
@@ -113,7 +114,7 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<bool, Validation
         }
     } else {
         #[cfg(feature = "invariant_violations")]
-        crate::invariant_violation!(
+        invariant_violation!(
             cursor,
             cursor,
             "Expected to be at heading content, but found node kind: {}",

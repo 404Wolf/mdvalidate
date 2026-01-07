@@ -1,5 +1,6 @@
 use serde_json::json;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::{NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError},
@@ -66,7 +67,7 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
     if input_cursor.node().kind() != "fenced_code_block"
         || schema_cursor.node().kind() != "fenced_code_block"
     {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
             &input_cursor,
             &schema_cursor,
@@ -97,7 +98,7 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
         #[cfg(feature = "invariant_violations")]
         // The only reason the "entire thing" would be wrong is because we're
         // doing something wrong in our usage of it. That would be a bug!
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
             &input_cursor,
             &schema_cursor,

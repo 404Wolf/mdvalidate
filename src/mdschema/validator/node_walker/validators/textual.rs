@@ -1,6 +1,7 @@
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::node_walker::validators::matchers::MatcherVsTextValidator;
 use crate::mdschema::validator::ts_utils::{
@@ -76,7 +77,7 @@ pub(super) fn validate_textual_vs_textual_direct(
 
     #[cfg(feature = "invariant_violations")]
     if !both_are_textual_nodes(&schema_cursor.node(), &input_cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
             &input_cursor,
             &schema_cursor,

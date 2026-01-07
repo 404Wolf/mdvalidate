@@ -364,6 +364,19 @@ pub enum SchemaViolationError {
         /// Actual number of items in input.
         actual: usize,
     },
+
+    /// Malformed node structure.
+    MalformedNodeStructure {
+        schema_index: usize,
+        input_index: usize,
+        kind: MalformedStructureKind,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum MalformedStructureKind {
+    MissingListItemContent,
+    HadExtraListItem,
 }
 
 impl fmt::Display for SchemaViolationError {
@@ -403,6 +416,9 @@ impl fmt::Display for SchemaViolationError {
                     (None, None) => "any number of".to_string(),
                 };
                 write!(f, "Expected {} items, found {}", range_desc, actual)
+            }
+            SchemaViolationError::MalformedNodeStructure { kind, .. } => {
+                write!(f, "Malformed node structure: {:?}", kind)
             }
         }
     }
@@ -561,27 +577,27 @@ fn validation_error_to_ariadne(
                 let schema_range = schema_node.start_byte()..schema_node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, input_range.clone()))
-                    .with_message("Non-repeating matcher in repeating context")
-                    .with_label(
-                        Label::new((filename, input_range))
-                            .with_message(
-                                "This input corresponds to a list node in the schema"
-                            )
-                            .with_color(Color::Blue),
-                    )
-                    .with_label(
-                        Label::new((filename, schema_range))
-                            .with_message(format!(
-                                "This matcher is in a list context but is not marked as repeating: '{}'",
-                                schema_content
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .with_help(r#"
+                .with_message("Non-repeating matcher in repeating context")
+                .with_label(
+                    Label::new((filename, input_range))
+                        .with_message(
+                            "This input corresponds to a list node in the schema"
+                        )
+                        .with_color(Color::Blue),
+                )
+                .with_label(
+                    Label::new((filename, schema_range))
+                        .with_message(format!(
+                            "This matcher is in a list context but is not marked as repeating: '{}'",
+                            schema_content
+                        ))
+                        .with_color(Color::Red),
+                )
+                .with_help(r#"
 You can mark a list node as repeating by adding a '{<min_count>,<max_count>} directly after the matcher, like
 - `myLabel:/foo/`{1,12}
 "#)
-                    .finish()
+                .finish()
             }
             SchemaViolationError::ChildrenLengthMismatch {
                 schema_index: _,
@@ -606,7 +622,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 if parent.kind() == "list_item" {
                     report = report.with_help(
                         "If you want to allow any number of list items, use the {min,max} syntax \
-                         (e.g., `item:/pattern/`{1,} or `item:/pattern/`{0,})",
+                     (e.g., `item:/pattern/`{1,} or `item:/pattern/`{0,})",
                     );
                 }
 
@@ -621,26 +637,26 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 let node_range = node.start_byte()..node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, node_range.clone()))
-                    .with_message("Nested list exceeds maximum depth")
-                    .with_label(
-                        Label::new((filename, node_range))
-                            .with_message(format!(
-                                "List nesting exceeds maximum depth of {} level(s).",
-                                max_depth,
-                            ))
-                            .with_color(Color::Red),
-                    )
-                    .with_help(
-                        "For schemas like:\n\
-                         - `num1:/\\d/`{1,}\n\
-                         \u{20} - `num2:/\\d/`{1,}{1,}\n\
-                         \n\
-                         You may need to adjust the repetition for the first matcher\n\
-                         to allow for the depth of the following ones. For example, you could\n\
-                         make that `num1:/\\d/`{1,}{1,}{1,} to allow for three levels of nesting (the one \
-                         below it, and the two allowed below that).",
-                    )
-                    .finish()
+                .with_message("Nested list exceeds maximum depth")
+                .with_label(
+                    Label::new((filename, node_range))
+                        .with_message(format!(
+                            "List nesting exceeds maximum depth of {} level(s).",
+                            max_depth,
+                        ))
+                        .with_color(Color::Red),
+                )
+                .with_help(
+                    "For schemas like:\n\
+                     - `num1:/\\d/`{1,}\n\
+                     \u{20} - `num2:/\\d/`{1,}{1,}\n\
+                     \n\
+                     You may need to adjust the repetition for the first matcher\n\
+                     to allow for the depth of the following ones. For example, you could\n\
+                     make that `num1:/\\d/`{1,}{1,}{1,} to allow for three levels of nesting (the one \
+                     below it, and the two allowed below that).",
+                )
+                .finish()
             }
             SchemaViolationError::WrongListCount {
                 schema_index,
@@ -677,8 +693,25 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     )
                     .with_help(
                         "The number of items in `matcher`{1,2} syntax refers to the number of \
-                         entries at the level of that matcher (deeper items are not included in \
-                         that count).",
+                     entries at the level of that matcher (deeper items are not included in \
+                     that count).",
+                    )
+                    .finish()
+            }
+            SchemaViolationError::MalformedNodeStructure {
+                schema_index: _,
+                input_index,
+                kind,
+            } => {
+                let node = find_node_by_index(tree.root_node(), *input_index);
+                let node_range = node.start_byte()..node.end_byte();
+
+                Report::build(ReportKind::Error, (filename, node_range.clone()))
+                    .with_message("Malformed node structure")
+                    .with_label(
+                        Label::new((filename, node_range))
+                            .with_message(format!("Malformed node structure: {:?}", kind))
+                            .with_color(Color::Red),
                     )
                     .finish()
             }

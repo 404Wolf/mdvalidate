@@ -1,5 +1,6 @@
 use tree_sitter::TreeCursor;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::*,
@@ -75,7 +76,7 @@ fn validate_textual_container_vs_textual_container_impl(
 
     #[cfg(feature = "invariant_violations")]
     if !both_are_textual_containers(&schema_cursor.node(), &input_cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
             &input_cursor,
             &schema_cursor,

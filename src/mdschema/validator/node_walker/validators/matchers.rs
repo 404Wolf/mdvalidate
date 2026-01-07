@@ -4,6 +4,7 @@ use log::trace;
 use serde_json::json;
 use tree_sitter::TreeCursor;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::errors::{
     NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError,
 };
@@ -467,7 +468,7 @@ pub(super) fn validate_literal_matcher_vs_textual(
 
     #[cfg(feature = "invariant_violations")]
     if !is_inline_code_node(&input_cursor.node()) || !is_inline_code_node(&schema_cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
             &input_cursor,
             &schema_cursor,
@@ -484,7 +485,7 @@ pub(super) fn validate_literal_matcher_vs_textual(
 
         #[cfg(feature = "invariant_violations")]
         if !is_text_node(&input_cursor.node()) || !is_text_node(&schema_cursor.node()) {
-            crate::invariant_violation!(
+            invariant_violation!(
                 result,
                 &input_cursor,
                 &schema_cursor,
@@ -511,7 +512,7 @@ pub(super) fn validate_literal_matcher_vs_textual(
     // the first place).
     #[cfg(feature = "invariant_violations")]
     if !schema_cursor.goto_next_sibling() && is_text_node(&schema_cursor.node()) {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
             &input_cursor,
             &schema_cursor,
@@ -533,7 +534,7 @@ pub(super) fn validate_literal_matcher_vs_textual(
         None => {
             #[cfg(feature = "invariant_violations")]
             {
-                crate::invariant_violation!(
+                invariant_violation!(
                     result,
                     &input_cursor,
                     &schema_cursor,
@@ -545,7 +546,7 @@ pub(super) fn validate_literal_matcher_vs_textual(
 
     #[cfg(feature = "invariant_violations")]
     if !input_cursor.goto_next_sibling() && schema_node_str_has_more_than_extras {
-        crate::invariant_violation!(
+        invariant_violation!(
             result,
             &input_cursor,
             &schema_cursor,
