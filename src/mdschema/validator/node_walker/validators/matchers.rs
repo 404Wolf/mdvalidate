@@ -4,7 +4,7 @@ use log::trace;
 use serde_json::json;
 use tree_sitter::TreeCursor;
 
-use crate::invariant_violation;
+use crate::{invariant_violation};
 use crate::mdschema::validator::errors::{
     NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError,
 };
@@ -15,7 +15,8 @@ use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
-    get_next_node, get_node_n_nodes_ahead, get_node_text, is_inline_code_node, is_text_node, waiting_at_end,
+    get_next_node, get_node_n_nodes_ahead, get_node_text, is_inline_code_node, is_text_node,
+    waiting_at_end,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
@@ -529,10 +530,7 @@ pub(super) fn validate_literal_matcher_vs_textual(
         );
     }
 
-    let schema_node_str = get_node_text(
-        &schema_cursor.node(),
-        schema_str,
-    );
+    let schema_node_str = get_node_text(&schema_cursor.node(), schema_str);
 
     let schema_node_str_has_more_than_extras = schema_node_str.len() > 1;
 
@@ -950,10 +948,29 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_matcher_vs_text_incomplete() {
+        let schema_str = "test `foo:/test/`";
+        let input_str = "test te";
+
+        let (value, errors, _) =
+            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .goto_first_child_then_unwrap()
+                .validate_incomplete()
+                .destruct();
+
+        // no errors so far
+        assert_eq!(errors, vec![]);
+        // nor do we get any captures so far
+        assert_eq!(value, json!({}));
+    }
+
+    #[test]
     fn test_validate_matcher_vs_text_with_repeating() {
         let schema_str = "test `test:/test/`{1,} foo";
         let input_str = "test test foo";
-        let (value, errors, _farthest_reached_pos) =
+        let (value, errors, _) =
             ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()

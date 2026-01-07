@@ -102,6 +102,7 @@ pub fn process<R: Read>(
 
         let new_text = std::str::from_utf8(&buffer[..bytes_read])?;
         input_str.push_str(new_text);
+        dbg!(&input_str);
 
         validator.read_more_input(&input_str)?;
         validator.validate();
@@ -144,12 +145,7 @@ pub fn process_stdio<R: Read, W: Write>(
             _ => {}
         }
     } else {
-        use std::collections::HashSet;
-
-        // TODO: fix the underlying issue, we shouldn't have duplicates
-        let unique_errors: HashSet<_> = errors.iter().collect();
-
-        for error in unique_errors {
+        for error in &errors {
             let error_output = if debug_mode {
                 debug_print_error(error)
             } else {
@@ -283,7 +279,28 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    fn test_validate_stream_input_against_matcher_stream_correctly() {
+        let schema_str = r#"# s `a:/.*/`
+
+# `t:/.*/`
+"#;
+        let input_data = r#"# s 7
+
+# `t:/.*/`
+"#;
+
+        let cursor = Cursor::new(input_data.as_bytes());
+        let reader = LimitedReader::new(cursor, 4);
+
+        let (errors, _) = run_validation(&schema_str.into(), reader, false);
+        assert!(
+            errors.is_empty(),
+            "should have no errors but found: {:?}",
+            errors
+        );
+    }
+
+    #[test]
     fn test_validate_stream_input_against_matcher() {
         let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d+/`
 

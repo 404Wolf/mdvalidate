@@ -137,8 +137,11 @@ mod tests {
 
     #[test]
     fn test_validate_textual_vs_textual_with_incomplete_matcher() {
-        let schema_str = "prefix `test:/test/`";
-        let input_str = "prefix `test:/te";
+        let schema_str = r#"prefix `test:/test/`
+
+prefix `test:/test/`
+"#;
+        let input_str = r#"prefix t"#;
 
         let (value, errors, farthest_reached_pos) =
             ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)

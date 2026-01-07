@@ -1,6 +1,8 @@
 use log::trace;
 
+use crate::compare_node_children_lengths_check;
 use crate::mdschema::validator::errors::{SchemaError, ValidationError};
+use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::check_repeating_matchers::check_repeating_matchers;
 use crate::mdschema::validator::node_walker::validators::code::CodeVsCodeValidator;
 use crate::mdschema::validator::node_walker::validators::headings::HeadingVsHeadingValidator;
@@ -15,8 +17,6 @@ use crate::mdschema::validator::ts_utils::{
     both_are_textual_nodes, is_heading_node,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::compare_node_children_lengths_check;
 
 /// Validate two arbitrary nodes against each other.
 ///
@@ -143,6 +143,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 got_eof,
             );
             result.join_other_result(&heading_result);
+            result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
             result.sync_cursor_pos(&schema_cursor, &input_cursor);
         }
 
@@ -206,6 +207,34 @@ mod tests {
         ts_utils::parse_markdown,
         validator_walker::ValidatorWalker,
     };
+
+    #[test]
+    fn test_validate_doesnt_get_multiple_errors() {
+        // Previously this test yielded multiple errors
+        let schema_str = r#"# pre `assignment_number:/\d+/`"#;
+
+        let input_str = r#"# pre dd"#;
+
+        let schema = parse_markdown(schema_str).unwrap();
+        let input = parse_markdown(input_str).unwrap();
+
+        let schema_cursor = schema.walk();
+        let input_cursor = input.walk();
+
+        let walker =
+            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+        let result = NodeVsNodeValidator::validate(&walker, true);
+
+        assert_eq!(
+            result.errors.len(),
+            1,
+            "Expected exactly one error but found {:?}",
+            result.errors
+        );
+        assert!(
+            result.value.is_null() || result.value.as_object().map_or(true, |obj| obj.is_empty())
+        );
+    }
 
     #[test]
     fn test_validate_node_vs_node_with_with_nesting_lists() {
