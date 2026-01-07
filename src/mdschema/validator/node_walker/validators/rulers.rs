@@ -1,34 +1,54 @@
 use log::trace;
-use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::is_ruler_node;
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate that both nodes are rulers (thematic breaks).
 ///
 /// This is a simple check - both nodes must be ruler nodes.
 /// Rulers have no children and no content to validate.
-#[instrument(skip(input_cursor, schema_cursor), level = "trace", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
-), ret)]
-pub fn validate_ruler_vs_ruler(
+pub(super) struct RulerVsRulerValidator;
+
+impl ValidatorImpl for RulerVsRulerValidator {
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        let _got_eof = got_eof;
+        validate_ruler_vs_ruler_impl(walker.input_cursor(), walker.schema_cursor())
+    }
+}
+
+fn validate_ruler_vs_ruler_impl(
     input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
 ) -> ValidationResult {
-    let result = ValidationResult::from_cursors(input_cursor, schema_cursor);
+    let mut result = ValidationResult::from_cursors(input_cursor, schema_cursor);
 
     let input_node = input_cursor.node();
     let schema_node = schema_cursor.node();
 
     // Both should be rulers - this is validated at the caller level in node_vs_node
-    debug_assert!(is_ruler_node(&input_node), "Input node should be a ruler");
-    debug_assert!(is_ruler_node(&schema_node), "Schema node should be a ruler");
+    if !is_ruler_node(&input_node) || !is_ruler_node(&schema_node) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "ruler validation expects thematic_break nodes"
+        );
+        return result;
+    }
 
     // Rulers have no children
-    debug_assert_eq!(input_node.child_count(), 0);
-    debug_assert_eq!(schema_node.child_count(), 0);
+    if input_node.child_count() != 0 || schema_node.child_count() != 0 {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "ruler nodes should not have children"
+        );
+        return result;
+    }
 
     trace!("Ruler validated successfully");
 
@@ -38,34 +58,30 @@ pub fn validate_ruler_vs_ruler(
 
 #[cfg(test)]
 mod tests {
-    use crate::mdschema::validator::{
-        node_walker::validators::rulers::validate_ruler_vs_ruler, ts_utils::parse_markdown,
-    };
+    use crate::mdschema::validator::node_walker::validators::rulers::RulerVsRulerValidator;
+    use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
+    use crate::mdschema::validator::ts_utils::is_ruler_node;
     use serde_json::json;
 
     #[test]
     fn test_validate_ruler_vs_ruler() {
         let schema_str = "---";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-
         let input_str = "---";
-        let input_tree = parse_markdown(input_str).unwrap();
 
-        let mut schema_cursor = schema_tree.walk();
-        let mut input_cursor = input_tree.walk();
+        let (value, errors, _) =
+            ValidatorTester::<RulerVsRulerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| {
+                    assert!(is_ruler_node(i));
+                    assert!(is_ruler_node(s));
+                })
+                .validate_complete()
+                .destruct();
 
-        schema_cursor.goto_first_child(); // document -> thematic_break
-        input_cursor.goto_first_child(); // document -> thematic_break
-
-        let result = validate_ruler_vs_ruler(&input_cursor, &schema_cursor);
-
-        assert!(
-            result.errors.is_empty(),
-            "Errors found: {:?}",
-            result.errors
-        );
+        assert_eq!(errors, vec![], "Errors found: {:?}", errors);
         // Rulers don't capture matches
-        assert_eq!(result.value, json!({}));
+        assert_eq!(value, json!({}));
     }
 
     #[test]
@@ -80,25 +96,26 @@ mod tests {
         ];
 
         for (schema_str, input_str) in test_cases {
-            let schema_tree = parse_markdown(schema_str).unwrap();
-            let input_tree = parse_markdown(input_str).unwrap();
+            let (value, errors, _) =
+                ValidatorTester::<RulerVsRulerValidator>::from_strs(schema_str, input_str)
+                    .walk()
+                    .goto_first_child_then_unwrap()
+                    .peek_nodes(|(i, s)| {
+                        assert!(is_ruler_node(i));
+                        assert!(is_ruler_node(s));
+                    })
+                    .validate_complete()
+                    .destruct();
 
-            let mut schema_cursor = schema_tree.walk();
-            let mut input_cursor = input_tree.walk();
-
-            schema_cursor.goto_first_child();
-            input_cursor.goto_first_child();
-
-            let result = validate_ruler_vs_ruler(&input_cursor, &schema_cursor);
-
-            assert!(
-                result.errors.is_empty(),
+            assert_eq!(
+                errors,
+                vec![],
                 "Expected no errors for schema '{}' and input '{}', got: {:?}",
                 schema_str,
                 input_str,
-                result.errors
+                errors
             );
-            assert_eq!(result.value, json!({}));
+            assert_eq!(value, json!({}));
         }
     }
 }

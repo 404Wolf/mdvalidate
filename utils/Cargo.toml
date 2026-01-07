@@ -1,0 +1,12 @@
+[dependencies]
+ptree = "0.5.2"
+tree-sitter = "0.25.10"
+tree-sitter-markdown = {package = "tree-sitter-markdown-fork", version = "0.7.1"}
+
+[lib]
+path = "src/lib.rs"
+
+[package]
+name = "mdv-utils"
+version = "0.1.0"
+edition = "2024"

@@ -9,7 +9,7 @@ rustPlatform.buildRustPackage {
 
   src = ../.;
 
-  cargoHash = "sha256-M/uvId8PnqvLPkYWuZFqjzzFJ4Ip5zqdbMt8cALfmuI=";
+  cargoHash = "sha256-wtk+TKxDqRUuGnUixiKSJ2ewjHkP2BwMmCzQYXCQA5U=";
 
   cargoBuildFlags = [
     "--bin"

@@ -53,8 +53,14 @@ pub fn compare_node_kinds(
     // which are list markers. This will indicate whether they are the same type
     // of list.
     if schema_cursor.node().kind() == "tight_list" && input_cursor.node().kind() == "tight_list" {
-        let schema_list_marker = extract_list_marker(schema_cursor, schema_str);
-        let input_list_marker = extract_list_marker(input_cursor, input_str);
+        let schema_list_marker = match extract_list_marker(schema_cursor, schema_str) {
+            Ok(marker) => marker,
+            Err(error) => return Some(error),
+        };
+        let input_list_marker = match extract_list_marker(input_cursor, input_str) {
+            Ok(marker) => marker,
+            Err(error) => return Some(error),
+        };
 
         // They must both be unordered, both be ordered, or both have the same marker
         if schema_list_marker == input_list_marker {
@@ -83,8 +89,14 @@ pub fn compare_node_kinds(
     }
 
     if schema_cursor.node().kind() == "atx_heading" && input_cursor.node().kind() == "atx_heading" {
-        let schema_heading_kind = get_heading_kind(&schema_cursor);
-        let input_heading_kind = get_heading_kind(&input_cursor);
+        let schema_heading_kind = match get_heading_kind(&schema_cursor) {
+            Ok(kind) => kind,
+            Err(error) => return Some(error),
+        };
+        let input_heading_kind = match get_heading_kind(&input_cursor) {
+            Ok(kind) => kind,
+            Err(error) => return Some(error),
+        };
 
         if schema_heading_kind != input_heading_kind {
             return Some(ValidationError::SchemaViolation(
@@ -280,7 +292,7 @@ mod tests {
         let mut cursor = tree.walk();
         cursor.goto_first_child();
         assert_eq!(
-            extract_codeblock_contents(&cursor, input),
+            extract_codeblock_contents(&cursor, input).unwrap(),
             Some((None, ("code".into(), 3)))
         );
 
@@ -290,7 +302,7 @@ mod tests {
         let mut cursor = tree.walk();
         cursor.goto_first_child();
         assert_eq!(
-            extract_codeblock_contents(&cursor, input),
+            extract_codeblock_contents(&cursor, input).unwrap(),
             Some((Some(("rust".into(), 3)), ("code".into(), 5)))
         );
 
@@ -300,7 +312,7 @@ mod tests {
         let mut cursor = tree.walk();
         cursor.goto_first_child();
         assert_eq!(
-            extract_codeblock_contents(&cursor, input),
+            extract_codeblock_contents(&cursor, input).unwrap(),
             Some((None, ("code".into(), 3)))
         );
 
@@ -310,7 +322,7 @@ mod tests {
         let mut cursor = tree.walk();
         cursor.goto_first_child();
         assert_eq!(
-            extract_codeblock_contents(&cursor, input),
+            extract_codeblock_contents(&cursor, input).unwrap(),
             Some((Some(("rust".into(), 3)), ("code".into(), 5)))
         );
     }
@@ -323,7 +335,7 @@ mod tests {
         let mut cursor = tree.walk();
         cursor.goto_first_child();
         assert_eq!(
-            extract_codeblock_contents(&cursor, input),
+            extract_codeblock_contents(&cursor, input).unwrap(),
             Some((None, ("line1\nline2\nline3".into(), 3)))
         );
 
@@ -333,7 +345,7 @@ mod tests {
         let mut cursor = tree.walk();
         cursor.goto_first_child();
         assert_eq!(
-            extract_codeblock_contents(&cursor, input),
+            extract_codeblock_contents(&cursor, input).unwrap(),
             Some((
                 Some(("rust".into(), 3)),
                 ("fn main() {\n    println!(\"Hello\");\n}".into(), 5)
@@ -346,7 +358,7 @@ mod tests {
         let mut cursor = tree.walk();
         cursor.goto_first_child();
         assert_eq!(
-            extract_codeblock_contents(&cursor, input),
+            extract_codeblock_contents(&cursor, input).unwrap(),
             Some((
                 Some(("python".into(), 3)),
                 (

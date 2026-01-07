@@ -22,8 +22,8 @@ Here’s a simple schema that will validate all grocery lists of a specific shap
 ```markdown
 # Grocery List
 
-- `item:/[A-Z][a-z]+/`+         <!-- one or more items; each starts with a capital letter -->
-  - `note:/\w+/`?{,2}           <!-- up to two optional sub-notes per item -->
+- `item:/[A-Z][a-z]+/`{2,2}
+  - `note:/\w+/`{,2}
 ```
 
 A passing document:
@@ -38,7 +38,7 @@ A passing document:
   - ripe
 ```
 
-A failing document (too many sub-notes):
+A failing document (too few sub-notes):
 
 ```markdown
 # Grocery List
@@ -46,7 +46,6 @@ A failing document (too many sub-notes):
 - Apples
   - organic
   - local
-  - green
 ```
 
 ## Some examples of what you can match 

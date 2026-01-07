@@ -1,6 +1,5 @@
 use log::trace;
 use serde_json::json;
-use tracing::instrument;
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
@@ -8,7 +7,10 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError},
     node_walker::{
         ValidationResult,
-        validators::textual_container::validate_textual_container_vs_textual_container,
+        validators::{
+            Validator, ValidatorImpl,
+            textual_container::TextualContainerVsTextualContainerValidator,
+        },
     },
     ts_utils::{
         count_siblings, get_node_and_next_node, has_single_code_child, has_subsequent_node_of_kind,
@@ -16,6 +18,7 @@ use crate::mdschema::validator::{
     },
     utils::compare_node_kinds,
 };
+use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate a list node against a schema list node.
 ///
@@ -72,21 +75,22 @@ use crate::mdschema::validator::{
 ///
 /// Note that a limitation here is that you cannot have a variable-length list
 /// that is not the final list in your schema.
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
-    i = %input_cursor.descendant_index(),
-    s = %schema_cursor.descendant_index(),
-), ret)]
-pub fn validate_list_vs_list(
-    input_cursor: &TreeCursor,
-    schema_cursor: &TreeCursor,
-    schema_str: &str,
-    input_str: &str,
-    got_eof: bool,
-) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(input_cursor, input_cursor);
+pub(super) struct ListVsListValidator;
 
-    let mut input_cursor = input_cursor.clone();
-    let mut schema_cursor = schema_cursor.clone();
+impl ValidatorImpl for ListVsListValidator {
+    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        validate_list_vs_list_impl(walker, got_eof)
+    }
+}
+
+fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    let mut result = ValidationResult::from_cursors(walker.input_cursor(), walker.input_cursor());
+
+    let input_str = walker.input_str();
+    let schema_str = walker.schema_str();
+
+    let mut input_cursor = walker.input_cursor().clone();
+    let mut schema_cursor = walker.schema_cursor().clone();
 
     // We want to ensure that the types of lists are the same
     if let Some(error) = compare_node_kinds(&schema_cursor, &input_cursor, input_str, schema_str) {
@@ -97,10 +101,23 @@ pub fn validate_list_vs_list(
     let at_list_schema_cursor = schema_cursor.clone();
     let at_list_input_cursor = input_cursor.clone();
 
-    ensure_at_first_list_item(&mut input_cursor);
-    ensure_at_first_list_item(&mut schema_cursor);
-    debug_assert_eq!(input_cursor.node().kind(), "list_item");
-    debug_assert_eq!(schema_cursor.node().kind(), "list_item");
+    if let Err(error) = ensure_at_first_list_item(&mut input_cursor) {
+        result.add_error(error);
+        return result;
+    }
+    if let Err(error) = ensure_at_first_list_item(&mut schema_cursor) {
+        result.add_error(error);
+        return result;
+    }
+    if input_cursor.node().kind() != "list_item" || schema_cursor.node().kind() != "list_item" {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "expected list_item nodes after list traversal"
+        );
+        return result;
+    }
 
     match extract_repeated_matcher_from_list_item(&schema_cursor, schema_str) {
         // We were able to find a valid repeated matcher in the schema list item.
@@ -133,8 +150,17 @@ pub fn validate_list_vs_list(
             loop {
                 trace!("Validating list item #{}", validate_so_far + 1,);
 
-                debug_assert_eq!(input_cursor.node().kind(), "list_item");
-                debug_assert_eq!(schema_cursor.node().kind(), "list_item");
+                if input_cursor.node().kind() != "list_item"
+                    || schema_cursor.node().kind() != "list_item"
+                {
+                    crate::invariant_violation!(
+                        result,
+                        input_cursor,
+                        schema_cursor,
+                        "expected list_item nodes while validating repeated matcher"
+                    );
+                    return result;
+                }
 
                 let new_matches = validate_list_item_contents_vs_list_item_contents(
                     &input_cursor,
@@ -246,11 +272,8 @@ pub fn validate_list_vs_list(
             // If there are more items to validate AT THE SAME LEVEL, recurse to
             // validate them. We now use the *next* schema node too.
             if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
-                let next_result = validate_list_vs_list(
-                    &input_cursor,
-                    &schema_cursor,
-                    schema_str,
-                    input_str,
+                let next_result = ListVsListValidator::validate(
+                    &walker.with_cursors(&input_cursor, &schema_cursor),
                     got_eof,
                 );
                 result.join_other_result(&next_result);
@@ -270,11 +293,8 @@ pub fn validate_list_vs_list(
                         schema_cursor.node().kind()
                     );
 
-                    let next_result = validate_list_vs_list(
-                        &input_cursor,
-                        &schema_cursor,
-                        schema_str,
-                        input_str,
+                    let next_result = ListVsListValidator::validate(
+                        &walker.with_cursors(&input_cursor, &schema_cursor),
                         got_eof,
                     );
                     // We need to be able to capture errors that happen in the recursive call
@@ -427,11 +447,8 @@ pub fn validate_list_vs_list(
                     input_cursor.goto_first_child();
                     schema_cursor.goto_first_child();
 
-                    let deeper_result = validate_list_vs_list(
-                        &input_cursor,
-                        &schema_cursor,
-                        schema_str,
-                        input_str,
+                    let deeper_result = ListVsListValidator::validate(
+                        &walker.with_cursors(&input_cursor, &schema_cursor),
                         got_eof,
                     );
                     result.join_other_result(&deeper_result);
@@ -441,11 +458,8 @@ pub fn validate_list_vs_list(
             // Recurse on next sibling if available!
             if input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {
                 trace!("Moving to next sibling list items for continued validation");
-                let new_matches = validate_list_vs_list(
-                    &mut input_cursor,
-                    &mut schema_cursor,
-                    schema_str,
-                    input_str,
+                let new_matches = ListVsListValidator::validate(
+                    &walker.with_cursors(&input_cursor, &schema_cursor),
                     got_eof,
                 );
                 result.join_other_result(&new_matches);
@@ -496,27 +510,44 @@ fn validate_list_item_contents_vs_list_item_contents(
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
+    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
     let mut schema_cursor = schema_cursor.clone();
     let mut input_cursor = input_cursor.clone();
 
-    debug_assert!(is_list_item_node(&schema_cursor.node()));
-    debug_assert!(is_list_item_node(&input_cursor.node()));
+    if !is_list_item_node(&schema_cursor.node()) || !is_list_item_node(&input_cursor.node()) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "expected list_item nodes before validating list item contents"
+        );
+        return result;
+    }
     schema_cursor.goto_first_child();
     input_cursor.goto_first_child();
-    debug_assert!(is_list_marker_node(&schema_cursor.node()));
-    debug_assert!(is_list_marker_node(&input_cursor.node()));
+    if !is_list_marker_node(&schema_cursor.node()) || !is_list_marker_node(&input_cursor.node()) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "expected list_marker nodes while validating list item contents"
+        );
+        return result;
+    }
     schema_cursor.goto_next_sibling();
     input_cursor.goto_next_sibling();
-    debug_assert!(is_paragraph_node(&schema_cursor.node()));
-    debug_assert!(is_paragraph_node(&input_cursor.node()));
+    if !is_paragraph_node(&schema_cursor.node()) || !is_paragraph_node(&input_cursor.node()) {
+        crate::invariant_violation!(
+            result,
+            input_cursor,
+            schema_cursor,
+            "expected paragraph nodes while validating list item contents"
+        );
+        return result;
+    }
 
-    validate_textual_container_vs_textual_container(
-        &input_cursor,
-        &schema_cursor,
-        schema_str,
-        input_str,
-        got_eof,
-    )
+    let walker = ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+    TextualContainerVsTextualContainerValidator::validate(&walker, got_eof)
 }
 
 /// Creates a new matcher from a tree-sitter cursor pointing at code node in
@@ -582,7 +613,14 @@ fn extract_repeated_matcher_from_list_item(
     schema_cursor: &TreeCursor,
     schema_str: &str,
 ) -> Option<Result<Matcher, MatcherError>> {
-    debug_assert_eq!(schema_cursor.node().kind(), "list_item");
+    if schema_cursor.node().kind() != "list_item" {
+        let error = crate::invariant_violation!(
+            schema_cursor,
+            schema_cursor,
+            "expected list_item while extracting repeated matcher"
+        );
+        return Some(Err(MatcherError::InvariantViolation(error.to_string())));
+    }
 
     // If the first node in the list item is not a paragraph that starts with a
     // code node, we can't have a matcher.
@@ -627,11 +665,18 @@ fn extract_repeated_matcher_from_list_item(
 }
 
 /// Ensure that the cursor is at the first list item in the list.
-fn ensure_at_first_list_item(input_cursor: &mut TreeCursor) {
+fn ensure_at_first_list_item(input_cursor: &mut TreeCursor) -> Result<(), ValidationError> {
     if input_cursor.node().kind() == "tight_list" {
         input_cursor.goto_first_child();
-        debug_assert_eq!(input_cursor.node().kind(), "list_item");
+        if input_cursor.node().kind() != "list_item" {
+            return Err(crate::invariant_violation!(
+                input_cursor,
+                input_cursor,
+                "expected list_item while walking into list"
+            ));
+        }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -639,15 +684,45 @@ mod tests {
     use std::panic;
 
     use serde_json::json;
+    use tree_sitter::TreeCursor;
 
+    use super::ListVsListValidator;
     use crate::mdschema::validator::{
         errors::{ChildrenCount, NodeContentMismatchKind, SchemaViolationError, ValidationError},
-        node_walker::validators::lists::{
-            ensure_at_first_list_item, extract_repeated_matcher_from_list_item,
-            validate_list_vs_list,
+        node_walker::{
+            ValidationResult,
+            validators::{
+                Validator,
+                lists::{ensure_at_first_list_item, extract_repeated_matcher_from_list_item},
+                test_utils::ValidatorTester,
+            },
         },
-        ts_utils::parse_markdown,
+        ts_utils::{is_list_node, parse_markdown},
+        validator_walker::ValidatorWalker,
     };
+
+    fn validate_lists(schema_str: &str, input_str: &str, got_eof: bool) -> ValidationResult {
+        ValidatorTester::<ListVsListValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(i, s)| {
+                assert!(is_list_node(i));
+                assert!(is_list_node(s));
+            })
+            .validate(got_eof)
+    }
+
+    fn validate_list_cursors(
+        input_cursor: &TreeCursor,
+        schema_cursor: &TreeCursor,
+        schema_str: &str,
+        input_str: &str,
+        got_eof: bool,
+    ) -> ValidationResult {
+        let walker =
+            ValidatorWalker::from_cursors(input_cursor, schema_cursor, schema_str, input_str);
+        ListVsListValidator::validate(&walker, got_eof)
+    }
 
     #[test]
     fn test_ensure_at_first_list_item() {
@@ -659,7 +734,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
 
         // Test with - (hyphen)
@@ -670,7 +745,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
 
         // Test with + (plus)
@@ -681,7 +756,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
 
         // Test with * (asterisk)
@@ -692,7 +767,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
 
         // Test with ordered list (1.)
@@ -703,7 +778,7 @@ mod tests {
         input_cursor.goto_first_child();
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
         assert_eq!(input_cursor.node().kind(), "list_item");
     }
 
@@ -745,7 +820,7 @@ mod tests {
         let mut input_cursor = input_tree.walk();
 
         input_cursor.goto_first_child();
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
 
         let matcher = extract_repeated_matcher_from_list_item(&mut input_cursor, input_str)
             .unwrap()
@@ -799,21 +874,12 @@ mod tests {
     #[test]
     fn test_validate_list_vs_list_literal_list_items_matching() {
         let schema_str = "- test1\n- test2";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "- test1\n- test2";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
+        let result = validate_lists(schema_str, input_str, false);
 
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
-
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -822,18 +888,8 @@ mod tests {
     #[test]
     fn test_validate_list_vs_list_literal_list_items_different() {
         let input_str = "- test1\n- different";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
-
         let schema_str = "- test1\n- test2";
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_lists(schema_str, input_str, false);
 
         assert!(!result.errors.is_empty());
         match &result.errors[0] {
@@ -860,87 +916,54 @@ mod tests {
         //             └─ (paragraph[9]12..19)
         //                └─ (text[10]12..19)
 
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "- test1\n  - nested_different";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
+        let result = validate_lists(schema_str, input_str, false);
 
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
-
-        assert!(
-            !result.errors.is_empty(),
-            "Expected errors with mismatched nested literal items"
+        assert_eq!(
+            result.errors,
+            vec![ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    kind: NodeContentMismatchKind::Literal,
+                    schema_index: 10,
+                    input_index: 10,
+                    expected: "nested1".into(),
+                    actual: "nested_different".into(),
+                }
+            )],
+            "Expected NodeContentMismatch error with nested literal items"
         );
+    }
 
-        match &result.errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                kind: NodeContentMismatchKind::Literal,
-                expected,
-                actual,
-                ..
-            }) => {
-                assert_eq!(expected, "nested1");
-                assert_eq!(actual, "nested_different");
-            }
-            _ => panic!("Unexpected error type: {:?}", result.errors[0]),
-        }
+    #[test]
+    fn test_link_in_list_item() {
+        let schema_str = "- [link]({url:/.*/})";
+        let input_str = "- [link](https://404wolf.com)";
+
+        let result = validate_lists(schema_str, input_str, false);
+
+        assert_eq!(result.errors, vec![],);
+        assert_eq!(result.value, json!({"url": "https://404wolf.com"}));
     }
 
     #[test]
     fn test_validate_list_vs_list_literal_list_items_with_nesting_mismatch_and_more() {
         let schema_str = "- test1\n  - nested1\n- test2";
-        // (document[0]0..28)
-        // └─ (tight_list[1]0..27)
-        //    ├─ (list_item[2]0..19)
-        //    │  ├─ (list_marker[3]0..1)
-        //    │  ├─ (paragraph[4]2..7)
-        //    │  │  └─ (text[5]2..7)
-        //    │  └─ (tight_list[6]10..19)
-        //    │     └─ (list_item[7]10..19)
-        //    │        ├─ (list_marker[8]10..11)
-        //    │        └─ (paragraph[9]12..19)
-        //    │           └─ (text[10]12..19)
-        //    └─ (list_item[11]20..27)
-        //       ├─ (list_marker[12]20..21)
-        //       └─ (paragraph[13]22..27)
-        //          └─ (text[14]22..27)
-
-        let schema_tree = parse_markdown(schema_str).unwrap();
-        let mut schema_cursor = schema_tree.walk();
-
         let input_str = "- test1\n  - nested1\n- test3";
-        let input_tree = parse_markdown(input_str).unwrap();
-        let mut input_cursor = input_tree.walk();
+        let result = validate_lists(schema_str, input_str, false);
 
-        schema_cursor.goto_first_child();
-        input_cursor.goto_first_child();
-
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
-
-        assert!(
-            !result.errors.is_empty(),
-            "Expected errors with mismatched nested literal items"
+        assert_eq!(
+            result.errors,
+            vec![ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    kind: NodeContentMismatchKind::Literal,
+                    schema_index: 14,
+                    input_index: 14,
+                    expected: "test2".into(),
+                    actual: "test3".into(),
+                }
+            )],
+            "Expected NodeContentMismatch error with mismatched literal items"
         );
-
-        match &result.errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                kind: NodeContentMismatchKind::Literal,
-                expected,
-                actual,
-                ..
-            }) => {
-                assert_eq!(expected, "test2");
-                assert_eq!(actual, "test3");
-            }
-            _ => panic!("Unexpected error type: {:?}", result.errors[0]),
-        }
     }
 
     #[test]
@@ -956,11 +979,17 @@ mod tests {
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors with nested literal items, got: {:?}",
             result.errors
         );
@@ -993,11 +1022,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1035,11 +1070,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1077,11 +1118,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1114,8 +1161,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1193,8 +1245,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert!(!result.errors.is_empty());
         assert_eq!(result.value, json!({}));
@@ -1243,8 +1300,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert!(!result.errors.is_empty());
         assert_eq!(result.value, json!({})); // we stop early. TODO: capture as much as we can
@@ -1294,11 +1356,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1329,11 +1397,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1395,8 +1469,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(schema_cursor.node().kind(), "tight_list");
         assert_eq!(input_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
         // even with eof=false we should know that there is an error by now
 
         assert_eq!(result.errors.len(), 1, "Expected an error");
@@ -1445,11 +1524,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1485,11 +1570,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1546,11 +1637,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors, got: {:?}",
             result.errors
         );
@@ -1609,8 +1706,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1643,12 +1745,18 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         // Should stop at max (3) and not validate the 4th item
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Should not error when max is reached, just stop validating"
         );
 
@@ -1681,11 +1789,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors for valid non-nested list"
         );
         assert_eq!(result.value, json!({"test": ["test1", "test2", "test3"]}));
@@ -1708,8 +1822,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1738,8 +1857,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
         assert_eq!(result.errors, vec![]);
         assert_eq!(result.value, json!({"test": ["test1", "test2"]}));
@@ -1765,18 +1889,29 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Should not error when got_eof is false, just stop at max"
         );
         assert_eq!(result.value, json!({"test": ["test1", "test2"]}));
 
         // Negative case with EOF: should error when exceeding max
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1820,11 +1955,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors when list meets minimum"
         );
         assert_eq!(
@@ -1851,8 +1992,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert!(
             !result.errors.is_empty(),
@@ -1884,11 +2030,17 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, false);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            false,
+        );
 
-        assert!(
-            result.errors.is_empty(),
+        assert_eq!(
+            result.errors,
+            vec![],
             "Expected no errors for unlimited matcher"
         );
         assert_eq!(
@@ -1912,8 +2064,13 @@ Footer: test (footer isn't validated with_list_vs_list)
 
         // Handle case where input might not have a list at all
         if input_cursor.goto_first_child() {
-            let result =
-                validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+            let result = validate_list_cursors(
+                &input_cursor,
+                &schema_cursor,
+                schema_str,
+                input_str,
+                true,
+            );
 
             assert!(
                 result.errors.is_empty() || result.errors[0].to_string().contains("kind"),
@@ -1954,16 +2111,21 @@ Footer: test (footer isn't validated with_list_vs_list)
 
         // Walk to the tight_list node under the heading, then ensure we're at the first list_item
         schema_cursor.goto_first_child(); // document -> tight_list
-        ensure_at_first_list_item(&mut schema_cursor);
+        ensure_at_first_list_item(&mut schema_cursor).unwrap();
 
         input_cursor.goto_first_child(); // document -> tight_list
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
 
         assert_eq!(input_cursor.node().kind(), "list_item");
         assert_eq!(schema_cursor.node().kind(), "list_item");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert_eq!(result.errors.len(), 1);
         assert_eq!(
@@ -1996,19 +2158,24 @@ Footer: test (footer isn't validated with_list_vs_list)
         // Walk to the tight_list node under the heading, then ensure we're at the first list_item
         schema_cursor.goto_first_child(); // document -> heading
         schema_cursor.goto_next_sibling(); // heading -> tight_list
-        ensure_at_first_list_item(&mut schema_cursor);
+        ensure_at_first_list_item(&mut schema_cursor).unwrap();
 
         input_cursor.goto_first_child(); // document -> heading
         input_cursor.goto_next_sibling(); // heading -> tight_list
-        ensure_at_first_list_item(&mut input_cursor);
+        ensure_at_first_list_item(&mut input_cursor).unwrap();
 
         assert_eq!(input_cursor.node().kind(), "list_item");
         assert_eq!(schema_cursor.node().kind(), "list_item");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
-        assert!(result.errors.is_empty());
+        assert_eq!(result.errors, vec![]);
     }
 
     #[test]
@@ -2049,8 +2216,13 @@ Footer: test (footer isn't validated with_list_vs_list)
         assert_eq!(input_cursor.node().kind(), "tight_list");
         assert_eq!(schema_cursor.node().kind(), "tight_list");
 
-        let result =
-            validate_list_vs_list(&input_cursor, &schema_cursor, schema_str, input_str, true);
+        let result = validate_list_cursors(
+            &input_cursor,
+            &schema_cursor,
+            schema_str,
+            input_str,
+            true,
+        );
 
         assert_eq!(result.errors, vec![]);
 

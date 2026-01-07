@@ -54,7 +54,7 @@ pub fn expected_input_nodes(
 
         correction_count += match at_coalescing_matcher(&schema_cursor, schema_str)? {
             Some(at_coalescing) => {
-                let has_extra_text = has_extra_text(&schema_cursor, schema_str);
+                let has_extra_text = has_extra_text(&schema_cursor, schema_str)?;
 
                 if at_coalescing {
                     if !has_extra_text {
@@ -114,29 +114,43 @@ fn next_is_non_text(schema_cursor: &TreeCursor) -> bool {
 ///                 | - no -> T
 ///                 | - yes -> F
 /// ```
-fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> bool {
-    debug_assert!(is_code_node(&schema_cursor.node()));
+fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> Result<bool, ValidationError> {
+    if !is_code_node(&schema_cursor.node()) {
+        return Err(crate::invariant_violation!(
+            schema_cursor,
+            schema_cursor,
+            "expected code node when checking matcher extra text"
+        ));
+    }
 
     let mut lookahead_cursor = schema_cursor.clone();
     match at_coalescing_matcher(schema_cursor, schema_str).unwrap_or(Some(false)) {
         Some(is_literal) => {
-            let had_next_matcher = move_cursor_to_next_matcher(&mut lookahead_cursor, schema_str);
+            let had_next_matcher = move_cursor_to_next_matcher(&mut lookahead_cursor, schema_str)?;
 
-            let text_after_matcher = text_after_matcher(schema_cursor, schema_str) != "";
+            let has_text_after_matcher = text_after_matcher(schema_cursor, schema_str)? != "";
 
-            if text_after_matcher {
-                true
-            } else if is_literal {
-                match at_coalescing_matcher(&lookahead_cursor, schema_str).unwrap_or(Some(false)) {
-                    Some(next_matcher_is_literal) if had_next_matcher => !next_matcher_is_literal,
-                    Some(_) => text_after_matcher,
-                    None => text_after_matcher,
-                }
-            } else {
-                false
+            if has_text_after_matcher {
+                return Ok(true);
             }
+
+            if is_literal {
+                let next_is_literal =
+                    match at_coalescing_matcher(&lookahead_cursor, schema_str)
+                        .unwrap_or(Some(false))
+                    {
+                        Some(next_matcher_is_literal) => next_matcher_is_literal,
+                        None => false,
+                    };
+                if !had_next_matcher {
+                    return Ok(false);
+                };
+                return Ok(had_next_matcher && !next_is_literal);
+            }
+
+            Ok(false)
         }
-        None => false, // not even at matcher to begin with. TODO: should we error here?
+        None => Ok(false), // not even at matcher to begin with. TODO: should we error here?
     }
 }
 
@@ -144,20 +158,29 @@ fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> bool {
 ///
 /// The cursor must be pointing at a code node, which is the matcher, and this
 /// gets all the text that comes after the next node's matcher extras.
-fn text_after_matcher<'a>(schema_cursor: &TreeCursor, schema_str: &'a str) -> &'a str {
-    debug_assert!(is_code_node(&schema_cursor.node()));
+fn text_after_matcher<'a>(
+    schema_cursor: &TreeCursor,
+    schema_str: &'a str,
+) -> Result<&'a str, ValidationError> {
+    if !is_code_node(&schema_cursor.node()) {
+        return Err(crate::invariant_violation!(
+            schema_cursor,
+            schema_cursor,
+            "expected code node when reading matcher suffix text"
+        ));
+    }
 
     match get_next_node(&schema_cursor) {
         Some(next_node) => {
             if !is_text_node(&next_node) {
-                return "";
+                return Ok("");
             }
 
             let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
 
-            get_after_extras(next_node_str).unwrap_or("")
+            Ok(get_after_extras(next_node_str).unwrap_or(""))
         }
-        None => "",
+        None => Ok(""),
     }
 }
 
@@ -165,16 +188,25 @@ fn text_after_matcher<'a>(schema_cursor: &TreeCursor, schema_str: &'a str) -> &'
 ///
 /// The cursor must be pointing at a code node, which is the matcher, and this
 /// gets all the extras for it.
-fn extras_after_matcher<'a>(schema_cursor: &TreeCursor, schema_str: &'a str) -> &'a str {
-    debug_assert!(is_code_node(&schema_cursor.node()));
+fn extras_after_matcher<'a>(
+    schema_cursor: &TreeCursor,
+    schema_str: &'a str,
+) -> Result<&'a str, ValidationError> {
+    if !is_code_node(&schema_cursor.node()) {
+        return Err(crate::invariant_violation!(
+            schema_cursor,
+            schema_cursor,
+            "expected code node when reading matcher extras"
+        ));
+    }
 
     match get_next_node(&schema_cursor) {
         Some(next_node) => {
             let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
 
-            get_all_extras(next_node_str).unwrap_or("")
+            Ok(get_all_extras(next_node_str).unwrap_or(""))
         }
-        None => "",
+        None => Ok(""),
     }
 }
 
@@ -226,17 +258,26 @@ fn next_at_coalescing_matcher(
 
 /// Assuming the cursor is at a matcher, move it forward to the next text node,
 /// then move it forward to the next code span.
-fn move_cursor_to_next_matcher(schema_cursor: &mut TreeCursor, schema_str: &str) -> bool {
-    let extras_after_matcher = extras_after_matcher(schema_cursor, schema_str) != "";
+fn move_cursor_to_next_matcher(
+    schema_cursor: &mut TreeCursor,
+    schema_str: &str,
+) -> Result<bool, ValidationError> {
+    let extras_after_matcher = extras_after_matcher(schema_cursor, schema_str)? != "";
 
     // If there was extras after the matcher, that means we should skip to the
     // next next node
     if extras_after_matcher {
-        schema_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling()
+        if !schema_cursor.goto_next_sibling() || !schema_cursor.goto_next_sibling() {
+            return Ok(false);
+        }
     } else {
         // Otherwise just go to the next node
-        schema_cursor.goto_next_sibling()
+        if !schema_cursor.goto_next_sibling() {
+            return Ok(false);
+        }
     }
+
+    Ok(is_code_node(&schema_cursor.node()))
 }
 
 #[cfg(test)]
@@ -262,7 +303,7 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child();
         schema_cursor.goto_first_child();
-        has_extra_text(&schema_cursor, schema_str)
+        has_extra_text(&schema_cursor, schema_str).unwrap()
     }
 
     fn get_text_after_matcher<'a>(schema_str: &'a str) -> &'a str {
@@ -270,7 +311,7 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child();
         schema_cursor.goto_first_child();
-        text_after_matcher(&schema_cursor, schema_str)
+        text_after_matcher(&schema_cursor, schema_str).unwrap()
     }
 
     fn get_extras_after_matcher<'a>(schema_str: &'a str) -> &'a str {
@@ -278,7 +319,7 @@ mod tests {
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child();
         schema_cursor.goto_first_child();
-        extras_after_matcher(&schema_cursor, schema_str)
+        extras_after_matcher(&schema_cursor, schema_str).unwrap()
     }
 
     fn get_at_literal_matcher(schema_str: &str) -> Option<bool> {
