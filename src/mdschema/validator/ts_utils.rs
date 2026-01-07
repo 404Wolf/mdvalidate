@@ -660,7 +660,6 @@ mod tests {
         cursor.goto_first_child(); // atx_heading
         cursor.goto_next_sibling(); // paragraph
         cursor.goto_first_child(); // text node (last node)
-        dbg!(is_text_node(&cursor.node()));
 
         assert!(is_last_node(input, &cursor.node()));
     }

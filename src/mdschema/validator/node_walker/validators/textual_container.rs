@@ -20,7 +20,7 @@ use crate::mdschema::validator::{
         get_next_node, get_node_text, is_inline_code_node, is_text_node,
     },
 };
-use crate::{invariant_violation, trace_cursors};
+use crate::{invariant_violation};
 
 /// Validate a textual region of input against a textual region of schema.
 ///
@@ -141,13 +141,10 @@ fn validate_textual_container_vs_textual_container_impl(
         let pair_result = if both_are_link_nodes(&input_cursor.node(), &schema_cursor.node())
             || both_are_image_nodes(&input_cursor.node(), &schema_cursor.node())
         {
-            trace_cursors!(schema_cursor, input_cursor);
             let result = LinkVsLinkValidator::validate(
                 &walker.with_cursors(&input_cursor, &schema_cursor),
                 got_eof,
             );
-            dbg!(&result);
-            trace_cursors!(schema_cursor, input_cursor);
             result
         } else {
             TextualVsTextualValidator::validate(
