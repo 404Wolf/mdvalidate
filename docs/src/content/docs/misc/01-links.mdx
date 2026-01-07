@@ -42,17 +42,17 @@ Images work the same way:
 
 ## Link Text with Matchers
 
-Use matchers in the link text:
+To use matchers in links, within the link segements surround a matcher with "\{" s.
 
 <SchemaAndInput
-  schema={"[`text:/\\w+/`](https://example.com)"}
+  schema={"[{text:/\\w+/}](https://example.com)"}
   input={"[Hello](https://example.com)"}
   valid={true}
   output={'{"text":"Hello"}'}
 />
 
 <SchemaAndInput
-  schema={"[`text:/\\w+/`](https://example.com)"}
+  schema={"[{text:/\\w+/}](https://example.com)"}
   input={"[123](https://example.com)"}
   valid={true}
   output={'{"text":"123"}'}
@@ -63,14 +63,14 @@ Use matchers in the link text:
 Use matchers in the URL:
 
 <SchemaAndInput
-  schema={"[Click here](`url:/https?:\\/\\/.+/`)"}
+  schema={"[Click here]({url:/https?:\\/\\/.+/})"}
   input={"[Click here](https://example.com)"}
   valid={true}
   output={'{"url":"https://example.com"}'}
 />
 
 <SchemaAndInput
-  schema={"[Documentation](`page:/\\/docs\\/.+/`)"}
+  schema={"[Documentation]({page:/\\/docs\\/.+/})"}
   input={"[Documentation](/docs/getting-started)"}
   valid={true}
   output={'{"page":"/docs/getting-started"}'}
@@ -81,7 +81,7 @@ Use matchers in the URL:
 Use matchers in image alt text:
 
 <SchemaAndInput
-  schema={"![`alt:/\\w+/`](image.png)"}
+  schema={"![{alt:/\\w+/}](image.png)"}
   input={"![logo](image.png)"}
   valid={true}
   output={'{"alt":"logo"}'}
@@ -92,14 +92,14 @@ Use matchers in image alt text:
 Use matchers in image paths:
 
 <SchemaAndInput
-  schema={"![Logo](`img:/images\\/.+\\.png/`)"}
+  schema={"![Logo]({img:/images\\/.+\\.png/})"}
   input={"![Logo](images/logo.png)"}
   valid={true}
   output={'{"img":"images/logo.png"}'}
 />
 
 <SchemaAndInput
-  schema={"![Logo](`img:/images\\/.+\\.png/`)"}
+  schema={"![Logo]({img:/images\\/.+\\.png/})"}
   input={"![Logo](images/icon.jpg)"}
   valid={false}
 />
@@ -109,14 +109,14 @@ Use matchers in image paths:
 Combine matchers in both positions:
 
 <SchemaAndInput
-  schema={"[`text:/\\w+/`](`url:/https?:\\/\\/.+/`)"}
+  schema={"[{text:/\\w+/}]({url:/https?:\\/\\/.+/})"}
   input={"[Home](https://example.com)"}
   valid={true}
   output={'{"text":"Home","url":"https://example.com"}'}
 />
 
 <SchemaAndInput
-  schema={"![`alt:/\\w+/`](`path:/.+\\.png/`)"}
+  schema={"![{alt:/\\w+/}]({path:/.+\\.png/})"}
   input={"![icon](assets/icon.png)"}
   valid={true}
   output={'{"alt":"icon","path":"assets/icon.png"}'}
