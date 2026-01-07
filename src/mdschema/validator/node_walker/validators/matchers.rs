@@ -682,15 +682,18 @@ mod tests {
     fn test_validate_matcher_vs_text_with_prefix_no_suffix() {
         let schema_str = "prefix `test:/test/`";
         let input_str = "prefix test";
-        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-            .walk()
-            .goto_first_child_then_unwrap()
-            .goto_first_child_then_unwrap()
-            .validate_complete();
 
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({"test": "test"}));
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 2));
+        let (value, errors, farthest_reached_pos) =
+            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .goto_first_child_then_unwrap()
+                .validate_complete()
+                .destruct();
+
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({"test": "test"}));
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 2));
 
         let schema_tree = parse_markdown(schema_str).unwrap();
         let input_tree = parse_markdown(input_str).unwrap();
@@ -702,15 +705,17 @@ mod tests {
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let textual_result = TextualVsTextualValidator::validate(
+        let (value, errors, _) = TextualVsTextualValidator::validate(
             &input_cursor,
             &schema_cursor,
             schema_str,
             input_str,
             true,
-        );
+        )
+        .destruct();
 
-        assert_eq!(textual_result, result);
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({"test": "test"}));
     }
 
     #[test]

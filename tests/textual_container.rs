@@ -46,3 +46,11 @@ test_case!(
     json!({}),
     vec![]
 );
+
+test_case!(
+    heading_link_and_text_matchers,
+    r#"# [hi]({url:/.*/}) `other:/\w+/`"#,
+    r#"# [hi](https://example.com) hi"#,
+    json!({"url": "https://example.com", "other": "hi"}),
+    vec![]
+);

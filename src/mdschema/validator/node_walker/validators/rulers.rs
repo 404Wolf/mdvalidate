@@ -75,18 +75,21 @@ mod tests {
     fn test_validate_ruler_vs_ruler() {
         let schema_str = "---";
         let input_str = "---";
-        let result = ValidatorTester::<RulerVsRulerValidator>::from_strs(schema_str, input_str)
-            .walk()
-            .goto_first_child_then_unwrap()
-            .peek_nodes(|(i, s)| {
-                assert!(is_ruler_node(i));
-                assert!(is_ruler_node(s));
-            })
-            .validate_complete();
 
-        assert_eq!(result.errors, vec![], "Errors found: {:?}", result.errors);
+        let (value, errors, _) =
+            ValidatorTester::<RulerVsRulerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| {
+                    assert!(is_ruler_node(i));
+                    assert!(is_ruler_node(s));
+                })
+                .validate_complete()
+                .destruct();
+
+        assert_eq!(errors, vec![], "Errors found: {:?}", errors);
         // Rulers don't capture matches
-        assert_eq!(result.value, json!({}));
+        assert_eq!(value, json!({}));
     }
 
     #[test]
@@ -101,24 +104,26 @@ mod tests {
         ];
 
         for (schema_str, input_str) in test_cases {
-            let result = ValidatorTester::<RulerVsRulerValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| {
-                    assert!(is_ruler_node(i));
-                    assert!(is_ruler_node(s));
-                })
-                .validate_complete();
+            let (value, errors, _) =
+                ValidatorTester::<RulerVsRulerValidator>::from_strs(schema_str, input_str)
+                    .walk()
+                    .goto_first_child_then_unwrap()
+                    .peek_nodes(|(i, s)| {
+                        assert!(is_ruler_node(i));
+                        assert!(is_ruler_node(s));
+                    })
+                    .validate_complete()
+                    .destruct();
 
             assert_eq!(
-                result.errors,
+                errors,
                 vec![],
                 "Expected no errors for schema '{}' and input '{}', got: {:?}",
                 schema_str,
                 input_str,
-                result.errors
+                errors
             );
-            assert_eq!(result.value, json!({}));
+            assert_eq!(value, json!({}));
         }
     }
 }

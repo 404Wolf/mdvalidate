@@ -36,6 +36,9 @@ fn validate_link_vs_link_impl(
 ) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
+    let link_schema_cursor = schema_cursor.clone();
+    let link_input_cursor = input_cursor.clone();
+
     let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();
 
@@ -138,6 +141,8 @@ fn validate_link_vs_link_impl(
     if let Some(pos) = link_child_pos(&schema_cursor, &input_cursor) {
         result.keep_farther_pos(&pos);
     }
+
+    result.sync_cursor_pos(&link_schema_cursor, &link_input_cursor);
 
     result
 }

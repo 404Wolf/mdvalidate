@@ -126,3 +126,58 @@ pub(super) fn validate_textual_vs_textual_direct(
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::TextualVsTextualValidator;
+    use crate::mdschema::validator::{
+        node_walker::validators::test_utils::ValidatorTester,
+        ts_utils::{is_code_node, is_text_node},
+        validator_state::NodePosPair,
+    };
+
+    #[test]
+    fn test_validate_textual_vs_textual_with_literal_matcher() {
+        let schema_str = "`code`! test";
+        let input_str = "`code` test";
+
+        let (value, errors, _) =
+            ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(input, schema)| {
+                    assert!(is_code_node(input));
+                    assert!(is_code_node(schema));
+                })
+                .validate_complete()
+                .destruct();
+
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({}));
+    }
+
+    #[test]
+    fn test_validate_textual_vs_textual_with_incomplete_matcher() {
+        let schema_str = "prefix `test:/test/`";
+        let input_str = "prefix `test:/te";
+
+        let (value, errors, farthest_reached_pos) =
+            ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(input, schema)| {
+                    assert!(is_text_node(input));
+                    assert!(is_text_node(schema));
+                })
+                .validate_incomplete()
+                .destruct();
+
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({}));
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(2, 2));
+    }
+}

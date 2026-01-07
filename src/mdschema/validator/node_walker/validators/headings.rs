@@ -190,18 +190,20 @@ mod tests {
         let schema_str = "# Heading";
         let input_str = "# Heading";
 
-        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
-            .walk()
-            .goto_first_child_then_unwrap()
-            .peek_nodes(|(i, s)| {
-                assert!(is_heading_node(i));
-                assert!(is_heading_node(s));
-            })
-            .validate_complete();
+        let (value, errors, farthest_reached_pos) =
+            ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| {
+                    assert!(is_heading_node(i));
+                    assert!(is_heading_node(s));
+                })
+                .validate_complete()
+                .destruct();
 
-        assert_eq!(result.value, json!({})); // No real match content
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
+        assert_eq!(value, json!({})); // No real match content
+        assert_eq!(errors, vec![]);
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
     }
 
     #[test]
@@ -209,33 +211,29 @@ mod tests {
         let schema_str = "# Heading";
         let input_str = "## Heading";
 
-        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
-            .walk()
-            .goto_first_child_then_unwrap()
-            .peek_nodes(|(i, s)| {
-                assert!(is_heading_node(i));
-                assert!(is_heading_node(s));
-            })
-            .validate_complete();
-        assert_eq!(result.value, json!({}));
-        assert_eq!(result.errors.len(), 1);
-        match &result.errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::NodeTypeMismatch {
-                schema_index,
-                input_index,
-                expected,
-                actual,
-            }) => {
-                assert_eq!(*schema_index, 1);
-                assert_eq!(*input_index, 1);
-                assert_eq!(expected, "atx_heading(atx_h1_marker)");
-                assert_eq!(actual, "atx_heading(atx_h2_marker)");
-            }
-            _ => panic!(
-                "Expected SchemaViolation(NodeTypeMismatch), got {:?}",
-                result.errors[0]
-            ),
-        }
+        let (value, errors, _) =
+            ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| {
+                    assert!(is_heading_node(i));
+                    assert!(is_heading_node(s));
+                })
+                .validate_complete()
+                .destruct();
+
+        assert_eq!(value, json!({}));
+        assert_eq!(
+            errors,
+            vec![ValidationError::SchemaViolation(
+                SchemaViolationError::NodeTypeMismatch {
+                    schema_index: 1,
+                    input_index: 1,
+                    expected: "atx_heading(atx_h1_marker)".to_string(),
+                    actual: "atx_heading(atx_h2_marker)".to_string(),
+                }
+            )]
+        );
     }
     // TODO: tests for got_eof=false
 }

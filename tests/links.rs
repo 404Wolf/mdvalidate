@@ -46,3 +46,11 @@ test_case!(
         }
     )]
 );
+
+test_case!(
+    link_inside_heading,
+    r#"# [hi]({url:/.*/}) `other:/.*/`"#,
+    r#"# [hi](https://example.com) hi"#,
+    json!({"url": "https://example.com", "other": "hi"}),
+    vec![]
+);

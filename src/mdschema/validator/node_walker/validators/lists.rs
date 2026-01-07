@@ -930,64 +930,51 @@ mod tests {
         let input_str = "- test1\n  - nested_different";
         let result = validate_lists(schema_str, input_str, false);
 
-        assert!(
-            !result.errors.is_empty(),
-            "Expected errors with mismatched nested literal items"
+        assert_eq!(
+            result.errors,
+            vec![ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    kind: NodeContentMismatchKind::Literal,
+                    schema_index: 10,
+                    input_index: 10,
+                    expected: "nested1".into(),
+                    actual: "nested_different".into(),
+                }
+            )],
+            "Expected NodeContentMismatch error with nested literal items"
         );
+    }
 
-        match &result.errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                kind: NodeContentMismatchKind::Literal,
-                expected,
-                actual,
-                ..
-            }) => {
-                assert_eq!(expected, "nested1");
-                assert_eq!(actual, "nested_different");
-            }
-            _ => panic!("Unexpected error type: {:?}", result.errors[0]),
-        }
+    #[test]
+    fn test_link_in_list_item() {
+        let schema_str = "- [link]({url:/.*/})";
+        let input_str = "- [link](https://404wolf.com)";
+
+        let result = validate_lists(schema_str, input_str, false);
+
+        assert_eq!(result.errors, vec![],);
+        assert_eq!(result.value, json!({"url": "https://404wolf.com"}));
     }
 
     #[test]
     fn test_validate_list_vs_list_literal_list_items_with_nesting_mismatch_and_more() {
         let schema_str = "- test1\n  - nested1\n- test2";
-        // (document[0]0..28)
-        // └─ (tight_list[1]0..27)
-        //    ├─ (list_item[2]0..19)
-        //    │  ├─ (list_marker[3]0..1)
-        //    │  ├─ (paragraph[4]2..7)
-        //    │  │  └─ (text[5]2..7)
-        //    │  └─ (tight_list[6]10..19)
-        //    │     └─ (list_item[7]10..19)
-        //    │        ├─ (list_marker[8]10..11)
-        //    │        └─ (paragraph[9]12..19)
-        //    │           └─ (text[10]12..19)
-        //    └─ (list_item[11]20..27)
-        //       ├─ (list_marker[12]20..21)
-        //       └─ (paragraph[13]22..27)
-        //          └─ (text[14]22..27)
-
         let input_str = "- test1\n  - nested1\n- test3";
         let result = validate_lists(schema_str, input_str, false);
 
-        assert!(
-            !result.errors.is_empty(),
-            "Expected errors with mismatched nested literal items"
+        assert_eq!(
+            result.errors,
+            vec![ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    kind: NodeContentMismatchKind::Literal,
+                    schema_index: 14,
+                    input_index: 14,
+                    expected: "test2".into(),
+                    actual: "test3".into(),
+                }
+            )],
+            "Expected NodeContentMismatch error with mismatched literal items"
         );
-
-        match &result.errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
-                kind: NodeContentMismatchKind::Literal,
-                expected,
-                actual,
-                ..
-            }) => {
-                assert_eq!(expected, "test2");
-                assert_eq!(actual, "test3");
-            }
-            _ => panic!("Unexpected error type: {:?}", result.errors[0]),
-        }
     }
 
     #[test]
