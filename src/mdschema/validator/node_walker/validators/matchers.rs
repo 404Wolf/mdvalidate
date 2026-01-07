@@ -15,7 +15,7 @@ use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
-    get_next_node, get_node_n_nodes_ahead, is_inline_code_node, is_text_node, waiting_at_end,
+    get_next_node, get_node_n_nodes_ahead, get_node_text, is_inline_code_node, is_text_node, waiting_at_end,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
@@ -362,7 +362,7 @@ fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> Val
         // Everything that comes after the matcher
         let schema_suffix = {
             let text_node_after_code_node_str_contents =
-                schema_suffix_node.utf8_text(schema_str.as_bytes()).unwrap();
+                get_node_text(&schema_suffix_node, schema_str);
             // All text after the matcher node and maybe the text node right after it ("extras")
             get_after_extras(text_node_after_code_node_str_contents).unwrap()
         };
@@ -529,10 +529,10 @@ pub(super) fn validate_literal_matcher_vs_textual(
         );
     }
 
-    let schema_node_str = schema_cursor
-        .node()
-        .utf8_text(schema_str.as_bytes())
-        .unwrap();
+    let schema_node_str = get_node_text(
+        &schema_cursor.node(),
+        schema_str,
+    );
 
     let schema_node_str_has_more_than_extras = schema_node_str.len() > 1;
 

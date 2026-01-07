@@ -31,6 +31,22 @@ impl<T: ValidatorImpl> Validator for T {
     }
 }
 
+#[macro_export]
+macro_rules! trace_cursors {
+    ($schema_cursor:expr, $input_cursor:expr) => {
+        {
+            let schema_idx = $schema_cursor.descendant_index();
+            let input_idx = $input_cursor.descendant_index();
+
+            eprintln!(
+                "(S={}, I={})",
+                schema_idx,
+                input_idx
+            );
+        }
+    };
+}
+
 #[cfg(test)]
 mod test_utils {
     use tree_sitter::{Node, Tree, TreeCursor};
@@ -117,6 +133,13 @@ mod test_utils {
         {
             f((&self.input_cursor.node(), &self.schema_cursor.node()));
             self
+        }
+
+        pub fn panic_print(&mut self) -> &mut Self {
+            self.print();
+            panic!();
+            #[allow(unreachable_code)]
+            return &mut self;
         }
 
         pub fn print(&mut self) -> &mut Self {

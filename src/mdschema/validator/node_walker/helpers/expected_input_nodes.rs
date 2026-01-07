@@ -7,7 +7,7 @@ use crate::mdschema::validator::{
         matcher::{Matcher, MatcherError},
         matcher_extras::{get_after_extras, get_all_extras},
     },
-    ts_utils::{get_next_node, is_inline_code_node, is_text_node},
+    ts_utils::{get_next_node, get_node_text, is_inline_code_node, is_text_node},
 };
 
 /// Determine the number of nodes we expect in some corresponding input string.
@@ -178,7 +178,7 @@ fn text_after_matcher<'a>(
                 return Ok("");
             }
 
-            let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
+            let next_node_str = get_node_text(&next_node, schema_str);
 
             Ok(get_after_extras(next_node_str).unwrap_or(""))
         }
@@ -205,7 +205,7 @@ fn extras_after_matcher<'a>(
 
     match get_next_node(&schema_cursor) {
         Some(next_node) => {
-            let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
+            let next_node_str = get_node_text(&next_node, schema_str);
 
             Ok(get_all_extras(next_node_str).unwrap_or(""))
         }

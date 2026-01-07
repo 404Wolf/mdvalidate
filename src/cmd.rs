@@ -175,7 +175,7 @@ mod tests {
     use super::*;
     use std::io::{self, Cursor, Read};
 
-    fn get_validator<R: Read>(
+    fn run_validation<R: Read>(
         schema: &String,
         mut input: R,
         fast_fail: bool,
@@ -250,7 +250,7 @@ mod tests {
         let input_data = "# Hi there!";
         let reader = Cursor::new(input_data.as_bytes());
 
-        let (errors, _) = get_validator(&schema_str, reader, false);
+        let (errors, _) = run_validation(&schema_str, reader, false);
         assert_eq!(errors, vec![]);
     }
 
@@ -261,7 +261,7 @@ mod tests {
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 2);
 
-        let (errors, _) = get_validator(&schema_str, reader, false);
+        let (errors, _) = run_validation(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content"
@@ -275,7 +275,7 @@ mod tests {
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 1000);
 
-        let (errors, _) = get_validator(&schema_str, reader, false);
+        let (errors, _) = run_validation(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content"
@@ -313,7 +313,7 @@ This is a shopping list:
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 4);
 
-        let (errors, _) = get_validator(&schema_str, reader, false);
+        let (errors, _) = run_validation(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "should have no errors but found: {:?}",
@@ -343,7 +343,7 @@ This is a test"#;
             let cursor = Cursor::new(input_data.as_bytes());
             let reader = LimitedReader::new(cursor, cursor_size);
 
-            let (errors, matches) = get_validator(&schema_str, reader, false);
+            let (errors, matches) = run_validation(&schema_str, reader, false);
             assert_eq!(
                 errors.len(),
                 1,

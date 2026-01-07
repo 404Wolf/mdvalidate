@@ -8,11 +8,11 @@ use crate::mdschema::validator::errors::{
 use crate::mdschema::validator::matcher::matcher::MatcherError;
 use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::mdschema::validator::node_walker::helpers::curly_matchers::extract_matcher_from_curly_delineated_text;
 use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
+use crate::mdschema::validator::node_walker::helpers::curly_matchers::extract_matcher_from_curly_delineated_text;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
-    is_image_node, is_link_destination_node, is_link_node, waiting_at_end,
+    both_are_text_nodes, is_image_node, is_link_destination_node, is_link_node, waiting_at_end,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
@@ -34,9 +34,6 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     let schema_str = walker.schema_str();
     let input_str = walker.input_str();
 
-    let link_schema_cursor = walker.schema_cursor().clone();
-    let link_input_cursor = walker.input_cursor().clone();
-
     let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
 
@@ -51,6 +48,8 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         result.add_error(error);
         return result;
     }
+
+    let link_input_cursor = input_cursor.clone();
 
     #[cfg(feature = "invariant_violations")]
     if !input_cursor.goto_first_child() || !schema_cursor.goto_first_child() {
@@ -73,6 +72,7 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             got_eof,
         );
         result.join_other_result(&destination_result);
+
         if destination_result.has_errors() {
             return result;
         }
@@ -112,9 +112,7 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             got_eof,
         );
         result.join_other_result(&destination_result);
-        if destination_result.has_errors() {
-            return result;
-        }
+        // Don't return early since we want to move the cursor (20 lines down) first
     } else if let Some(error) = compare_link_child_text(
         &schema_cursor,
         &input_cursor,
@@ -126,11 +124,13 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         return result;
     }
 
-    if let Some(pos) = link_child_pos(&schema_cursor, &input_cursor) {
+    if !waiting_at_end(got_eof, input_str, &link_input_cursor)
+        && let Some(pos) = link_child_pos(&schema_cursor, &input_cursor)
+    {
         result.keep_farther_pos(&pos);
+    } else {
+        result.sync_cursor_pos(&schema_cursor, &input_cursor);
     }
-
-    result.sync_cursor_pos(&link_schema_cursor, &link_input_cursor);
 
     result
 }
@@ -203,14 +203,14 @@ fn validate_link_destination(
         }
     }
 
-    let schema_text = match schema_text_cursor.node().utf8_text(schema_str.as_bytes()) {
-        Ok(text) => text,
-        Err(_) => return result,
-    };
-    let input_text = match input_text_cursor.node().utf8_text(input_str.as_bytes()) {
-        Ok(text) => text,
-        Err(_) => return result,
-    };
+    let schema_text = schema_text_cursor
+        .node()
+        .utf8_text(schema_str.as_bytes())
+        .unwrap();
+    let input_text = input_text_cursor
+        .node()
+        .utf8_text(input_str.as_bytes())
+        .unwrap();
 
     let is_partial_match = waiting_at_end(got_eof, input_str, &input_text_cursor);
 
@@ -290,6 +290,15 @@ fn link_child_pos(schema_cursor: &TreeCursor, input_cursor: &TreeCursor) -> Opti
         return None;
     }
 
+    #[cfg(feature = "invariant_violations")]
+    if !both_are_text_nodes(&input_text_cursor.node(), &schema_text_cursor.node()) {
+        invariant_violation!(
+            &input_text_cursor,
+            &schema_text_cursor,
+            "link child nodes must both be text nodes"
+        );
+    }
+
     Some(NodePosPair::from_cursors(
         &schema_text_cursor,
         &input_text_cursor,
@@ -300,7 +309,9 @@ fn link_child_pos(schema_cursor: &TreeCursor, input_cursor: &TreeCursor) -> Opti
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
+    use crate::mdschema::validator::{
+        node_pos_pair::NodePosPair, node_walker::validators::test_utils::ValidatorTester,
+    };
 
     use super::LinkVsLinkValidator;
 
@@ -309,16 +320,24 @@ mod tests {
         let schema_str = "[hi](https://test.com)";
         let input_str = "[hi](https://test.com)";
 
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let tester = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str);
+        let mut tester_walker = tester.walk();
+        tester_walker
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap();
+
+        let (value, errors, farthest_reached_pos) = tester_walker.validate_incomplete().destruct();
 
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
+        // Don't go "inside" the link source unless we are EOF. If we are EOF we scrape all the way to the very very end.
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 5));
+
+        let (value, errors, farthest_reached_pos) = tester_walker.validate_complete().destruct();
+
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({}));
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 6))
     }
 
     #[test]
@@ -326,7 +345,7 @@ mod tests {
         let schema_str = "[hi](https://test.com)";
         let input_str = "[hi](https://different.com)";
 
-        let (_value, errors, _) =
+        let (_, errors, farthest_reached_pos) =
             ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
@@ -335,6 +354,7 @@ mod tests {
                 .destruct();
 
         assert!(!errors.is_empty());
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 6));
     }
 
     #[test]

@@ -1,6 +1,5 @@
 use tree_sitter::TreeCursor;
 
-use crate::invariant_violation;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::*,
@@ -18,9 +17,10 @@ use crate::mdschema::validator::{
     },
     ts_utils::{
         both_are_image_nodes, both_are_link_nodes, both_are_textual_containers, count_siblings,
-        get_next_node, is_inline_code_node, is_text_node,
+        get_next_node, get_node_text, is_inline_code_node, is_text_node,
     },
 };
+use crate::{invariant_violation, trace_cursors};
 
 /// Validate a textual region of input against a textual region of schema.
 ///
@@ -69,7 +69,6 @@ fn validate_textual_container_vs_textual_container_impl(
     let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
     let schema_str = walker.schema_str();
-    let _input_str = walker.input_str();
 
     let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
@@ -142,10 +141,14 @@ fn validate_textual_container_vs_textual_container_impl(
         let pair_result = if both_are_link_nodes(&input_cursor.node(), &schema_cursor.node())
             || both_are_image_nodes(&input_cursor.node(), &schema_cursor.node())
         {
-            LinkVsLinkValidator::validate(
+            trace_cursors!(schema_cursor, input_cursor);
+            let result = LinkVsLinkValidator::validate(
                 &walker.with_cursors(&input_cursor, &schema_cursor),
                 got_eof,
-            )
+            );
+            dbg!(&result);
+            trace_cursors!(schema_cursor, input_cursor);
+            result
         } else {
             TextualVsTextualValidator::validate(
                 &walker.with_cursors(&input_cursor, &schema_cursor),
@@ -192,7 +195,7 @@ fn count_non_literal_matchers_in_children(
         let extras_str = match get_next_node(&cursor)
             .filter(|n| is_text_node(n))
             .map(|next_node| {
-                let next_node_str = next_node.utf8_text(schema_str.as_bytes()).unwrap();
+                let next_node_str = get_node_text(&next_node, schema_str);
                 get_all_extras(next_node_str)
             }) {
             Some(Ok(extras)) => Some(extras),
@@ -205,7 +208,7 @@ fn count_non_literal_matchers_in_children(
             None => None,
         };
 
-        let pattern_str = cursor.node().utf8_text(schema_str.as_bytes()).unwrap();
+        let pattern_str = get_node_text(&cursor.node(), schema_str);
 
         match Matcher::try_from_pattern_and_suffix_str(pattern_str, extras_str) {
             Ok(_) => count += 1,
@@ -240,7 +243,7 @@ mod tests {
         node_walker::validators::{
             test_utils::ValidatorTester, textual_container::count_non_literal_matchers_in_children,
         },
-        ts_utils::{both_are_list_items, both_are_paragraphs, is_heading_content_node, parse_markdown},
+        ts_utils::{is_heading_content_node, parse_markdown},
     };
 
     #[test]
@@ -298,25 +301,25 @@ mod tests {
         let schema_str = "# Test Wolf [hi](https://example.com)";
         let input_str = "# Test Wolf [hi](https://foobar.com)";
 
-        let (value, errors, _) =
-            ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
-                schema_str, input_str,
-            )
-            .walk()
-            .goto_first_child_then_unwrap()
-            .goto_first_child_then_unwrap()
-            .goto_next_sibling_then_unwrap()
-            .peek_nodes(|(input, schema)| {
-                let n = input;
-                assert!(is_heading_content_node(n));
-                let n = schema;
-                assert!(is_heading_content_node(n));
-            })
-            .validate_complete()
-            .destruct();
+        let (value, errors, farthest_pos) = ValidatorTester::<
+            TextualContainerVsTextualContainerValidator,
+        >::from_strs(schema_str, input_str)
+        .walk()
+        .goto_first_child_then_unwrap()
+        .goto_first_child_then_unwrap()
+        .goto_next_sibling_then_unwrap()
+        .peek_nodes(|(input, schema)| {
+            let n = input;
+            assert!(is_heading_content_node(n));
+            let n = schema;
+            assert!(is_heading_content_node(n));
+        })
+        .validate_complete()
+        .destruct();
 
         assert!(!errors.is_empty());
         assert_eq!(value, json!({}));
+        assert_eq!(farthest_pos, NodePosPair::from_pos(9, 9));
     }
 
     #[test]

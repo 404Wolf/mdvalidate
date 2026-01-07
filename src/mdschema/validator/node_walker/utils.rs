@@ -24,6 +24,14 @@ pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, 
 }
 
 pub fn pretty_print_cursor_pair(input_cursor: &TreeCursor, schema_cursor: &TreeCursor) -> String {
+    pretty_print_cursor_pair_with_highlight(input_cursor, schema_cursor, None)
+}
+
+pub fn pretty_print_cursor_pair_with_highlight(
+    input_cursor: &TreeCursor,
+    schema_cursor: &TreeCursor,
+    highlight_index: Option<usize>,
+) -> String {
     use tabled::{Table, Tabled, settings::Style};
 
     #[derive(Tabled)]
@@ -34,9 +42,19 @@ pub fn pretty_print_cursor_pair(input_cursor: &TreeCursor, schema_cursor: &TreeC
         input: String,
     }
 
+    let mut schema_str = schema_cursor.node().pretty_print();
+    let mut input_str = input_cursor.node().pretty_print();
+
+    if let Some(idx) = highlight_index {
+        // Mark the position with a dot
+        let marker = format!(" <-- Index {}", idx);
+        schema_str.push_str(&marker);
+        input_str.push_str(&marker);
+    }
+
     let content = Content {
-        schema: schema_cursor.node().pretty_print(),
-        input: input_cursor.node().pretty_print(),
+        schema: schema_str,
+        input: input_str,
     };
 
     Table::new(vec![content]).with(Style::blank()).to_string()
