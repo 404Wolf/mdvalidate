@@ -240,7 +240,7 @@ mod tests {
         node_walker::validators::{
             test_utils::ValidatorTester, textual_container::count_non_literal_matchers_in_children,
         },
-        ts_utils::{is_heading_content_node, parse_markdown},
+        ts_utils::{both_are_list_items, both_are_paragraphs, is_heading_content_node, parse_markdown},
     };
 
     #[test]
@@ -370,6 +370,4 @@ mod tests {
         assert_eq!(value, json!({"name": "Wolf"}));
         assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 4));
     }
-
-    // Tests for TextualVsTextualValidator live in textual.rs.
 }

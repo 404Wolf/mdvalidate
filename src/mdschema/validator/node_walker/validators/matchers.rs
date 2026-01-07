@@ -12,12 +12,12 @@ use crate::mdschema::validator::matcher::matcher::{Matcher, MatcherError};
 use crate::mdschema::validator::matcher::matcher_extras::get_after_extras;
 use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
     get_next_node, get_node_n_nodes_ahead, is_inline_code_node, is_text_node, waiting_at_end,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 
 use super::textual::validate_textual_vs_textual_direct;
 
@@ -266,11 +266,15 @@ fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> Val
                     input_byte_offset += matched_str.len();
 
                     // Good match! Add the matched node to the matches (if it has an id)
-                    if let Some(id) = matcher.id() {
-                        trace!("Storing match for id '{}': '{}'", id, matched_str);
-                        result.set_match(id, json!(matched_str));
-                    } else {
-                        trace!("Matcher has no id, not storing match");
+                    //
+                    // If we're at the end though, don't add it just yet!
+                    if !waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                        if let Some(id) = matcher.id() {
+                            trace!("Storing match for id '{}': '{}'", id, matched_str);
+                            result.set_match(id, json!(matched_str));
+                        } else {
+                            trace!("Matcher has no id, not storing match");
+                        }
                     }
 
                     // Walk so that we are ON the `code_span`
@@ -281,10 +285,14 @@ fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> Val
                         let mut schema_cursor = schema_cursor.clone();
 
                         schema_cursor.goto_first_child();
-                        result.keep_farther_pos(&NodePosPair::from_cursors(
-                            &schema_cursor,
-                            &input_cursor,
-                        ));
+
+                        // Only dig in if we won't need to rematch again
+                        if !waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                            result.keep_farther_pos(&NodePosPair::from_cursors(
+                                &schema_cursor,
+                                &input_cursor,
+                            ));
+                        }
                     }
                 }
                 None => {
@@ -641,12 +649,38 @@ mod tests {
         Validator, textual::TextualVsTextualValidator,
     };
     use crate::mdschema::validator::ts_utils::{
-        both_are_inline_code, both_are_paragraphs, is_paragraph_node,
-        parse_markdown,
+        both_are_inline_code, both_are_paragraphs, is_paragraph_node, parse_markdown,
     };
     use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
     use super::{LiteralMatcherVsTextualValidator, MatcherVsTextValidator};
+
+    #[test]
+    fn test_validate_matcher_vs_text_partial() {
+        let schema_str = r#"`item:/\w+/`"#;
+        let input_str = "appl";
+
+        let (value, errors, pos_so_far) =
+            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(i, s)| assert!(both_are_paragraphs(i, s)))
+                .goto_first_child_then_unwrap()
+                .validate_incomplete()
+                .destruct();
+
+        // shouldn't capture just yet
+        assert_eq!(value, json!({}));
+        assert_eq!(errors, vec![]);
+
+        // We should NOT go farther for now
+        // Schema:                     Input:
+        // (document[0]0..12)          (document[0]0..4)
+        // └─ (paragraph[1]0..12)      └─ (paragraph[1]0..4)
+        //    └─ (code_span[2]0..12)      └─ (text[2]0..4)
+        //       └─ (text[3]1..11)
+        assert_eq!(pos_so_far, NodePosPair::from_pos(2, 2));
+    }
 
     #[test]
     fn test_validate_matcher_vs_text_with_prefix_no_suffix_test() {
@@ -805,6 +839,29 @@ mod tests {
                 .destruct();
 
         assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({}));
+
+        let (value, errors, _farthest_reached_pos) =
+            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .goto_first_child_then_unwrap()
+                .validate_complete()
+                .destruct();
+
+        assert_eq!(
+            errors,
+            vec![ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    schema_index: 5,
+                    input_index: 2,
+                    expected: " suffix that is longer".into(),
+                    actual: " suffix that".into(),
+                    kind: NodeContentMismatchKind::Suffix,
+                }
+            )]
+        );
+
         assert_eq!(value, json!({"test": "test"}));
     }
 

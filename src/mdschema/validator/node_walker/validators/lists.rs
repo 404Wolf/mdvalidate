@@ -170,7 +170,7 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                     );
                 }
 
-                let new_matches = validate_list_item_contents_vs_list_item_contents(
+                let (new_matches, early_return) = validate_list_item_contents_vs_list_item_contents(
                     &input_cursor,
                     &schema_cursor,
                     schema_str,
@@ -182,7 +182,7 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 validate_so_far += 1;
                 values_at_level.push(new_matches.value);
                 result.errors.extend(new_matches.errors);
-                if has_errors {
+                if early_return || has_errors {
                     return result;
                 }
 
@@ -441,16 +441,17 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 return result;
             }
 
-            let list_item_match_result = validate_list_item_contents_vs_list_item_contents(
-                &input_cursor,
-                &schema_cursor,
-                schema_str,
-                input_str,
-                got_eof,
-            );
+            let (list_item_match_result, early_return) =
+                validate_list_item_contents_vs_list_item_contents(
+                    &input_cursor,
+                    &schema_cursor,
+                    schema_str,
+                    input_str,
+                    got_eof,
+                );
             result.join_other_result(&list_item_match_result);
 
-            if list_item_match_result.has_errors() {
+            if early_return || list_item_match_result.has_errors() {
                 return result;
             }
 
@@ -537,7 +538,7 @@ fn validate_list_item_contents_vs_list_item_contents(
     schema_str: &str,
     input_str: &str,
     got_eof: bool,
-) -> ValidationResult {
+) -> (ValidationResult, bool) {
     let mut result = ValidationResult::from_cursors(&schema_cursor, &input_cursor);
 
     let mut schema_cursor = schema_cursor.clone();
@@ -584,7 +585,10 @@ fn validate_list_item_contents_vs_list_item_contents(
             let walker =
                 ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
 
-            TextualContainerVsTextualContainerValidator::validate(&walker, got_eof)
+            (
+                TextualContainerVsTextualContainerValidator::validate(&walker, got_eof),
+                false,
+            )
         }
         (true, false) => {
             // Input has only marker, no content yet
@@ -598,7 +602,7 @@ fn validate_list_item_contents_vs_list_item_contents(
                     },
                 ));
             }
-            result
+            (result, true)
         }
         (false, true) => {
             result.add_error(ValidationError::SchemaViolation(
@@ -608,9 +612,9 @@ fn validate_list_item_contents_vs_list_item_contents(
                     input_index: input_cursor.descendant_index(),
                 },
             ));
-            result
+            (result, true)
         }
-        (false, false) => result,
+        (false, false) => (result, true),
     }
 }
 
@@ -1038,7 +1042,7 @@ Footer: test (footer isn't validated with_list_vs_list)
                 .goto_first_child_then_unwrap()
                 .goto_next_sibling_then_unwrap()
                 .peek_nodes(|(i, s)| assert!(both_are_list_nodes(i, s)))
-                .validate_incomplete()
+                .validate_complete()
                 .destruct();
 
         assert_eq!(errors, vec![], "Expected no errors, got: {:?}", errors);
@@ -1176,7 +1180,7 @@ Footer: test (footer isn't validated with_list_vs_list)
     fn test_validate_list_vs_list_with_simple_matcher() {
         let schema_str = r#"- `test:/test\d/`{2,2}"#;
         let input_str = "- test1\n- test2";
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
 
         assert_eq!(errors, vec![],);
         assert_eq!(value, json!({"test": ["test1", "test2"]}));
@@ -1194,7 +1198,7 @@ Footer: test (footer isn't validated with_list_vs_list)
 - line2test1
 - line2test2
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
 
         assert_eq!(errors, vec![]);
         assert_eq!(
@@ -1214,7 +1218,7 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test2
 - line2test1
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
         // even with eof=false we should know that there is an error by now
 
         // Single error: test2 doesn't match testB's pattern - we return early on mismatch
@@ -1247,7 +1251,7 @@ Footer: test (footer isn't validated with_list_vs_list)
     - deep1
 "#;
 
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
 
         assert_eq!(errors, vec![],);
         assert_eq!(value, json!({"test": ["test1", {"deep": ["deep1"]}]}));
@@ -1267,7 +1271,7 @@ Footer: test (footer isn't validated with_list_vs_list)
         - deeper1
         - deeper2
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
 
         assert_eq!(errors, vec![],);
         assert_eq!(
@@ -1311,7 +1315,7 @@ Footer: test (footer isn't validated with_list_vs_list)
         - deepest3
         - deepest4
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
 
         assert_eq!(errors, vec![],);
         assert_eq!(
@@ -1515,7 +1519,7 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test2
 - test3
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
 
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"test": ["test1", "test2", "test3"]}));
@@ -1545,7 +1549,7 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test1
 - test2
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
 
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"test": ["test1", "test2"]}));
@@ -1560,7 +1564,7 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test3
 - test4
 "#;
-        let result = validate_lists(schema_str, input_str, false);
+        let result = validate_lists(schema_str, input_str, true);
 
         // Error reported immediately - extra items are definitive
         assert_eq!(result.errors.len(), 1);
@@ -1594,7 +1598,7 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test3
 - test4
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
 
         assert_eq!(errors, vec![], "Expected no errors when list meets minimum");
         assert_eq!(value, json!({"test": ["test1", "test2", "test3", "test4"]}));
@@ -1629,7 +1633,7 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test4
 - test5
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
 
         assert_eq!(errors, vec![], "Expected no errors for unlimited matcher");
         assert_eq!(
@@ -1786,6 +1790,25 @@ Footer: test (footer isn't validated with_list_vs_list)
             errors.len(),
             1,
             "Should report error even when got_eof=false - extra items are definitive"
+        );
+    }
+
+    #[test]
+    fn test_streaming_list_with_only_marker() {
+        // When streaming input, if we only have the list marker "-" so far,
+        // we should NOT report an error - more content is coming
+        let schema_str = r#"
+- `item:/\w+/`
+"#;
+        let input_str = "-";
+
+        let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+
+        // Should have no errors when got_eof=false - we're waiting for more input
+        assert_eq!(
+            errors,
+            vec![],
+            "Should not report error when streaming and only marker received"
         );
     }
 }
