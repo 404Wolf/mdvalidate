@@ -147,6 +147,10 @@ is_node_kind!(is_list_marker_node, "list_marker");
 is_node_kind!(is_list_item_node, "list_item");
 is_node_kind!(is_codeblock_node, "fenced_code_block");
 is_node_kind!(is_heading_node, "atx_heading");
+is_node_kind!(is_table_node, "table");
+is_node_kind!(is_table_header, "table_header_row");
+is_node_kind!(is_table_delimeter, "table_delimiter_row");
+is_node_kind!(is_table_column_alignment, "table_column_alignment");
 is_node_kind!(is_ruler_node, "thematic_break");
 is_node_kind!(is_list_node, "tight_list", "loose_list");
 is_node_kind!(
@@ -217,6 +221,11 @@ both_are!(
     both_are_headings,
     is_heading_node,
     "Check if both nodes are headings."
+);
+both_are!(
+    both_are_tables,
+    is_table_node,
+    "Check if both nodes are tables."
 );
 both_are!(
     both_are_textual_nodes,
