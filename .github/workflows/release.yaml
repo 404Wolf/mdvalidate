@@ -28,16 +28,29 @@ jobs:
           fetch-depth: 0
 
       - name: Install Nix
+        if: matrix.os == 'ubuntu-latest'
         uses: cachix/install-nix-action@v31
+
+      - name: Setup Rust
+        if: matrix.os == 'macos-latest'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
 
       - name: Build
         run: |
-          nix build
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            cargo build --release
+          else
+            nix build
+          fi
 
       - name: Package artifact
         run: |
           mkdir -p dist
-          cp -r result/* dist/
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            cp target/release/my-cli dist/
+          else
+            cp -r result/* dist/
+          fi
           tar -czf my-cli-${{ matrix.name }}.tar.gz -C dist .
 
       - name: Upload release artifact
