@@ -57,7 +57,7 @@ pub fn compare_node_children_lengths(
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rs
 /// compare_node_children_lengths_check!(
 ///     schema_cursor,
 ///     input_cursor,

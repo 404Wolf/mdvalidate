@@ -105,7 +105,7 @@ pub fn compare_node_kinds(
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rs
 /// compare_node_kinds_check!(
 ///     schema_cursor,
 ///     input_cursor,

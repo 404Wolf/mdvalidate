@@ -98,7 +98,7 @@ fn next_is_non_text(schema_cursor: &TreeCursor) -> bool {
 ///
 /// # Algorithm
 ///
-/// ```ignore
+/// ```ansi
 /// | is literal?
 /// | - no
 /// |   | - text after matcher?

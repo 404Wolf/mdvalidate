@@ -124,7 +124,7 @@ pub fn compare_text_contents(
 ///
 /// # Example
 ///
-/// ```ignore
+/// ```rs
 /// compare_text_contents_check!(
 ///     schema_str,
 ///     input_str,
