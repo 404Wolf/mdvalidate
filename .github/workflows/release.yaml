@@ -47,15 +47,15 @@ jobs:
         run: |
           mkdir -p dist
           if [ "${{ matrix.os }}" == "macos-latest" ]; then
-            cp target/release/my-cli dist/
+            cp target/release/mdv dist/
           else
             cp -r result/* dist/
           fi
-          tar -czf my-cli-${{ matrix.name }}.tar.gz -C dist .
+          tar -czf mdv-${{ matrix.name }}.tar.gz -C dist .
 
       - name: Upload release artifact
         if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
         with:
-          artifacts: my-cli-${{ matrix.name }}.tar.gz
+          artifacts: mdv-${{ matrix.name }}.tar.gz
           tag: ${{ github.ref_name }}
