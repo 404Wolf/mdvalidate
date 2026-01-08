@@ -59,3 +59,4 @@ jobs:
         with:
           artifacts: mdv-${{ matrix.name }}.tar.gz
           tag: ${{ github.ref_name }}
+          allowUpdates: true
