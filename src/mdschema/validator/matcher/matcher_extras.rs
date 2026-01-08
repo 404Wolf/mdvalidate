@@ -3,6 +3,8 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
+use crate::mdschema::validator::matcher::matcher::LITERAL_INDICATOR;
+
 static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
 
 pub static MATCHERS_EXTRA_PATTERN: LazyLock<Regex> =
@@ -82,6 +84,7 @@ impl std::fmt::Display for MatcherExtrasError {
 /// immediately after a matcher code block in the schema.
 ///
 /// # Item Count Limits
+///
 /// The `{min,max}` syntax specifies matcher repetition:
 /// - `{2,5}` - min 2, max 5 items
 /// - `{3,}` - min 3, no max
@@ -93,14 +96,17 @@ impl std::fmt::Display for MatcherExtrasError {
 /// code blocks in the output, preserving formatting and syntax.
 ///
 /// # Examples
-/// ```ignore
+///
+/// ```
+/// use mdvalidate::mdschema::validator::matcher::matcher_extras::MatcherExtras;
+///
 /// // Matcher with repeat limits: `name:/\w+/`{2,5}
-/// let extras = MatcherExtras::new(Some("{2,5}"));
+/// let extras = MatcherExtras::try_new(Some("{2,5}")).unwrap();
 /// assert_eq!(extras.min_items(), Some(2));
 /// assert_eq!(extras.max_items(), Some(5));
 ///
 /// // Matcher with literal code flag: `code:/\w+/`!
-/// let extras = MatcherExtras::new(Some("!"));
+/// let extras = MatcherExtras::try_new(Some("!")).unwrap();
 /// // is_literal_code will be true
 /// ```
 #[derive(Debug, Clone)]
@@ -151,6 +157,45 @@ impl MatcherExtras {
         })
     }
 
+    /// Create new `MatcherExtras` directly with the extras that come after a matcher.
+    ///
+    /// # Arguments
+    /// * `extras` - The extras string that follows a matcher. Does not include any potential additional text.
+    pub fn try_from_extras_str(extras: &str) -> Result<Self, MatcherExtrasError> {
+        let is_literal = extras.starts_with(LITERAL_INDICATOR);
+        if is_literal {
+            // If it's literal, we can't have anything else after the matcher
+            if extras.len() > 1 {
+                return Err(MatcherExtrasError::MixedLiteralAndOthers);
+            }
+
+            Ok(Self {
+                min_items: None,
+                max_items: None,
+                had_min_max: false,
+                is_literal_code: true,
+            })
+        } else {
+            let (min_items, max_items, had_range_syntax) = extract_item_count_limits(extras);
+
+            Ok(Self {
+                min_items,
+                max_items,
+                had_min_max: had_range_syntax,
+                is_literal_code: is_literal, // We handle literal code at a higher level now
+            })
+        }
+    }
+
+    /// Create new `MatcherExtras` by parsing the text following a matcher.
+    ///
+    /// # Arguments
+    /// * `text` - Optional text following the matcher code block
+    pub fn try_from_post_matcher_str(text: Option<&str>) -> Result<Self, MatcherExtrasError> {
+        let extras_str = get_all_extras(text.unwrap_or_default())?;
+        Self::try_from_extras_str(extras_str)
+    }
+
     /// Return optional minimum number of items at this list level
     pub fn min_items(&self) -> Option<usize> {
         self.min_items
@@ -164,6 +209,10 @@ impl MatcherExtras {
     /// Whether min/max constraints were specified
     pub fn had_min_max(&self) -> bool {
         self.had_min_max
+    }
+
+    pub fn is_literal_code(&self) -> bool {
+        self.is_literal_code
     }
 }
 

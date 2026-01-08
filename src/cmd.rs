@@ -144,12 +144,7 @@ pub fn process_stdio<R: Read, W: Write>(
             _ => {}
         }
     } else {
-        use std::collections::HashSet;
-
-        // TODO: fix the underlying issue, we shouldn't have duplicates
-        let unique_errors: HashSet<_> = errors.iter().collect();
-
-        for error in unique_errors {
+        for error in &errors {
             let error_output = if debug_mode {
                 debug_print_error(error)
             } else {
@@ -175,7 +170,7 @@ mod tests {
     use super::*;
     use std::io::{self, Cursor, Read};
 
-    fn get_validator<R: Read>(
+    fn run_validation<R: Read>(
         schema: &String,
         mut input: R,
         fast_fail: bool,
@@ -250,7 +245,7 @@ mod tests {
         let input_data = "# Hi there!";
         let reader = Cursor::new(input_data.as_bytes());
 
-        let (errors, _) = get_validator(&schema_str, reader, false);
+        let (errors, _) = run_validation(&schema_str, reader, false);
         assert_eq!(errors, vec![]);
     }
 
@@ -261,7 +256,7 @@ mod tests {
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 2);
 
-        let (errors, _) = get_validator(&schema_str, reader, false);
+        let (errors, _) = run_validation(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content"
@@ -275,7 +270,7 @@ mod tests {
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 1000);
 
-        let (errors, _) = get_validator(&schema_str, reader, false);
+        let (errors, _) = run_validation(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "Should have no errors for matching content"
@@ -283,7 +278,34 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    fn test_validate_stream_input_against_matcher_stream_correctly() {
+        let schema_str = r#"
+# `a:/.*/`
+
+# `b:/.*/`
+
+## `c:/.*/`
+"#;
+        let input_data = r#"
+# a
+
+# b
+
+## c
+"#;
+
+        let cursor = Cursor::new(input_data.as_bytes());
+        let reader = LimitedReader::new(cursor, 4);
+
+        let (errors, _) = run_validation(&schema_str.into(), reader, false);
+        assert!(
+            errors.is_empty(),
+            "should have no errors but found: {:?}",
+            errors
+        );
+    }
+
+    #[test]
     fn test_validate_stream_input_against_matcher() {
         let schema_str = r#"# CSDS 999 Assignment `assignment_number:/\d+/`
 
@@ -313,7 +335,7 @@ This is a shopping list:
         let cursor = Cursor::new(input_data.as_bytes());
         let reader = LimitedReader::new(cursor, 4);
 
-        let (errors, _) = get_validator(&schema_str, reader, false);
+        let (errors, _) = run_validation(&schema_str, reader, false);
         assert!(
             errors.is_empty(),
             "should have no errors but found: {:?}",
@@ -343,7 +365,7 @@ This is a test"#;
             let cursor = Cursor::new(input_data.as_bytes());
             let reader = LimitedReader::new(cursor, cursor_size);
 
-            let (errors, matches) = get_validator(&schema_str, reader, false);
+            let (errors, matches) = run_validation(&schema_str, reader, false);
             assert_eq!(
                 errors.len(),
                 1,

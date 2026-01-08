@@ -4,13 +4,15 @@ use tree_sitter::TreeCursor;
 use crate::invariant_violation;
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::node_walker::ValidationResult;
+use crate::mdschema::validator::node_walker::helpers::compare_node_kinds::compare_node_kinds;
 use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
+use crate::mdschema::validator::ts_utils::both_are_headings;
+use crate::mdschema::validator::ts_utils::waiting_at_end;
 use crate::mdschema::validator::ts_utils::{
     is_heading_content_node, is_heading_node, is_marker_node, is_textual_container_node,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::compare_node_kinds_check;
 
 /// Validate two headings.
 ///
@@ -21,27 +23,37 @@ pub(super) struct HeadingVsHeadingValidator;
 impl ValidatorImpl for HeadingVsHeadingValidator {
     fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
-            ValidationResult::from_cursors(walker.input_cursor(), walker.schema_cursor());
+            ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
-        let input_str = walker.input_str();
         let schema_str = walker.schema_str();
+        let input_str = walker.input_str();
 
-        let mut input_cursor = walker.input_cursor().clone();
         let mut schema_cursor = walker.schema_cursor().clone();
+        let mut input_cursor = walker.input_cursor().clone();
 
         // Both should be the start of headings
         #[cfg(feature = "invariant_violations")]
-        if !is_heading_node(&input_cursor.node()) || !is_heading_node(&schema_cursor.node()) {
+        if !is_heading_node(&schema_cursor.node()) || !is_heading_node(&input_cursor.node()) {
             invariant_violation!(
                 result,
-                &input_cursor,
                 &schema_cursor,
+                &input_cursor,
                 "heading validation expects atx_heading nodes"
             );
         }
 
         // This also checks the *type* of heading that they are at
-        compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
+        if let Some(error) =
+            compare_node_kinds(&schema_cursor, &input_cursor, schema_str, input_str)
+        {
+            if waiting_at_end(got_eof, walker.input_str(), &input_cursor)
+                && both_are_headings(&schema_cursor.node(), &input_cursor.node())
+            {
+            } else {
+                result.add_error(error);
+                return result;
+            }
+        };
         trace!("Node kinds mismatched");
 
         // Go to the actual heading content
@@ -64,7 +76,7 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
                 }
             };
             if failed_to_walk_to_heading
-                || !(input_had_heading_content && schema_had_heading_content)
+                || !(schema_had_heading_content && input_had_heading_content)
             {
                 return result;
             }
@@ -73,20 +85,20 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
 
         // Both should be at markers
         #[cfg(feature = "invariant_violations")]
-        if !is_textual_container_node(&input_cursor.node())
-            || !is_textual_container_node(&schema_cursor.node())
+        if !is_textual_container_node(&schema_cursor.node())
+            || !is_textual_container_node(&input_cursor.node())
         {
             invariant_violation!(
                 result,
-                &input_cursor,
                 &schema_cursor,
+                &input_cursor,
                 "heading validation expects textual container nodes"
             );
         }
 
         // Now that we're at the heading content, use `validate_text_vs_text`
         TextualContainerVsTextualContainerValidator::validate(
-            &walker.with_cursors(&input_cursor, &schema_cursor),
+            &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         )
     }
@@ -127,7 +139,7 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<bool, Validation
 mod tests {
     use super::*;
     use crate::mdschema::validator::{
-        errors::SchemaViolationError,
+        errors::{NodeContentMismatchKind, SchemaViolationError},
         node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
         ts_utils::{both_are_headings, is_heading_node, parse_markdown},
@@ -161,21 +173,160 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_heading_vs_heading_simple_headings_so_far_wrong_type() {
+        let schema_str = "### Heading `foo:/test/`";
+        let input_str = "#";
+
+        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_headings(s, i)))
+            .validate_incomplete();
+
+        assert!(result.errors().is_empty()); // no errors yet
+        assert_eq!(result.value(), &json!({}));
+    }
+
+    #[test]
+    fn test_validate_heading_vs_heading_headings_three_children() {
+        let schema_str = r#"
+# `a:/.*/`
+
+# `b:/.*/`
+
+# `c:/.*/`
+"#;
+
+        let input_str = r#"
+# a
+
+# b
+
+# c
+"#;
+
+        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .with_schema_cursor(|c| c.goto_descendant(13))
+            .with_input_cursor(|c| c.goto_descendant(9))
+            .validate_complete();
+
+        assert_eq!(
+            *result.farthest_reached_pos(),
+            NodePosPair::from_pos(18, 12)
+        );
+        assert!(result.errors().is_empty()); // no errors yet
+        assert_eq!(result.value(), &json!({"c": "c"}));
+    }
+
+    #[test]
+    fn test_validate_heading_vs_heading_with_link() {
+        let schema_str = "# [test]({test:/test/})";
+        let input_str = "# [test](test)";
+
+        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_headings(s, i)))
+            .validate_complete();
+
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(9, 9));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
+    }
+
+    #[test]
+    fn test_validate_heading_vs_heading_with_link_and_prefix() {
+        let schema_str = "# Heading [test]({test:/test/})";
+        let input_str = "# Heading [test](test)";
+
+        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_headings(s, i)))
+            .validate_complete();
+
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(9, 9));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
+    }
+
+    #[test]
+    fn test_validate_heading_vs_heading_with_link_and_prefix_and_matcher() {
+        let schema_str = "# Heading [test]({a:/a/}) `b:/b/`";
+        let input_str = "# Heading [test](a) b";
+
+        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_headings(s, i)))
+            .validate_complete();
+
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(12, 10));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"a": "a", "b": "b"}));
+    }
+
+    #[test]
+    fn test_validate_heading_vs_heading_with_link_and_prefix_and_wrong_text() {
+        let schema_str = "# Heading [test]({a:/a/}) foo";
+        let input_str = "# Heading [test](a) bar";
+
+        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_headings(s, i)))
+            .validate_complete();
+
+        assert_eq!(
+            *result.farthest_reached_pos(),
+            NodePosPair::from_pos(10, 10)
+        );
+        assert_eq!(
+            *result.errors(),
+            [ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    schema_index: 10,
+                    input_index: 10,
+                    expected: " foo".to_string(),
+                    actual: " bar".to_string(),
+                    kind: NodeContentMismatchKind::Literal,
+                }
+            )]
+        );
+        assert_eq!(result.value(), &json!({"a": "a"}));
+    }
+
+    #[test]
+    fn test_validate_heading_vs_heading_with_matcher() {
+        let schema_str = "# Heading `test:/test/`";
+        let input_str = "# Heading test";
+
+        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_headings(s, i)))
+            .validate_complete();
+
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(6, 4));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
+    }
+
+    #[test]
     fn test_validate_heading_vs_heading_simple_headings() {
         let schema_str = "# Heading";
         let input_str = "# Heading";
 
-        let (value, errors, farthest_reached_pos) =
-            ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_headings(i, s)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_headings(s, i)))
+            .validate_complete();
 
-        assert_eq!(value, json!({})); // No real match content
-        assert_eq!(errors, vec![]);
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({})); // No real match content
     }
 
     #[test]
@@ -183,18 +334,15 @@ mod tests {
         let schema_str = "# Heading";
         let input_str = "## Heading";
 
-        let (value, errors, _) =
-            ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_headings(i, s)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_headings(s, i)))
+            .validate_complete();
 
-        assert_eq!(value, json!({}));
         assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+            result.errors(),
+            &[ValidationError::SchemaViolation(
                 SchemaViolationError::NodeTypeMismatch {
                     schema_index: 1,
                     input_index: 1,
@@ -203,6 +351,7 @@ mod tests {
                 }
             )]
         );
+        assert_eq!(result.value(), &json!({}));
     }
     // TODO: tests for got_eof=false
 }

@@ -56,12 +56,12 @@ impl ValidatorImpl for CodeVsCodeValidator {
 }
 
 fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(walker.input_cursor(), walker.input_cursor());
+    let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
-    let input_cursor = walker.input_cursor().clone();
     let schema_cursor = walker.schema_cursor().clone();
-    let input_str = walker.input_str();
+    let input_cursor = walker.input_cursor().clone();
     let schema_str = walker.schema_str();
+    let input_str = walker.input_str();
 
     #[cfg(feature = "invariant_violations")]
     if input_cursor.node().kind() != "fenced_code_block"
@@ -69,8 +69,8 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
     {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "code validation expects code block nodes"
         );
     }
@@ -91,20 +91,20 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
     };
 
     let (
-        Some((input_lang, (input_code, input_code_descendant_index))),
         Some((schema_lang, (schema_code, schema_code_descendant_index))),
-    ) = (&input_extracted, &schema_extracted)
+        Some((input_lang, (input_code, input_code_descendant_index))),
+    ) = (&schema_extracted, &input_extracted)
     else {
         #[cfg(feature = "invariant_violations")]
         // The only reason the "entire thing" would be wrong is because we're
         // doing something wrong in our usage of it. That would be a bug!
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
-            "Failed to extract code block contents from input or schema (input: {:?}, schema: {:?})",
-            input_extracted,
-            schema_extracted
+            &input_cursor,
+            "Failed to extract code block contents from schema or input (schema: {:?}, input: {:?})",
+            schema_extracted,
+            input_extracted
         );
     };
 
@@ -154,7 +154,7 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
             if let (
                 Some((input_lang_str, input_lang_descendant_index)),
                 Some((schema_lang_str, schema_lang_descendant_index)),
-            ) = (input_lang, schema_lang)
+            ) = (schema_lang, input_lang)
             {
                 if input_lang_str != schema_lang_str {
                     result.add_error(ValidationError::SchemaViolation(
@@ -212,31 +212,28 @@ mod tests {
     #[test]
     fn test_validate_code_vs_code_literal_same() {
         // positive case: input and schema are identical
-        let input_str = "```rust\nfn main() {}\n```";
         let schema_str = "```rust\nfn main() {}\n```";
+        let input_str = "```rust\nfn main() {}\n```";
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_codeblocks(s, i)))
+            .validate_complete();
 
-        assert_eq!(errors, vec![], "Expected no errors, got {:?}", errors);
-        assert_eq!(value, json!({}));
+        assert!(result.errors().is_empty(), "Expected no errors, got {:?}", result.errors());
+        assert_eq!(result.value(), &json!({}));
 
         // negative case: change input so it is not the same as the schema
         let input_str_negative = "```rust\nfn main() { println!(\"hi\"); }\n```";
-        let (_value, errors, _farthest_reached_pos) =
+        let result =
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str_negative)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
-                .validate_complete()
-                .destruct();
+                .peek_nodes(|(s, i)| assert!(both_are_codeblocks(s, i)))
+                .validate_complete();
 
-        assert!(!errors.is_empty());
+        assert!(!result.errors().is_empty());
     }
 
     #[test]
@@ -247,16 +244,14 @@ fn main() {}
         let input_str = r#"```rust
 fn main() {}
 ```"#;
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_codeblocks(s, i)))
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({ "lang": "rust" }));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({ "lang": "rust" }));
     }
 
     #[test]
@@ -267,15 +262,13 @@ fn main() {}
         let input_str = r#"```rust
 fn main() {}
 ```"#;
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_codeblocks(s, i)))
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({ "lang": "rust", "code": "fn main() {}" }))
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({ "lang": "rust", "code": "fn main() {}" }))
     }
 }

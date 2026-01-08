@@ -1,14 +1,14 @@
 #![allow(dead_code)]
 
-use crate::invariant_violation;
+use crate::{invariant_violation, mdschema::validator::matcher::matcher_extras::MatcherExtras};
 use core::fmt;
 use regex::Regex;
 use std::{collections::HashSet, sync::LazyLock};
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
-    matcher::matcher_extras::{MatcherExtrasError, get_all_extras, partition_at_special_chars},
-    ts_utils::{get_next_node, get_node_and_next_node, is_text_node},
+    matcher::matcher_extras::{MatcherExtrasError, partition_at_special_chars},
+    ts_utils::{get_next_node, get_node_and_next_node, get_node_text, is_text_node},
 };
 
 static REGEX_MATCHER_PATTERN: LazyLock<Regex> =
@@ -56,101 +56,6 @@ impl std::fmt::Display for MatcherError {
                 write!(f, "Invariant violation: {}", err)
             }
         }
-    }
-}
-
-/// Features of the given matcher, like max count if it is repeated.
-///
-/// This struct holds configuration options parsed from the suffix text that appears
-/// immediately after a matcher code block in the schema.
-///
-/// # Item Count Limits
-/// The `{min,max}` syntax specifies matcher repetition:
-/// - `{2,5}` - min 2, max 5 items
-/// - `{3,}` - min 3, no max
-/// - `{,10}` - no min, max 10
-/// - `{,}` - unbounded but repeatable
-///
-/// # Literal Code Flag
-/// The `!` character indicates that matched content should be treated as literal
-/// code blocks in the output, preserving formatting and syntax.
-///
-/// # Examples
-/// ```ignore
-/// // Matcher with repeat limits: `name:/\w+/`{2,5}
-/// let extras = MatcherExtras::new(Some("{2,5}"));
-/// assert_eq!(extras.min_items(), Some(2));
-/// assert_eq!(extras.max_items(), Some(5));
-///
-/// // Matcher with literal code flag: `code:/\w+/`!
-/// let extras = MatcherExtras::new(Some("!"));
-/// // is_literal_code will be true
-/// ```
-#[derive(Debug, Clone)]
-pub struct MatcherExtras {
-    /// Optional minimum number of list items at this level
-    min_items: Option<usize>,
-    /// Optional maximum number of list items at this level
-    max_items: Option<usize>,
-    /// Whether min/max constraints were specified
-    had_min_max: bool,
-    /// Whether it is a literal code block
-    is_literal_code: bool,
-}
-
-impl MatcherExtras {
-    /// Create new `MatcherExtras` directly with the extras that come after a matcher.
-    ///
-    /// # Arguments
-    /// * `extras` - The extras string that follows a matcher. Does not include any potential additional text.
-    pub fn try_from_extras_str(extras: &str) -> Result<Self, MatcherExtrasError> {
-        let is_literal = extras.starts_with(LITERAL_INDICATOR);
-        if is_literal {
-            // If it's literal, we can't have anything else after the matcher
-            if extras.len() > 1 {
-                return Err(MatcherExtrasError::MixedLiteralAndOthers);
-            }
-
-            Ok(Self {
-                min_items: None,
-                max_items: None,
-                had_min_max: false,
-                is_literal_code: true,
-            })
-        } else {
-            let (min_items, max_items, had_range_syntax) = extract_item_count_limits(extras);
-
-            Ok(Self {
-                min_items,
-                max_items,
-                had_min_max: had_range_syntax,
-                is_literal_code: is_literal, // We handle literal code at a higher level now
-            })
-        }
-    }
-
-    /// Create new `MatcherExtras` by parsing the text following a matcher.
-    ///
-    /// # Arguments
-    /// * `text` - Optional text following the matcher code block
-    pub fn try_from_post_matcher_str(text: Option<&str>) -> Result<Self, MatcherExtrasError> {
-        let extras_str = get_all_extras(text.unwrap_or_default())?;
-        Self::try_from_extras_str(extras_str)
-    }
-
-    /// Return optional minimum number of items at this list level
-    pub fn min_items(&self) -> Option<usize> {
-        self.min_items
-    }
-
-    /// Return optional maximum number of items at this list level
-    pub fn max_items(&self) -> Option<usize> {
-        self.max_items
-    }
-
-    /// Whether min/max constraints were specified
-    pub fn had_min_max(&self) -> bool {
-        self.had_min_max
     }
 }
 
@@ -262,7 +167,7 @@ impl Matcher {
 
         // We are allowed to have an invalid matcher interior if it is literal
         // code, so throw this error before trying to create the matcher
-        if extras.is_literal_code {
+        if extras.is_literal_code() {
             return Err(MatcherError::WasLiteralCode);
         }
 
@@ -304,14 +209,11 @@ impl Matcher {
         schema_cursor: &TreeCursor,
         schema_str: &str,
     ) -> Result<Self, MatcherError> {
-        let pattern_str = schema_cursor
-            .node()
-            .utf8_text(schema_str.as_bytes())
-            .unwrap();
+        let pattern_str = get_node_text(&schema_cursor.node(), schema_str);
         let next_node = get_next_node(schema_cursor);
         let extras_str = next_node
             .filter(|n| is_text_node(&n)) // don't bother if not text; extras must be in text
-            .map(|n| n.utf8_text(schema_str.as_bytes()).unwrap())
+            .map(|n| get_node_text(&n, schema_str))
             .and_then(|n| partition_at_special_chars(n).map(|(extras, _)| extras));
 
         Self::try_from_pattern_and_suffix_str(pattern_str, extras_str)

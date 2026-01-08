@@ -1,7 +1,9 @@
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
+use crate::compare_node_kinds_check;
 use crate::invariant_violation;
+use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::node_walker::validators::matchers::MatcherVsTextValidator;
 use crate::mdschema::validator::ts_utils::{
@@ -12,8 +14,6 @@ use crate::mdschema::validator::{
     node_walker::{ValidationResult, validators::Validator},
     ts_utils::waiting_at_end,
 };
-use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
-use crate::compare_node_kinds_check;
 
 /// Validate two textual elements.
 ///
@@ -49,8 +49,8 @@ fn validate_textual_vs_textual_impl(walker: &ValidatorWalker, got_eof: bool) -> 
     }
 
     validate_textual_vs_textual_direct(
-        walker.input_cursor(),
         walker.schema_cursor(),
+        walker.input_cursor(),
         walker.schema_str(),
         walker.input_str(),
         got_eof,
@@ -61,14 +61,14 @@ fn validate_textual_vs_textual_impl(walker: &ValidatorWalker, got_eof: bool) -> 
 ///
 /// This performs the actual node kind and text content comparison without
 /// delegating to matcher validation.
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
-    i = %input_cursor.descendant_index(),
+#[instrument(skip(schema_cursor, input_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     s = %schema_cursor.descendant_index(),
+    i = %input_cursor.descendant_index(),
 ), ret)]
 #[track_caller]
 pub(super) fn validate_textual_vs_textual_direct(
-    input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
     schema_str: &str,
     input_str: &str,
     got_eof: bool,
@@ -79,27 +79,27 @@ pub(super) fn validate_textual_vs_textual_direct(
     if !both_are_textual_nodes(&schema_cursor.node(), &input_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "expected textual nodes, got schema kind: {:?}, input kind: {:?}",
             schema_cursor.node().kind(),
             input_cursor.node().kind()
         );
     }
 
-    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
+    compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
 
     let is_partial_match = waiting_at_end(got_eof, input_str, &input_cursor);
-    if let Some(error) = compare_text_contents(
+    let text_result = compare_text_contents(
         schema_str,
         input_str,
         &schema_cursor,
         &input_cursor,
         is_partial_match,
         false,
-    ) {
-        result.add_error(error);
-
+    );
+    result.join_other_result(&text_result);
+    if text_result.has_errors() {
         return result;
     }
 
@@ -122,35 +122,34 @@ mod tests {
         let schema_str = "`code`! test";
         let input_str = "`code` test";
 
-        let (value, errors, _) =
-            ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_inline_code(i, s)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_inline_code(s, i)))
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
     fn test_validate_textual_vs_textual_with_incomplete_matcher() {
-        let schema_str = "prefix `test:/test/`";
-        let input_str = "prefix `test:/te";
+        let schema_str = r#"prefix `test:/test/`
 
-        let (value, errors, farthest_reached_pos) =
-            ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_text_nodes(i, s)))
-                .validate_incomplete()
-                .destruct();
+prefix `test:/test/`
+"#;
+        let input_str = r#"prefix t"#;
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(2, 2));
+        let result = ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_text_nodes(s, i)))
+            .validate_incomplete();
+
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(2, 2));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({}));
     }
 }

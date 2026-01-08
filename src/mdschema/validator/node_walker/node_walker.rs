@@ -14,28 +14,28 @@ use crate::mdschema::validator::{
 /// A node validator that validates input nodes against schema nodes.
 pub struct NodeWalker<'a, S: ValidatorState> {
     state: &'a mut S,
-    input_cursor: TreeCursor<'a>,
     schema_cursor: TreeCursor<'a>,
+    input_cursor: TreeCursor<'a>,
 }
 
 impl<'a, S: ValidatorState> NodeWalker<'a, S> {
     pub fn new(
         state: &'a mut S,
-        input_cursor: TreeCursor<'a>,
         schema_cursor: TreeCursor<'a>,
+        input_cursor: TreeCursor<'a>,
     ) -> Self {
         let mut node_walker = Self {
             state,
-            input_cursor,
             schema_cursor,
+            input_cursor,
         };
 
         node_walker
             .state()
             .farthest_reached_pos()
             .walk_cursors_to_pos(
-                &mut node_walker.input_cursor,
                 &mut node_walker.schema_cursor,
+                &mut node_walker.input_cursor,
             );
 
         node_walker
@@ -47,15 +47,15 @@ impl<'a, S: ValidatorState> NodeWalker<'a, S> {
         let got_eof = self.state.got_eof();
 
         let mut walker = ValidatorWalker::from_cursors(
-            &self.input_cursor,
             &self.schema_cursor,
             &schema_str,
+            &self.input_cursor,
             &input_str,
         );
-        let (input_cursor, schema_cursor) = walker.cursors_mut();
+        let (schema_cursor, input_cursor) = walker.cursors_mut();
         self.state
             .farthest_reached_pos()
-            .walk_cursors_to_pos(input_cursor, schema_cursor);
+            .walk_cursors_to_pos(schema_cursor, input_cursor);
 
         let validation_result = NodeVsNodeValidator::validate(&walker, got_eof);
 

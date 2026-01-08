@@ -15,7 +15,8 @@ use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::ts_utils::{
-    get_next_node, get_node_n_nodes_ahead, is_inline_code_node, is_text_node, waiting_at_end,
+    get_next_node, get_node_n_nodes_ahead, get_node_text, is_inline_code_node, is_text_node,
+    waiting_at_end,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
@@ -42,8 +43,8 @@ pub(super) struct LiteralMatcherVsTextualValidator;
 impl ValidatorImpl for LiteralMatcherVsTextualValidator {
     fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         validate_literal_matcher_vs_textual(
-            walker.input_cursor(),
             walker.schema_cursor(),
+            walker.input_cursor(),
             walker.schema_str(),
             walker.input_str(),
             got_eof,
@@ -60,9 +61,8 @@ fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> Val
     let mut schema_cursor = walker.schema_cursor().clone();
     let mut input_cursor = walker.input_cursor().clone();
 
-    let input_node = input_cursor.node();
-
     let schema_cursor_is_code_node = is_inline_code_node(&schema_cursor.node());
+    let input_node = input_cursor.node();
     let schema_prefix_node = if schema_cursor_is_code_node {
         let mut prev_cursor = schema_cursor.clone();
         if prev_cursor.goto_previous_sibling() && is_text_node(&prev_cursor.node()) {
@@ -336,8 +336,8 @@ fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> Val
 
                 // Delegate to the literal matcher validator
                 return validate_literal_matcher_vs_textual(
-                    &input_cursor,
                     &schema_cursor,
+                    &input_cursor,
                     schema_str,
                     input_str,
                     got_eof,
@@ -362,7 +362,7 @@ fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> Val
         // Everything that comes after the matcher
         let schema_suffix = {
             let text_node_after_code_node_str_contents =
-                schema_suffix_node.utf8_text(schema_str.as_bytes()).unwrap();
+                get_node_text(&schema_suffix_node, schema_str);
             // All text after the matcher node and maybe the text node right after it ("extras")
             get_after_extras(text_node_after_code_node_str_contents).unwrap()
         };
@@ -463,56 +463,56 @@ fn at_text_and_next_at_literal_matcher(
 }
 
 pub(super) fn validate_literal_matcher_vs_textual(
-    input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
     schema_str: &str,
     input_str: &str,
     got_eof: bool,
 ) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
-    let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();
+    let mut input_cursor = input_cursor.clone();
 
     #[cfg(feature = "invariant_violations")]
-    if !is_inline_code_node(&input_cursor.node()) || !is_inline_code_node(&schema_cursor.node()) {
+    if !is_inline_code_node(&schema_cursor.node()) || !is_inline_code_node(&input_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "literal matcher validation expects code_span nodes"
         );
     }
 
     // Walk into the code node and do regular textual validation.
     {
-        let mut input_cursor = input_cursor.clone();
         let mut schema_cursor = schema_cursor.clone();
+        let mut input_cursor = input_cursor.clone();
         input_cursor.goto_first_child();
         schema_cursor.goto_first_child();
 
         #[cfg(feature = "invariant_violations")]
-        if !is_text_node(&input_cursor.node()) || !is_text_node(&schema_cursor.node()) {
+        if !is_text_node(&schema_cursor.node()) || !is_text_node(&input_cursor.node()) {
             invariant_violation!(
                 result,
-                &input_cursor,
                 &schema_cursor,
+                &input_cursor,
                 "literal matcher validation expects text children"
             );
         }
 
-        if let Some(error) = compare_text_contents(
+        let text_result = compare_text_contents(
             schema_str,
             input_str,
             &schema_cursor,
             &input_cursor,
             false,
             false,
-        ) {
-            result.add_error(error);
+        );
+        result.join_other_result(&text_result);
+        if text_result.has_errors() {
             return result;
         }
-        result.keep_farther_pos(&NodePosPair::from_cursors(&schema_cursor, &input_cursor));
     }
 
     // The schema cursor definitely has a text node after the code node, which
@@ -522,17 +522,14 @@ pub(super) fn validate_literal_matcher_vs_textual(
     if !schema_cursor.goto_next_sibling() && is_text_node(&schema_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "validate_literal_matcher_vs_text called with a matcher that is not literal. \
              A text node does not follow the schema."
         );
     }
 
-    let schema_node_str = schema_cursor
-        .node()
-        .utf8_text(schema_str.as_bytes())
-        .unwrap();
+    let schema_node_str = get_node_text(&schema_cursor.node(), schema_str);
 
     let schema_node_str_has_more_than_extras = schema_node_str.len() > 1;
 
@@ -544,8 +541,8 @@ pub(super) fn validate_literal_matcher_vs_textual(
             {
                 invariant_violation!(
                     result,
-                    &input_cursor,
                     &schema_cursor,
+                    &input_cursor,
                     "we should have had extras in the matcher string"
                 );
             }
@@ -556,8 +553,8 @@ pub(super) fn validate_literal_matcher_vs_textual(
     if !input_cursor.goto_next_sibling() && schema_node_str_has_more_than_extras {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "at this point we should already have counted the number of nodes, \
              factoring in literal matchers."
         );
@@ -636,8 +633,6 @@ pub(super) fn validate_literal_matcher_vs_textual(
 
 #[cfg(test)]
 mod tests {
-    use std::vec;
-
     use serde_json::json;
 
     use crate::mdschema::validator::errors::{
@@ -660,18 +655,12 @@ mod tests {
         let schema_str = r#"`item:/\w+/`"#;
         let input_str = "appl";
 
-        let (value, errors, pos_so_far) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_paragraphs(i, s)))
-                .goto_first_child_then_unwrap()
-                .validate_incomplete()
-                .destruct();
-
-        // shouldn't capture just yet
-        assert_eq!(value, json!({}));
-        assert_eq!(errors, vec![]);
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+            .goto_first_child_then_unwrap()
+            .validate_incomplete();
 
         // We should NOT go farther for now
         // Schema:                     Input:
@@ -679,7 +668,10 @@ mod tests {
         // └─ (paragraph[1]0..12)      └─ (paragraph[1]0..4)
         //    └─ (code_span[2]0..12)      └─ (text[2]0..4)
         //       └─ (text[3]1..11)
-        assert_eq!(pos_so_far, NodePosPair::from_pos(2, 2));
+        // shouldn't capture just yet
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(2, 2));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -687,17 +679,15 @@ mod tests {
         let schema_str = "prefix `test:/test/`";
         let input_str = "prefix test";
 
-        let (value, errors, farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"test": "test"}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 2));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(4, 2));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
     }
 
     #[test]
@@ -705,17 +695,15 @@ mod tests {
         let schema_str = "prefix `test:/test/`";
         let input_str = "prefix test";
 
-        let (value, errors, farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"test": "test"}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 2));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(4, 2));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
 
         let schema_tree = parse_markdown(schema_str).unwrap();
         let input_tree = parse_markdown(input_str).unwrap();
@@ -728,28 +716,26 @@ mod tests {
         input_cursor.goto_first_child();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
-        let (value, errors, _) = TextualVsTextualValidator::validate(&walker, true).destruct();
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
+        let result = TextualVsTextualValidator::validate(&walker, true);
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"test": "test"}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_with_prefix_no_suffix_ends_at_end_of_text() {
         let schema_str = "prefix `test:/test/` *test*";
         let input_str = "prefix test *test*";
-        let (value, errors, farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"test": "test"}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 2));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(5, 2));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
     }
 
     #[test]
@@ -757,16 +743,14 @@ mod tests {
         let schema_str = "prefix `test:/test/` suffix";
         let input_str = "prefix test suffix";
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"test": "test"}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
     }
 
     #[test]
@@ -774,38 +758,29 @@ mod tests {
         let schema_str = "prefix `test:/test/` suffix *test* _*test*_";
         let input_str = "prefix test suffix *test* _*test*_";
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"test": "test"}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
     }
     #[test]
     fn test_validate_matcher_vs_text_with_input_prefix_not_long_enough() {
         let schema_str = "prefix that is longer than input `test:/test/`";
         let input_str = "prefix";
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(input, schema)| {
-                    let n = input;
-                    assert!(is_paragraph_node(n));
-                    let n = schema;
-                    assert!(is_paragraph_node(n));
-                })
-                .goto_first_child_then_unwrap()
-                .validate_incomplete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(is_paragraph_node(s) && is_paragraph_node(i)))
+            .goto_first_child_then_unwrap()
+            .validate_incomplete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -813,16 +788,14 @@ mod tests {
         let schema_str = "prefix that is longer than input `test:/test/`";
         let input_str = "prefix that is lo";
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_incomplete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_incomplete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -830,28 +803,24 @@ mod tests {
         let schema_str = "prefix `test:/test/` suffix that is longer";
         let input_str = "prefix test suffix that";
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_incomplete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_incomplete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
         assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+            result.errors(),
+            &[ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     schema_index: 5,
                     input_index: 2,
@@ -862,7 +831,7 @@ mod tests {
             )]
         );
 
-        assert_eq!(value, json!({"test": "test"}));
+        assert_eq!(result.value(), &json!({"test": "test"}));
     }
 
     #[test]
@@ -870,16 +839,14 @@ mod tests {
         let schema_str = "good prefix `test:/test/`";
         let input_str = "bad p";
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_incomplete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_incomplete();
 
-        assert_eq!(errors.len(), 1);
-        match &errors[0] {
+        assert_eq!(result.errors().len(), 1);
+        match &result.errors()[0] {
             ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
                 kind: NodeContentMismatchKind::Prefix,
                 actual,
@@ -892,10 +859,13 @@ mod tests {
                 assert_eq!(*input_index, 2);
                 assert_eq!(*schema_index, 2);
             }
-            _ => panic!("Expected a prefix mismatch error, got: {:?}", errors[0]),
+            _ => panic!(
+                "Expected a prefix mismatch error, got: {:?}",
+                result.errors()[0]
+            ),
         }
 
-        assert_eq!(value, json!({}));
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -903,125 +873,129 @@ mod tests {
         let schema_str = "`test`! foo";
         let input_str = "`test` foo";
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_literal_matcher_with_prefix() {
         let schema_str = "prefix `test`! foo";
         let input_str = "prefix `test` foo";
-        let (value, errors, farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 5));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(5, 5));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_literal_matcher_partial_suffix_match() {
         let schema_str = "`test`! foo";
         let input_str = "`test` f";
-        let (value, errors, farthest_reached_pos) =
+        let result =
             ValidatorTester::<LiteralMatcherVsTextualValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate_incomplete()
-                .destruct();
+                .validate_incomplete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(3, 3));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(3, 3));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
+    }
+
+    #[test]
+    fn test_validate_matcher_vs_text_incomplete() {
+        let schema_str = "test `foo:/test/`";
+        let input_str = "test te";
+
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_incomplete();
+
+        // no errors so far
+        assert!(result.errors().is_empty());
+        // nor do we get any captures so far
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_with_repeating() {
         let schema_str = "test `test:/test/`{1,} foo";
         let input_str = "test test foo";
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"test": "test"}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": "test"}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_literal_matcher_ends_at_end_of_text() {
         let schema_str = "`test`! foo *test*";
         let input_str = "`test` foo *testing*";
-        let (value, errors, farthest_reached_pos) =
+        let result =
             ValidatorTester::<LiteralMatcherVsTextualValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+                .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
 
-        let (value, errors, farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
     fn test_validate_matcher_vs_text_literal_matcher_instant_non_text_in_input() {
         let schema_str = "`test`!*test*";
         let input_str = "`test`*testing*";
-        let (value, errors, farthest_reached_pos) =
+        let result =
             ValidatorTester::<LiteralMatcherVsTextualValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_paragraphs(i, s)))
+                .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_inline_code(i, s)))
-                .validate_complete()
-                .destruct();
+                .peek_nodes(|(s, i)| assert!(both_are_inline_code(s, i)))
+                .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 4));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(5, 4));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
 
-        let (value, errors, farthest_reached_pos) =
-            ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 4));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(5, 4));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 }

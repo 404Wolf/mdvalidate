@@ -1,6 +1,7 @@
 use log::trace;
 
 use crate::mdschema::validator::errors::{SchemaError, ValidationError};
+use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::check_repeating_matchers::check_repeating_matchers;
 use crate::mdschema::validator::node_walker::validators::code::CodeVsCodeValidator;
 use crate::mdschema::validator::node_walker::validators::headings::HeadingVsHeadingValidator;
@@ -15,8 +16,7 @@ use crate::mdschema::validator::ts_utils::{
     both_are_textual_nodes, is_heading_node,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::compare_node_children_lengths_check;
+use crate::{compare_node_children_lengths_check};
 
 /// Validate two arbitrary nodes against each other.
 ///
@@ -34,40 +34,40 @@ impl ValidatorImpl for NodeVsNodeValidator {
 }
 
 fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(walker.input_cursor(), walker.schema_cursor());
+    let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
     let schema_str = walker.schema_str();
     let _input_str = walker.input_str();
 
-    let input_node = walker.input_cursor().node();
     let schema_node = walker.schema_cursor().node();
+    let input_node = walker.input_cursor().node();
 
     // Make mutable copies that we can walk
-    let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
+    let mut input_cursor = walker.input_cursor().clone();
 
     // Both are textual nodes - use text_vs_text directly
-    if both_are_textual_nodes(&input_node, &schema_node) {
+    if both_are_textual_nodes(&schema_node, &input_node) {
         trace!("Both are textual nodes, validating text vs text");
 
         return TextualVsTextualValidator::validate(
-            &walker.with_cursors(&input_cursor, &schema_cursor),
+            &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
 
     // Both are container nodes - use container_vs_container directly
-    if both_are_codeblocks(&input_node, &schema_node) {
+    if both_are_codeblocks(&schema_node, &input_node) {
         trace!("Both are container nodes, validating container vs container");
 
         return CodeVsCodeValidator::validate(
-            &walker.with_cursors(&input_cursor, &schema_cursor),
+            &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
 
     // Both are textual containers
-    if both_are_textual_containers(&input_node, &schema_node) {
+    if both_are_textual_containers(&schema_node, &input_node) {
         trace!("Both are textual containers, validating text vs text");
 
         // If we have top level textual containers, they CANNOT have repeating
@@ -86,63 +86,64 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         }
 
         return TextualContainerVsTextualContainerValidator::validate(
-            &walker.with_cursors(&input_cursor, &schema_cursor),
+            &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
 
     // Both are textual nodes
-    if both_are_textual_nodes(&input_node, &schema_node) {
+    if both_are_textual_nodes(&schema_node, &input_node) {
         trace!("Both are textual nodes, validating text vs text");
 
         return TextualVsTextualValidator::validate(
-            &walker.with_cursors(&input_cursor, &schema_cursor),
+            &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
 
     // Both are link nodes or image nodes
-    if both_are_link_nodes(&input_node, &schema_node)
-        || both_are_image_nodes(&input_node, &schema_node)
+    if both_are_link_nodes(&schema_node, &input_node)
+        || both_are_image_nodes(&schema_node, &input_node)
     {
         trace!("Both are links or images, validating link vs link");
 
         return LinkVsLinkValidator::validate(
-            &walker.with_cursors(&input_cursor, &schema_cursor),
+            &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
 
     // Both are list nodes
-    if both_are_list_nodes(&input_node, &schema_node) {
+    if both_are_list_nodes(&schema_node, &input_node) {
         trace!("Both are list nodes, validating list vs list");
 
         return ListVsListValidator::validate(
-            &walker.with_cursors(&input_cursor, &schema_cursor),
+            &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
 
     // Both are ruler nodes
-    if both_are_rulers(&input_node, &schema_node) {
+    if both_are_rulers(&schema_node, &input_node) {
         trace!("Both are rulers. No extra validation happens for rulers.");
     }
 
     // Both are heading nodes or document nodes
     //
     // Crawl down one layer to get to the actual children
-    if both_are_matching_top_level_nodes(&input_node, &schema_node) {
+    if both_are_matching_top_level_nodes(&schema_node, &input_node) {
         trace!("Both are matching top level nodes. Checking of which kind.");
 
         // First, if they are headings, validate the headings themselves.
-        if is_heading_node(&input_node) && is_heading_node(&schema_node) {
+        if is_heading_node(&schema_node) && is_heading_node(&input_node) {
             trace!("Both are heading nodes, validating heading vs heading");
 
             let heading_result = HeadingVsHeadingValidator::validate(
-                &walker.with_cursors(&input_cursor, &schema_cursor),
+                &walker.with_cursors(&schema_cursor, &input_cursor),
                 got_eof,
             );
             result.join_other_result(&heading_result);
+            result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
             result.sync_cursor_pos(&schema_cursor, &input_cursor);
         }
 
@@ -152,9 +153,9 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         compare_node_children_lengths_check!(schema_cursor, input_cursor, got_eof, result);
 
         // Now actually go down to the children
-        if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
+        if schema_cursor.goto_first_child() && input_cursor.goto_first_child() {
             let new_result = NodeVsNodeValidator::validate(
-                &walker.with_cursors(&input_cursor, &schema_cursor),
+                &walker.with_cursors(&schema_cursor, &input_cursor),
                 got_eof,
             );
             result.join_other_result(&new_result);
@@ -165,8 +166,8 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
         loop {
             // TODO: handle case where one has more children than the other
-            let input_had_sibling = input_cursor.goto_next_sibling();
             let schema_had_sibling = schema_cursor.goto_next_sibling();
+            let input_had_sibling = input_cursor.goto_next_sibling();
             trace!(
                 "input_had_sibling: {}, schema_had_sibling: {}, input_kind: {}, schema_kind: {}",
                 input_had_sibling,
@@ -179,7 +180,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 trace!("Both input and schema node have siblings");
 
                 let new_result = NodeVsNodeValidator::validate(
-                    &walker.with_cursors(&input_cursor, &schema_cursor),
+                    &walker.with_cursors(&schema_cursor, &input_cursor),
                     got_eof,
                 );
                 result.join_other_result(&new_result);
@@ -208,6 +209,69 @@ mod tests {
     };
 
     #[test]
+    fn test_validate_node_vs_node_incomplete() {
+        let schema_str = r#"
+# `a:/.*/`
+
+# `b:/.*/`
+
+# `c:/.*/`
+"#;
+
+        let input_str = r#"
+# a
+
+# b
+
+# c
+"#;
+        let schema = parse_markdown(schema_str).unwrap();
+        let input = parse_markdown(input_str).unwrap();
+
+        let schema_cursor = schema.walk();
+        let input_cursor = input.walk();
+
+        let walker =
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
+        let result = NodeVsNodeValidator::validate(&walker, true);
+
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({"a": "a", "b": "b", "c": "c"}));
+    }
+
+    #[test]
+    fn test_validate_node_vs_node_doesnt_get_multiple_errors() {
+        // Previously this test yielded multiple errors
+        let schema_str = r#"# pre `assignment_number:/\d+/`"#;
+
+        let input_str = r#"# pre dd"#;
+
+        let schema = parse_markdown(schema_str).unwrap();
+        let input = parse_markdown(input_str).unwrap();
+
+        let schema_cursor = schema.walk();
+        let input_cursor = input.walk();
+
+        let walker =
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
+        let result = NodeVsNodeValidator::validate(&walker, true);
+
+        assert_eq!(
+            result.errors().len(),
+            1,
+            "Expected exactly one error but found {:?}",
+            result.errors()
+        );
+        assert!(
+            result.value().is_null()
+                || result
+                    .value()
+                    .as_object()
+                    .map_or(true, |obj| obj.is_empty())
+        );
+    }
+
+    #[test]
     fn test_validate_node_vs_node_with_with_nesting_lists() {
         let schema_str = r#"
 - `test:/\w+/`{2,2}
@@ -226,14 +290,14 @@ mod tests {
         assert_eq!(input_cursor.node().kind(), "document");
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
-        assert_eq!(result.errors, vec![]);
+        assert_eq!(result.errors(), &[]);
 
         assert_eq!(
-            result.value,
-            json!({
+            result.value(),
+            &json!({
                 "test": [
                     "test1",
                     "test2",
@@ -254,11 +318,11 @@ mod tests {
         let input_cursor = input.walk();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, false);
 
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({}));
+        assert_eq!(result.errors(), &[]);
+        assert_eq!(result.value(), &json!({}));
 
         let schema_str2 = "This is *bold* text.";
         let input_str2 = "This is **bold** text.";
@@ -269,11 +333,11 @@ mod tests {
         let input_cursor = input2.walk();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str2, input_str2);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str2, &input_cursor, input_str2);
         let result = NodeVsNodeValidator::validate(&walker, false);
 
-        assert!(!result.errors.is_empty());
-        assert_eq!(result.value, json!({}));
+        assert!(!result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -287,16 +351,16 @@ mod tests {
         let input_cursor = input.walk();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
         assert_eq!(
-            result.errors,
-            vec![],
+            result.errors(),
+            &[],
             "Expected no errors, got: {:?}",
-            result.errors
+            result.errors()
         );
-        assert_eq!(result.value, json!({"name": "Alice"}));
+        assert_eq!(result.value(), &json!({"name": "Alice"}));
     }
 
     #[test]
@@ -310,16 +374,16 @@ mod tests {
         let input_cursor = input.walk();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
         assert_eq!(
-            result.errors,
-            vec![],
+            result.errors(),
+            &[],
             "Expected no errors, got: {:?}",
-            result.errors
+            result.errors()
         );
-        assert_eq!(result.value, json!({}));
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -333,16 +397,16 @@ mod tests {
         let input_cursor = input.walk();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
         assert_eq!(
-            result.errors,
-            vec![],
+            result.errors(),
+            &[],
             "Expected no errors, got: {:?}",
-            result.errors
+            result.errors()
         );
-        assert_eq!(result.value, json!({}));
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -356,11 +420,11 @@ mod tests {
         let input_cursor = input.walk();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({"name": "Alice"}));
+        assert_eq!(result.errors(), &[]);
+        assert_eq!(result.value(), &json!({"name": "Alice"}));
     }
 
     #[test]
@@ -374,12 +438,12 @@ mod tests {
         let input_cursor = input.walk();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
-        assert_ne!(result.errors, vec![]);
+        assert_ne!(result.errors(), &[]);
 
-        match result.errors.first() {
+        match result.errors().first() {
             Some(error) => match error {
                 ValidationError::SchemaViolation(
                     SchemaViolationError::ChildrenLengthMismatch { expected, .. },
@@ -408,15 +472,15 @@ mod tests {
         let input_cursor = input.walk();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
         assert_eq!(
-            result.errors,
-            vec![],
+            result.errors(),
+            &[],
             "Expected no errors, got: {:?}",
-            result.errors
+            result.errors()
         );
-        assert_eq!(result.value, json!({}));
+        assert_eq!(result.value(), &json!({}));
     }
 }

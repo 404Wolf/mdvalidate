@@ -32,6 +32,14 @@ test_case!(
 );
 
 test_case!(
+    literal_matcher_with_inner_matcher,
+    r#"`{foo:/foo/}`!"#,
+    r#"`foo`"#,
+    json!({"foo": "foo"}),
+    vec![]
+);
+
+test_case!(
     matcher_mismatch,
     r#"`name:/[a-z]+/`"#,
     r#"123"#,

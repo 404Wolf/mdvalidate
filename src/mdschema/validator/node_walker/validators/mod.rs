@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 use tracing::instrument;
 
 use crate::mdschema::validator::{
@@ -23,6 +24,7 @@ pub trait Validator {
 
 impl<T: ValidatorImpl> Validator for T {
     #[instrument(skip_all, level = "trace", fields(
+        v = std::any::type_name::<T>().strip_prefix("mdvalidate::mdschema::validator::node_walker::validators::").unwrap_or(std::any::type_name::<T>()),
         i = %walker.input_cursor().descendant_index(),
         s = %walker.schema_cursor().descendant_index(),
     ), ret)]
@@ -31,13 +33,25 @@ impl<T: ValidatorImpl> Validator for T {
     }
 }
 
+#[macro_export]
+macro_rules! trace_cursors {
+    ($schema_cursor:expr, $input_cursor:expr) => {{
+        println!(
+            "{}",
+            crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair(
+                &$schema_cursor,
+                &$input_cursor,
+            )
+        );
+    }};
+}
+
 #[cfg(test)]
 mod test_utils {
     use tree_sitter::{Node, Tree, TreeCursor};
 
     use crate::mdschema::validator::{
-        node_walker::utils::pretty_print_cursor_pair,
-        ts_utils::{parse_markdown, walk_to_root},
+        node_walker::utils::pretty_print_cursor_pair, ts_utils::parse_markdown,
         validator_walker::ValidatorWalker,
     };
 
@@ -45,10 +59,10 @@ mod test_utils {
 
     pub struct ValidatorTester<'a, V: Validator> {
         _phantom: std::marker::PhantomData<V>,
-        input_tree: Tree,
         schema_tree: Tree,
-        input_str: &'a str,
         schema_str: &'a str,
+        input_tree: Tree,
+        input_str: &'a str,
     }
 
     impl<'a, V: Validator> ValidatorTester<'a, V> {
@@ -58,33 +72,33 @@ mod test_utils {
 
             Self {
                 _phantom: std::marker::PhantomData,
-                input_tree,
                 schema_tree,
-                input_str,
                 schema_str,
+                input_tree,
+                input_str,
             }
         }
 
         pub fn walk(&'_ self) -> ValidationTesterWalker<'_, V> {
-            let input_cursor = self.input_tree.walk();
             let schema_cursor = self.schema_tree.walk();
+            let input_cursor = self.input_tree.walk();
 
             ValidationTesterWalker {
                 _phantom: std::marker::PhantomData,
-                input_cursor,
                 schema_cursor,
-                input_str: self.input_str,
                 schema_str: self.schema_str,
+                input_cursor,
+                input_str: self.input_str,
             }
         }
     }
 
     pub struct ValidationTesterWalker<'a, V: Validator> {
         _phantom: std::marker::PhantomData<V>,
-        input_cursor: TreeCursor<'a>,
         schema_cursor: TreeCursor<'a>,
-        input_str: &'a str,
         schema_str: &'a str,
+        input_cursor: TreeCursor<'a>,
+        input_str: &'a str,
     }
 
     impl<'a, V: Validator> ValidationTesterWalker<'a, V> {
@@ -92,9 +106,9 @@ mod test_utils {
             self.print();
 
             let walker = ValidatorWalker::from_cursors(
-                &self.input_cursor,
                 &self.schema_cursor,
                 self.schema_str,
+                &self.input_cursor,
                 self.input_str,
             );
             V::validate(&walker, got_eof)
@@ -108,27 +122,45 @@ mod test_utils {
             self.validate(false)
         }
 
+        pub fn with_input_cursor<F>(&mut self, f: F) -> &mut Self
+        where
+            F: FnOnce(&mut TreeCursor<'a>),
+        {
+            f(&mut self.input_cursor);
+            self
+        }
+
+        pub fn with_schema_cursor<F>(&mut self, f: F) -> &mut Self
+        where
+            F: FnOnce(&mut TreeCursor<'a>),
+        {
+            f(&mut self.schema_cursor);
+            self
+        }
+
         /// Peek at the nodes that our cursors are currently positioned at.
         ///
-        /// Calls your callback with the (input_node, schema_node).
+        /// Calls your callback with the (schema_node, input_node).
         pub fn peek_nodes<F>(&mut self, f: F) -> &mut Self
         where
             F: Fn((&Node, &Node)),
         {
-            f((&self.input_cursor.node(), &self.schema_cursor.node()));
+            f((&self.schema_cursor.node(), &self.input_cursor.node()));
             self
         }
 
+        #[allow(dead_code)]
+        pub fn panic_print(&mut self) -> &mut Self {
+            self.print();
+            panic!();
+            #[allow(unreachable_code)]
+            return &mut self;
+        }
+
         pub fn print(&mut self) -> &mut Self {
-            let mut input_cursor = self.input_cursor.clone();
-            walk_to_root(&mut input_cursor);
-
-            let mut schema_cursor = self.schema_cursor.clone();
-            walk_to_root(&mut schema_cursor);
-
             println!(
                 "{}",
-                pretty_print_cursor_pair(&input_cursor, &schema_cursor)
+                pretty_print_cursor_pair(&self.schema_cursor, &self.input_cursor)
             );
             self
         }
@@ -141,7 +173,7 @@ mod test_utils {
                 $(
                     paste::paste! {
                         pub fn [<$goto _then>](&mut self, $($arg: $arg_ty),*) -> Result<&mut ValidationTesterWalker<'a, V>, ()> {
-                            (self.input_cursor.$goto($($arg),*) && self.schema_cursor.$goto($($arg),*))
+                            (self.schema_cursor.$goto($($arg),*) && self.input_cursor.$goto($($arg),*))
                                 .then(|| self)
                                 .ok_or(())
                         }
