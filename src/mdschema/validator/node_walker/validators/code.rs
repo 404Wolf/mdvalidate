@@ -205,7 +205,7 @@ mod tests {
     use serde_json::json;
 
     use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
-    use crate::mdschema::validator::ts_utils::{both_are_codeblocks};
+    use crate::mdschema::validator::ts_types::both_are_codeblocks;
 
     use super::*;
 

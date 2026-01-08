@@ -8,7 +8,8 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     matcher::matcher_extras::{MatcherExtrasError, partition_at_special_chars},
-    ts_utils::{get_next_node, get_node_and_next_node, get_node_text, is_text_node},
+    ts_types::is_text_node,
+    ts_utils::{get_next_node, get_node_and_next_node, get_node_text},
 };
 
 static REGEX_MATCHER_PATTERN: LazyLock<Regex> =

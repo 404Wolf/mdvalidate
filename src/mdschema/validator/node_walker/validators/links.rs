@@ -12,11 +12,11 @@ use crate::mdschema::validator::node_walker::helpers::compare_text_contents::com
 use crate::mdschema::validator::node_walker::helpers::curly_matchers::extract_matcher_from_curly_delineated_text;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 #[cfg(feature = "invariant_violations")]
-use crate::mdschema::validator::ts_utils::both_are_link_description_nodes;
-use crate::mdschema::validator::ts_utils::{
-    both_are_text_nodes, get_node_text, is_image_node, is_link_destination_node, is_link_node,
-    waiting_at_end,
+use crate::mdschema::validator::ts_types::both_are_link_description_nodes;
+use crate::mdschema::validator::ts_types::{
+    both_are_text_nodes, is_image_node, is_link_destination_node, is_link_node,
 };
+use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 // Use the macro from node_walker module

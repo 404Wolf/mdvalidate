@@ -14,9 +14,9 @@ use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
+use crate::mdschema::validator::ts_types::{is_inline_code_node, is_text_node};
 use crate::mdschema::validator::ts_utils::{
-    get_next_node, get_node_n_nodes_ahead, get_node_text, is_inline_code_node, is_text_node,
-    waiting_at_end,
+    get_next_node, get_node_n_nodes_ahead, get_node_text, waiting_at_end,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
@@ -643,9 +643,10 @@ mod tests {
     use crate::mdschema::validator::node_walker::validators::{
         Validator, textual::TextualVsTextualValidator,
     };
-    use crate::mdschema::validator::ts_utils::{
-        both_are_inline_code, both_are_paragraphs, is_paragraph_node, parse_markdown,
+    use crate::mdschema::validator::ts_types::{
+        both_are_inline_code, both_are_paragraphs, is_paragraph_node,
     };
+    use crate::mdschema::validator::ts_utils::parse_markdown;
     use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
     use super::{LiteralMatcherVsTextualValidator, MatcherVsTextValidator};

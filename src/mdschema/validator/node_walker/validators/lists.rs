@@ -1,5 +1,5 @@
 #[cfg(feature = "invariant_violations")]
-use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use crate::mdschema::validator::{ts_types::is_list_item_node, validator_walker::ValidatorWalker};
 use crate::mdschema::validator::{
     errors::MalformedStructureKind,
     matcher::matcher::{Matcher, MatcherError},
@@ -10,13 +10,13 @@ use crate::mdschema::validator::{
             textual_container::TextualContainerVsTextualContainerValidator,
         },
     },
-    ts_utils::*,
+    ts_types::{both_are_list_items, both_are_markers, both_are_paragraphs, is_list_node},
+    ts_utils::{count_siblings, get_node_and_next_node, get_node_text, has_single_code_child, has_subsequent_node_of_kind, waiting_at_end},
 };
 use crate::{
     invariant_violation,
     mdschema::validator::{
         errors::{ChildrenCount, SchemaError, SchemaViolationError, ValidationError},
-        ts_utils::{has_subsequent_node_of_kind, is_list_node},
     },
 };
 use log::trace;
@@ -772,7 +772,8 @@ mod tests {
                 test_utils::ValidatorTester,
             },
         },
-        ts_utils::{both_are_list_nodes, parse_markdown},
+        ts_types::both_are_list_nodes,
+        ts_utils::parse_markdown,
     };
 
     fn validate_lists(schema_str: &str, input_str: &str, got_eof: bool) -> ValidationResult {
