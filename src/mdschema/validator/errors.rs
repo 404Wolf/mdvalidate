@@ -569,12 +569,12 @@ fn validation_error_to_ariadne(
                 schema_index,
                 input_index,
             } => {
-                let input_node = find_node_by_index(tree.root_node(), *input_index);
                 let schema_node = find_node_by_index(tree.root_node(), *schema_index);
                 let schema_content =
                     node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                let input_range = input_node.start_byte()..input_node.end_byte();
                 let schema_range = schema_node.start_byte()..schema_node.end_byte();
+                let input_node = find_node_by_index(tree.root_node(), *input_index);
+                let input_range = input_node.start_byte()..input_node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, input_range.clone()))
                 .with_message("Non-repeating matcher in repeating context")

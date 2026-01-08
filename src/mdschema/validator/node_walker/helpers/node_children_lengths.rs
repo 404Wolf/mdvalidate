@@ -18,8 +18,8 @@ pub fn compare_node_children_lengths(
     got_eof: bool,
 ) -> Option<ValidationError> {
     // First, count the children to check for length mismatches
-    let input_child_count = input_cursor.node().child_count();
     let schema_child_count = schema_cursor.node().child_count();
+    let input_child_count = input_cursor.node().child_count();
 
     // Handle node mismatches
     // If we have reached the EOF:

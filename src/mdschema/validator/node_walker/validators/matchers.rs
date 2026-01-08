@@ -61,9 +61,8 @@ fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> Val
     let mut schema_cursor = walker.schema_cursor().clone();
     let mut input_cursor = walker.input_cursor().clone();
 
-    let input_node = input_cursor.node();
-
     let schema_cursor_is_code_node = is_inline_code_node(&schema_cursor.node());
+    let input_node = input_cursor.node();
     let schema_prefix_node = if schema_cursor_is_code_node {
         let mut prev_cursor = schema_cursor.clone();
         if prev_cursor.goto_previous_sibling() && is_text_node(&prev_cursor.node()) {
@@ -472,8 +471,8 @@ pub(super) fn validate_literal_matcher_vs_textual(
 ) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
-    let mut input_cursor = input_cursor.clone();
     let mut schema_cursor = schema_cursor.clone();
+    let mut input_cursor = input_cursor.clone();
 
     #[cfg(feature = "invariant_violations")]
     if !is_inline_code_node(&schema_cursor.node()) || !is_inline_code_node(&input_cursor.node()) {
@@ -487,8 +486,8 @@ pub(super) fn validate_literal_matcher_vs_textual(
 
     // Walk into the code node and do regular textual validation.
     {
-        let mut input_cursor = input_cursor.clone();
         let mut schema_cursor = schema_cursor.clone();
+        let mut input_cursor = input_cursor.clone();
         input_cursor.goto_first_child();
         schema_cursor.goto_first_child();
 

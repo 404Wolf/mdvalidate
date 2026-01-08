@@ -8,7 +8,7 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     matcher::matcher_extras::{MatcherExtrasError, get_all_extras, partition_at_special_chars},
-    ts_utils::{get_next_node, get_node_and_next_node, is_text_node},
+    ts_utils::{get_next_node, get_node_and_next_node, get_node_text, is_text_node},
 };
 
 static REGEX_MATCHER_PATTERN: LazyLock<Regex> =
@@ -304,14 +304,11 @@ impl Matcher {
         schema_cursor: &TreeCursor,
         schema_str: &str,
     ) -> Result<Self, MatcherError> {
-        let pattern_str = schema_cursor
-            .node()
-            .utf8_text(schema_str.as_bytes())
-            .unwrap();
+        let pattern_str = get_node_text(&schema_cursor.node(), schema_str);
         let next_node = get_next_node(schema_cursor);
         let extras_str = next_node
             .filter(|n| is_text_node(&n)) // don't bother if not text; extras must be in text
-            .map(|n| n.utf8_text(schema_str.as_bytes()).unwrap())
+            .map(|n| get_node_text(&n, schema_str))
             .and_then(|n| partition_at_special_chars(n).map(|(extras, _)| extras));
 
         Self::try_from_pattern_and_suffix_str(pattern_str, extras_str)

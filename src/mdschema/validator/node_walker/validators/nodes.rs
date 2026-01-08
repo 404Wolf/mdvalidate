@@ -39,12 +39,12 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     let schema_str = walker.schema_str();
     let _input_str = walker.input_str();
 
-    let input_node = walker.input_cursor().node();
     let schema_node = walker.schema_cursor().node();
+    let input_node = walker.input_cursor().node();
 
     // Make mutable copies that we can walk
-    let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
+    let mut input_cursor = walker.input_cursor().clone();
 
     // Both are textual nodes - use text_vs_text directly
     if both_are_textual_nodes(&schema_node, &input_node) {

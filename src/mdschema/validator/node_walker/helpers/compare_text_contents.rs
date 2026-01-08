@@ -1,6 +1,7 @@
 use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError};
+use crate::mdschema::validator::ts_utils::get_node_text;
 
 /// Compare text contents between schema and input nodes.
 ///
@@ -19,13 +20,8 @@ pub fn compare_text_contents(
     is_partial_match: bool,
     strip_extras: bool,
 ) -> Option<ValidationError> {
-    let (schema_text, input_text) = match (
-        schema_cursor.node().utf8_text(schema_str.as_bytes()),
-        input_cursor.node().utf8_text(input_str.as_bytes()),
-    ) {
-        (Ok(schema), Ok(input)) => (schema, input),
-        (Err(_), _) | (_, Err(_)) => return None, // Can't compare invalid UTF-8
-    };
+    let schema_text = get_node_text(&schema_cursor.node(), schema_str);
+    let input_text = get_node_text(&input_cursor.node(), input_str);
     let schema_text = if strip_extras {
         // TODO: this assumes that ! is the only extra when it is an extra
         let stripped = schema_text

@@ -58,10 +58,10 @@ impl ValidatorImpl for CodeVsCodeValidator {
 fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
-    let input_cursor = walker.input_cursor().clone();
     let schema_cursor = walker.schema_cursor().clone();
-    let input_str = walker.input_str();
+    let input_cursor = walker.input_cursor().clone();
     let schema_str = walker.schema_str();
+    let input_str = walker.input_str();
 
     #[cfg(feature = "invariant_violations")]
     if input_cursor.node().kind() != "fenced_code_block"
@@ -212,8 +212,8 @@ mod tests {
     #[test]
     fn test_validate_code_vs_code_literal_same() {
         // positive case: input and schema are identical
-        let input_str = "```rust\nfn main() {}\n```";
         let schema_str = "```rust\nfn main() {}\n```";
+        let input_str = "```rust\nfn main() {}\n```";
 
         let (value, errors, _farthest_reached_pos) =
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)

@@ -57,12 +57,12 @@ impl<'a> ValidatorWalker<'a> {
         &self.schema_cursor
     }
 
-    pub fn input_str(&self) -> &str {
-        self.input_str
-    }
-
     pub fn schema_str(&self) -> &str {
         self.schema_str
+    }
+
+    pub fn input_str(&self) -> &str {
+        self.input_str
     }
 
     pub fn cursors_mut(&mut self) -> (&mut TreeCursor<'a>, &mut TreeCursor<'a>) {

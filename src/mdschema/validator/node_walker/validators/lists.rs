@@ -92,11 +92,11 @@ impl ValidatorImpl for ListVsListValidator {
 fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
-    let input_str = walker.input_str();
     let schema_str = walker.schema_str();
+    let input_str = walker.input_str();
 
-    let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
+    let mut input_cursor = walker.input_cursor().clone();
 
     // We want to ensure that the types of lists are the same
     compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
@@ -401,9 +401,8 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             // exact same length, since they are both literal lists. Dynamic
             // lengths aren't allowed for literal lists.
             let remaining_schema_nodes = count_siblings(&schema_cursor);
-            let remaining_input_nodes = count_siblings(&input_cursor);
-
             let literal_chunk_count = count_next_n_literal_lists(&schema_cursor, schema_str);
+            let remaining_input_nodes = count_siblings(&input_cursor);
             if remaining_schema_nodes != remaining_input_nodes {
                 let available_literal_items = remaining_input_nodes + 1;
 
@@ -457,8 +456,8 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
             {
                 // Recurse down into the next list if there is one
-                let mut input_cursor = input_cursor.clone();
                 let mut schema_cursor = schema_cursor.clone();
+                let mut input_cursor = input_cursor.clone();
 
                 input_cursor.goto_last_child();
                 schema_cursor.goto_last_child();
@@ -652,13 +651,10 @@ fn try_from_code_and_text_node(
     suffix_node: Option<tree_sitter::Node>,
     schema_str: &str,
 ) -> Result<Matcher, MatcherError> {
-    let matcher_text = matcher_node.utf8_text(schema_str.as_bytes()).map_err(|_| {
-        MatcherError::MatcherInteriorRegexInvalid("Invalid UTF-8 in matcher node".to_string())
-    })?;
+    let matcher_text = get_node_text(&matcher_node, schema_str);
 
     let suffix_text = suffix_node
-        .map(|node| node.utf8_text(schema_str.as_bytes()).ok())
-        .flatten();
+        .map(|node| get_node_text(&node, schema_str));
 
     Matcher::try_from_pattern_and_suffix_str(matcher_text, suffix_text)
 }
@@ -920,8 +916,8 @@ mod tests {
 
     #[test]
     fn test_validate_list_vs_list_literal_list_items_different() {
-        let input_str = "- test1\n- different";
         let schema_str = "- test1\n- test2";
+        let input_str = "- test1\n- different";
         let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
 
         assert_eq!(

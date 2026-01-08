@@ -25,11 +25,11 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
-        let input_str = walker.input_str();
         let schema_str = walker.schema_str();
+        let input_str = walker.input_str();
 
-        let mut input_cursor = walker.input_cursor().clone();
         let mut schema_cursor = walker.schema_cursor().clone();
+        let mut input_cursor = walker.input_cursor().clone();
 
         // Both should be the start of headings
         #[cfg(feature = "invariant_violations")]
@@ -76,7 +76,7 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
                 }
             };
             if failed_to_walk_to_heading
-                || !(input_had_heading_content && schema_had_heading_content)
+                || !(schema_had_heading_content && input_had_heading_content)
             {
                 return result;
             }
@@ -85,8 +85,8 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
 
         // Both should be at markers
         #[cfg(feature = "invariant_violations")]
-        if !is_textual_container_node(&input_cursor.node())
-            || !is_textual_container_node(&schema_cursor.node())
+        if !is_textual_container_node(&schema_cursor.node())
+            || !is_textual_container_node(&input_cursor.node())
         {
             invariant_violation!(
                 result,

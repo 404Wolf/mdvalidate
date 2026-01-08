@@ -70,8 +70,8 @@ fn validate_textual_container_vs_textual_container_impl(
 
     let schema_str = walker.schema_str();
 
-    let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
+    let mut input_cursor = walker.input_cursor().clone();
 
     #[cfg(feature = "invariant_violations")]
     if !both_are_textual_containers(&schema_cursor.node(), &input_cursor.node()) {
