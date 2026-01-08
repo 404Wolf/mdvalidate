@@ -1,6 +1,6 @@
 use tree_sitter::TreeCursor;
 
-use crate::{invariant_violation, trace_cursors};
+use crate::invariant_violation;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::*,
@@ -155,7 +155,6 @@ fn validate_textual_container_vs_textual_container_impl(
         };
 
         result.join_other_result(&pair_result);
-        trace_cursors!(schema_cursor, input_cursor);
 
         if !schema_cursor.goto_next_sibling() || !input_cursor.goto_next_sibling() {
             break;
@@ -372,7 +371,10 @@ mod tests {
         let errors = result.errors().to_vec();
         let value = result.value().clone();
 
-        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(12, 10));
+        assert_eq!(
+            *result.farthest_reached_pos(),
+            NodePosPair::from_pos(12, 10)
+        );
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"a": "a", "b": "b"}));
     }
