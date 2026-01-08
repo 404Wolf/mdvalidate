@@ -11,7 +11,7 @@ use crate::mdschema::validator::node_walker::validators::lists::ListVsListValida
 use crate::mdschema::validator::node_walker::validators::textual::TextualVsTextualValidator;
 use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
-use crate::mdschema::validator::ts_utils::{
+use crate::mdschema::validator::ts_types::{
     both_are_codeblocks, both_are_image_nodes, both_are_link_nodes, both_are_list_nodes,
     both_are_matching_top_level_nodes, both_are_rulers, both_are_tables,
     both_are_textual_containers, both_are_textual_nodes, is_heading_node,

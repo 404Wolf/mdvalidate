@@ -6,13 +6,11 @@ use crate::invariant_violation;
 use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::node_walker::validators::matchers::MatcherVsTextValidator;
-use crate::mdschema::validator::ts_utils::{
-    both_are_textual_nodes, get_next_node, is_inline_code_node, is_text_node,
-};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     node_walker::{ValidationResult, validators::Validator},
-    ts_utils::waiting_at_end,
+    ts_types::{both_are_textual_nodes, is_inline_code_node, is_text_node},
+    ts_utils::{get_next_node, waiting_at_end},
 };
 
 /// Validate two textual elements.
@@ -114,7 +112,7 @@ mod tests {
     use crate::mdschema::validator::{
         node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
-        ts_utils::{both_are_inline_code, both_are_text_nodes},
+        ts_types::{both_are_inline_code, both_are_text_nodes},
     };
 
     #[test]

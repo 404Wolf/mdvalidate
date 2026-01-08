@@ -16,10 +16,11 @@ use crate::mdschema::validator::{
             textual::TextualVsTextualValidator,
         },
     },
-    ts_utils::{
-        both_are_image_nodes, both_are_link_nodes, both_are_textual_containers, count_siblings,
-        get_next_node, get_node_text, is_inline_code_node, is_text_node,
+    ts_types::{
+        both_are_image_nodes, both_are_link_nodes, both_are_textual_containers, is_inline_code_node,
+        is_text_node,
     },
+    ts_utils::{count_siblings, get_next_node, get_node_text},
 };
 
 /// Validate a textual region of input against a textual region of schema.
@@ -240,7 +241,8 @@ mod tests {
         node_walker::validators::{
             test_utils::ValidatorTester, textual_container::count_non_literal_matchers_in_children,
         },
-        ts_utils::{both_are_textual_containers, is_heading_content_node, parse_markdown},
+        ts_types::{both_are_textual_containers, is_heading_content_node},
+        ts_utils::parse_markdown,
     };
 
     #[test]

@@ -5,6 +5,8 @@ use tree_sitter::{Node, Parser, Tree, TreeCursor};
 use tree_sitter_markdown::language;
 
 use crate::mdschema::validator::{errors::ValidationError, validator::ValidatorState};
+#[cfg(feature = "invariant_violations")]
+use crate::mdschema::validator::ts_types::is_marker_node;
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -116,62 +118,6 @@ pub fn find_node_by_index(root: Node, target_index: usize) -> Node {
     cursor.node()
 }
 
-/// Check if a node is a list.
-///
-/// Macro to generate simple `is_*_node` functions that check if node.kind() equals a specific string.
-macro_rules! is_node_kind {
-    ($fn_name:ident, $($kind:expr),+) => {
-        pub fn $fn_name(node: &Node) -> bool {
-            match node.kind() {
-                $($kind)|+ => true,
-                _ => false,
-            }
-        }
-    };
-}
-
-is_node_kind!(is_text_node, "text");
-is_node_kind!(is_inline_code_node, "code_span");
-is_node_kind!(is_block_code_node, "fenced_code_block");
-is_node_kind!(is_link_node, "link");
-is_node_kind!(is_link_destination_node, "link_destination");
-is_node_kind!(is_link_text_node, "link_text");
-is_node_kind!(is_image_node, "image");
-is_node_kind!(is_image_description_node, "image_description");
-pub fn is_link_description_node(node: &Node) -> bool {
-    is_link_text_node(node) || is_image_description_node(node)
-}
-is_node_kind!(is_paragraph_node, "paragraph");
-is_node_kind!(is_heading_content_node, "heading_content");
-is_node_kind!(is_list_marker_node, "list_marker");
-is_node_kind!(is_list_item_node, "list_item");
-is_node_kind!(is_codeblock_node, "fenced_code_block");
-is_node_kind!(is_heading_node, "atx_heading");
-is_node_kind!(is_table_node, "table");
-is_node_kind!(is_table_header, "table_header_row");
-is_node_kind!(is_table_delimeter, "table_delimiter_row");
-is_node_kind!(is_table_column_alignment, "table_column_alignment");
-is_node_kind!(is_ruler_node, "thematic_break");
-is_node_kind!(is_list_node, "tight_list", "loose_list");
-is_node_kind!(
-    is_textual_node,
-    "text",
-    "emphasis",
-    "strong_emphasis",
-    "code_span",
-    "list_item"
-);
-is_node_kind!(
-    is_textual_container_node,
-    "paragraph",
-    "heading_content",
-    "list_item"
-);
-
-pub fn is_marker_node(node: &Node) -> bool {
-    node.kind().ends_with("_marker")
-}
-
 pub fn ends_at_end(node: &Node, last_input_str: &str) -> bool {
     let last_input_str = last_input_str.trim_end();
     node.byte_range().end >= last_input_str.len()
@@ -200,120 +146,6 @@ pub fn extract_list_marker<'a>(cursor: &TreeCursor<'a>, schema_str: &'a str) -> 
 
     let marker = cursor.node();
     get_node_text(&marker, schema_str)
-}
-
-/// Macro to generate `both_are_*` functions that check if both nodes satisfy a predicate.
-macro_rules! both_are {
-    ($fn_name:ident, $predicate:ident, $doc:expr) => {
-        #[doc = $doc]
-        pub fn $fn_name(schema_node: &Node, input_node: &Node) -> bool {
-            $predicate(&schema_node) && $predicate(&input_node)
-        }
-    };
-}
-
-both_are!(
-    both_are_rulers,
-    is_ruler_node,
-    "Check if both nodes are rulers."
-);
-both_are!(
-    both_are_headings,
-    is_heading_node,
-    "Check if both nodes are headings."
-);
-both_are!(
-    both_are_tables,
-    is_table_node,
-    "Check if both nodes are tables."
-);
-both_are!(
-    both_are_textual_nodes,
-    is_textual_node,
-    "Check if both nodes are textual nodes."
-);
-both_are!(
-    both_are_link_nodes,
-    is_link_node,
-    "Check if both nodes are link nodes."
-);
-both_are!(
-    both_are_link_destination_nodes,
-    is_link_destination_node,
-    "Check if both nodes are link destination nodes."
-);
-both_are!(
-    both_are_link_text_nodes,
-    is_link_text_node,
-    "Check if both nodes are link text nodes."
-);
-both_are!(
-    both_are_image_nodes,
-    is_image_node,
-    "Check if both nodes are image nodes."
-);
-both_are!(
-    both_are_image_description_nodes,
-    is_image_description_node,
-    "Check if both nodes are image description nodes."
-);
-both_are!(
-    both_are_link_description_nodes,
-    is_link_description_node,
-    "Check if both nodes are link description nodes."
-);
-both_are!(
-    both_are_text_nodes,
-    is_text_node,
-    "Check if both nodes are text nodes."
-);
-both_are!(
-    both_are_paragraphs,
-    is_paragraph_node,
-    "Check if both nodes are paragraph nodes."
-);
-both_are!(
-    both_are_textual_containers,
-    is_textual_container_node,
-    "Check if both nodes are textual containers."
-);
-both_are!(
-    both_are_list_nodes,
-    is_list_node,
-    "Check if both nodes are list nodes."
-);
-both_are!(
-    both_are_list_items,
-    is_list_item_node,
-    "Check if both nodes are list item nodes."
-);
-both_are!(
-    both_are_codeblocks,
-    is_codeblock_node,
-    "Check if both nodes are codeblock nodes."
-);
-both_are!(
-    both_are_inline_code,
-    is_inline_code_node,
-    "Check if both nodes are inline code nodes."
-);
-both_are!(
-    both_are_markers,
-    is_marker_node,
-    "Check if both nodes are marker nodes."
-);
-
-/// Check if both nodes are top-level nodes (document or heading).
-pub fn both_are_matching_top_level_nodes(schema_node: &Node, input_node: &Node) -> bool {
-    if schema_node.kind() != input_node.kind() {
-        return false;
-    }
-
-    match schema_node.kind() {
-        "document" => true,
-        "atx_heading" => true,
-        _ => false,
-    }
 }
 
 /// Extract the *type* of heading a given atx_heading is.
@@ -511,63 +343,10 @@ pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<Valida
 
 #[cfg(test)]
 mod tests {
+    use crate::mdschema::validator::ts_types::{is_list_node, is_textual_node};
     use crate::mdschema::validator::utils::parse_markdown_and_get_tree;
 
     use super::*;
-
-    #[test]
-    fn test_is_codeblock() {
-        // Without language, 3 backticks
-        let input = "```\ncode\n```\n";
-        let tree = parse_markdown_and_get_tree(input);
-        let mut cursor = tree.walk();
-        cursor.goto_first_child();
-        assert!(is_codeblock_node(&cursor.node()));
-
-        // With language, 3 backticks
-        let input = "```rust\ncode\n```\n";
-        let tree = parse_markdown_and_get_tree(input);
-        let mut cursor = tree.walk();
-        cursor.goto_first_child();
-        assert!(is_codeblock_node(&cursor.node()));
-
-        // Without language, 4 backticks
-        let input = "````\ncode\n````\n";
-        let tree = parse_markdown_and_get_tree(input);
-        let mut cursor = tree.walk();
-        cursor.goto_first_child();
-        assert!(is_codeblock_node(&cursor.node()));
-
-        // With language, 4 backticks
-        let input = "````rust\ncode\n````\n";
-        let tree = parse_markdown_and_get_tree(input);
-        let mut cursor = tree.walk();
-        cursor.goto_first_child();
-        assert!(is_codeblock_node(&cursor.node()));
-    }
-
-    #[test]
-    fn test_is_marker_node() {
-        let input = "# Test";
-        // walk to the marker
-        let tree = parse_markdown_and_get_tree(input);
-        let mut cursor = tree.walk();
-        cursor.goto_first_child();
-        cursor.goto_first_child();
-        assert_eq!(cursor.node().kind(), "atx_h1_marker");
-        assert!(is_marker_node(&cursor.node()));
-    }
-
-    #[test]
-    fn test_is_ruler_node() {
-        let input = "----";
-        // walk to the ruler
-        let tree = parse_markdown_and_get_tree(input);
-        let mut cursor = tree.walk();
-        cursor.goto_first_child();
-        assert_eq!(cursor.node().kind(), "thematic_break");
-        assert!(is_ruler_node(&cursor.node()));
-    }
 
     #[test]
     fn test_is_ordered_list_marker() {

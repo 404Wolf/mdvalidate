@@ -7,11 +7,11 @@ use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::compare_node_kinds::compare_node_kinds;
 use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
-use crate::mdschema::validator::ts_utils::both_are_headings;
-use crate::mdschema::validator::ts_utils::waiting_at_end;
-use crate::mdschema::validator::ts_utils::{
-    is_heading_content_node, is_heading_node, is_marker_node, is_textual_container_node,
+use crate::mdschema::validator::ts_types::{
+    both_are_headings, is_heading_content_node, is_heading_node, is_marker_node,
+    is_textual_container_node,
 };
+use crate::mdschema::validator::ts_utils::waiting_at_end;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 /// Validate two headings.
@@ -142,7 +142,8 @@ mod tests {
         errors::{NodeContentMismatchKind, SchemaViolationError},
         node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
-        ts_utils::{both_are_headings, is_heading_node, parse_markdown},
+        ts_types::{both_are_headings, is_heading_node},
+        ts_utils::parse_markdown,
     };
     use serde_json::json;
 
