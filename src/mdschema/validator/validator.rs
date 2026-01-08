@@ -17,15 +17,15 @@ use crate::mdschema::validator::{
 /// A Validator implementation that uses a zipper tree approach to validate
 /// an input Markdown document against a markdown schema treesitter tree.
 pub struct Validator {
-    /// The current input tree. When read_input is called, this is replaced with a new tree.
-    input_tree: Tree,
     /// The schema tree, which does not change after initialization.
     schema_tree: Tree,
+    /// The full schema string. Does not change.
+    schema_str: String,
+    /// The current input tree. When read_input is called, this is replaced with a new tree.
+    input_tree: Tree,
     /// The full input string as last read. Not used internally but useful for
     /// debugging or reporting.
     last_input_str: String,
-    /// The full schema string. Does not change.
-    schema_str: String,
     /// Whether we have received the end of the input. This means that last
     /// input tree descendant index is at the end of the input.
     got_eof: bool,
@@ -40,9 +40,9 @@ pub struct Validator {
 pub trait ValidatorState {
     fn got_eof(&self) -> bool;
     fn set_got_eof(&mut self, got_eof: bool);
-    fn input_tree(&self) -> &Tree;
     fn schema_tree(&self) -> &Tree;
     fn schema_str(&self) -> &str;
+    fn input_tree(&self) -> &Tree;
     fn last_input_str(&self) -> &str;
     fn set_last_input_str(&mut self, new_input: String);
     fn matches_so_far(&self) -> &Value;
@@ -63,10 +63,10 @@ impl Validator {
         let input_tree = input_parser.parse(input_str, None)?;
 
         Some(Validator {
-            input_tree,
             schema_tree,
-            last_input_str: input_str.to_string(),
             schema_str: schema_str.to_string(),
+            input_tree,
+            last_input_str: input_str.to_string(),
             got_eof,
             matches_so_far: Value::Object(Map::new()),
             errors_so_far: Vec::new(),
@@ -160,6 +160,10 @@ impl Validator {
     pub fn validate(&mut self) {
         if self.got_eof() {
             self.set_farthest_reached_pos(NodePosPair::default());
+            // Clear errors when revalidating from the beginning at EOF
+            // to avoid duplicate errors from streaming validation
+            self.errors_so_far.clear();
+            self.matches_so_far = Value::Object(Map::new());
         }
 
         let got_eof = self.got_eof();
@@ -170,9 +174,9 @@ impl Validator {
         let validation_result = {
             let mut input_cursor = self.input_tree.walk();
             let mut schema_cursor = self.schema_tree.walk();
-            farthest_reached_pos.walk_cursors_to_pos(&mut input_cursor, &mut schema_cursor);
+            farthest_reached_pos.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
 
-            let walker = ValidatorWalker::new(input_cursor, schema_cursor, &schema_str, &input_str);
+            let walker = ValidatorWalker::new(schema_cursor, &schema_str, input_cursor, &input_str);
             NodeVsNodeValidator::validate(&walker, got_eof)
         };
 
@@ -181,9 +185,9 @@ impl Validator {
 
     pub fn walk(&self) -> ValidatorWalker<'_> {
         ValidatorWalker::new(
-            self.input_tree.walk(),
             self.schema_tree.walk(),
             &self.schema_str,
+            self.input_tree.walk(),
             &self.last_input_str,
         )
     }
@@ -198,16 +202,16 @@ impl ValidatorState for Validator {
         self.got_eof = got_eof;
     }
 
-    fn input_tree(&self) -> &Tree {
-        &self.input_tree
-    }
-
     fn schema_tree(&self) -> &Tree {
         &self.schema_tree
     }
 
     fn schema_str(&self) -> &str {
         &self.schema_str
+    }
+
+    fn input_tree(&self) -> &Tree {
+        &self.input_tree
     }
 
     fn last_input_str(&self) -> &str {
@@ -1109,7 +1113,7 @@ Content for section 3."#;
             if i > 0 && chunk.len() > chunks[i - 1].len() {
                 // After the first chunk, indices should advance or stay the same
                 assert!(
-                    indices_after.0 >= indices_before.0,
+                    indices_after.1 >= indices_before.1,
                     "Input descendant index regressed after reading chunk {}. Before: {:?}, After: {:?}, Chunk length: {}",
                     i,
                     indices_before,

@@ -49,8 +49,8 @@ fn validate_textual_vs_textual_impl(walker: &ValidatorWalker, got_eof: bool) -> 
     }
 
     validate_textual_vs_textual_direct(
-        walker.input_cursor(),
         walker.schema_cursor(),
+        walker.input_cursor(),
         walker.schema_str(),
         walker.input_str(),
         got_eof,
@@ -61,14 +61,14 @@ fn validate_textual_vs_textual_impl(walker: &ValidatorWalker, got_eof: bool) -> 
 ///
 /// This performs the actual node kind and text content comparison without
 /// delegating to matcher validation.
-#[instrument(skip(input_cursor, schema_cursor, schema_str, input_str, got_eof), level = "debug", fields(
-    i = %input_cursor.descendant_index(),
+#[instrument(skip(schema_cursor, input_cursor, schema_str, input_str, got_eof), level = "debug", fields(
     s = %schema_cursor.descendant_index(),
+    i = %input_cursor.descendant_index(),
 ), ret)]
 #[track_caller]
 pub(super) fn validate_textual_vs_textual_direct(
-    input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
     schema_str: &str,
     input_str: &str,
     got_eof: bool,
@@ -79,15 +79,15 @@ pub(super) fn validate_textual_vs_textual_direct(
     if !both_are_textual_nodes(&schema_cursor.node(), &input_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "expected textual nodes, got schema kind: {:?}, input kind: {:?}",
             schema_cursor.node().kind(),
             input_cursor.node().kind()
         );
     }
 
-    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
+    compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
 
     let is_partial_match = waiting_at_end(got_eof, input_str, &input_cursor);
     if let Some(error) = compare_text_contents(
@@ -127,7 +127,7 @@ mod tests {
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_inline_code(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_inline_code(schema, input)))
                 .validate_complete()
                 .destruct();
 
@@ -148,7 +148,7 @@ prefix `test:/test/`
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_text_nodes(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_text_nodes(schema, input)))
                 .validate_incomplete()
                 .destruct();
 

@@ -43,8 +43,8 @@ pub(super) struct LiteralMatcherVsTextualValidator;
 impl ValidatorImpl for LiteralMatcherVsTextualValidator {
     fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         validate_literal_matcher_vs_textual(
-            walker.input_cursor(),
             walker.schema_cursor(),
+            walker.input_cursor(),
             walker.schema_str(),
             walker.input_str(),
             got_eof,
@@ -337,8 +337,8 @@ fn validate_matcher_vs_text_impl(walker: &ValidatorWalker, got_eof: bool) -> Val
 
                 // Delegate to the literal matcher validator
                 return validate_literal_matcher_vs_textual(
-                    &input_cursor,
                     &schema_cursor,
+                    &input_cursor,
                     schema_str,
                     input_str,
                     got_eof,
@@ -464,8 +464,8 @@ fn at_text_and_next_at_literal_matcher(
 }
 
 pub(super) fn validate_literal_matcher_vs_textual(
-    input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
     schema_str: &str,
     input_str: &str,
     got_eof: bool,
@@ -476,11 +476,11 @@ pub(super) fn validate_literal_matcher_vs_textual(
     let mut schema_cursor = schema_cursor.clone();
 
     #[cfg(feature = "invariant_violations")]
-    if !is_inline_code_node(&input_cursor.node()) || !is_inline_code_node(&schema_cursor.node()) {
+    if !is_inline_code_node(&schema_cursor.node()) || !is_inline_code_node(&input_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "literal matcher validation expects code_span nodes"
         );
     }
@@ -493,11 +493,11 @@ pub(super) fn validate_literal_matcher_vs_textual(
         schema_cursor.goto_first_child();
 
         #[cfg(feature = "invariant_violations")]
-        if !is_text_node(&input_cursor.node()) || !is_text_node(&schema_cursor.node()) {
+        if !is_text_node(&schema_cursor.node()) || !is_text_node(&input_cursor.node()) {
             invariant_violation!(
                 result,
-                &input_cursor,
                 &schema_cursor,
+                &input_cursor,
                 "literal matcher validation expects text children"
             );
         }
@@ -523,8 +523,8 @@ pub(super) fn validate_literal_matcher_vs_textual(
     if !schema_cursor.goto_next_sibling() && is_text_node(&schema_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "validate_literal_matcher_vs_text called with a matcher that is not literal. \
              A text node does not follow the schema."
         );
@@ -542,8 +542,8 @@ pub(super) fn validate_literal_matcher_vs_textual(
             {
                 invariant_violation!(
                     result,
-                    &input_cursor,
                     &schema_cursor,
+                    &input_cursor,
                     "we should have had extras in the matcher string"
                 );
             }
@@ -554,8 +554,8 @@ pub(super) fn validate_literal_matcher_vs_textual(
     if !input_cursor.goto_next_sibling() && schema_node_str_has_more_than_extras {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "at this point we should already have counted the number of nodes, \
              factoring in literal matchers."
         );
@@ -662,7 +662,7 @@ mod tests {
             ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_paragraphs(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_paragraphs(schema, input)))
                 .goto_first_child_then_unwrap()
                 .validate_incomplete()
                 .destruct();
@@ -726,7 +726,7 @@ mod tests {
         input_cursor.goto_first_child();
 
         let walker =
-            ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+            ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let (value, errors, _) = TextualVsTextualValidator::validate(&walker, true).destruct();
 
         assert_eq!(errors, vec![]);
@@ -792,10 +792,10 @@ mod tests {
             ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(input, schema)| {
-                    let n = input;
-                    assert!(is_paragraph_node(n));
+                .peek_nodes(|(schema, input)| {
                     let n = schema;
+                    assert!(is_paragraph_node(n));
+                    let n = input;
                     assert!(is_paragraph_node(n));
                 })
                 .goto_first_child_then_unwrap()
@@ -1019,9 +1019,9 @@ mod tests {
             ValidatorTester::<LiteralMatcherVsTextualValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_paragraphs(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_paragraphs(schema, input)))
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_inline_code(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_inline_code(schema, input)))
                 .validate_complete()
                 .destruct();
 

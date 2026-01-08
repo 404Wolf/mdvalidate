@@ -23,13 +23,13 @@ pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, 
     (matches, errors, validator)
 }
 
-pub fn pretty_print_cursor_pair(input_cursor: &TreeCursor, schema_cursor: &TreeCursor) -> String {
-    pretty_print_cursor_pair_with_highlight(input_cursor, schema_cursor, None)
+pub fn pretty_print_cursor_pair(schema_cursor: &TreeCursor, input_cursor: &TreeCursor) -> String {
+    pretty_print_cursor_pair_with_highlight(schema_cursor, input_cursor, None)
 }
 
 pub fn pretty_print_cursor_pair_with_highlight(
-    input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
     highlight_index: Option<usize>,
 ) -> String {
     use tabled::{Table, Tabled, settings::Style};

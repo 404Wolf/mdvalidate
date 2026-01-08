@@ -90,7 +90,7 @@ impl ValidatorImpl for ListVsListValidator {
 }
 
 fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(walker.input_cursor(), walker.input_cursor());
+    let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
     let input_str = walker.input_str();
     let schema_str = walker.schema_str();
@@ -99,7 +99,7 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     let mut schema_cursor = walker.schema_cursor().clone();
 
     // We want to ensure that the types of lists are the same
-    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
+    compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
 
     let at_list_schema_cursor = schema_cursor.clone();
     let at_list_input_cursor = input_cursor.clone();
@@ -118,11 +118,11 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     }
 
     #[cfg(feature = "invariant_violations")]
-    if !is_list_item_node(&input_cursor.node()) || !is_list_item_node(&schema_cursor.node()) {
+    if !is_list_item_node(&schema_cursor.node()) || !is_list_item_node(&input_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "expected list_item nodes after list traversal"
         );
     }
@@ -164,15 +164,15 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 {
                     invariant_violation!(
                         result,
-                        &input_cursor,
                         &schema_cursor,
+                        &input_cursor,
                         "expected list_item nodes while validating repeated matcher"
                     );
                 }
 
                 let (new_matches, early_return) = validate_list_item_contents_vs_list_item_contents(
-                    &input_cursor,
                     &schema_cursor,
+                    &input_cursor,
                     schema_str,
                     input_str,
                     got_eof,
@@ -291,7 +291,7 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             // validate them. We now use the *next* schema node too.
             if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
                 let next_result = ListVsListValidator::validate(
-                    &walker.with_cursors(&input_cursor, &schema_cursor),
+                    &walker.with_cursors(&schema_cursor, &input_cursor),
                     got_eof,
                 );
                 result.join_other_result(&next_result);
@@ -300,11 +300,11 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             trace!("Completed validation of all {} list items", validate_so_far);
 
             // Now, if there's another pair, recurse and validate it
-            if input_cursor.goto_first_child() && schema_cursor.goto_first_child() {
-                while input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {}
+            if schema_cursor.goto_first_child() && input_cursor.goto_first_child() {
+                while schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {}
 
                 // There is a deeper list!
-                if is_list_node(&input_cursor.node()) && is_list_node(&schema_cursor.node()) {
+                if is_list_node(&schema_cursor.node()) && is_list_node(&input_cursor.node()) {
                     trace!(
                         "Found next sibling pairs, recursing to validate next list elements; cursors are at {:?} and {:?}",
                         input_cursor.node().kind(),
@@ -312,7 +312,7 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                     );
 
                     let next_result = ListVsListValidator::validate(
-                        &walker.with_cursors(&input_cursor, &schema_cursor),
+                        &walker.with_cursors(&schema_cursor, &input_cursor),
                         got_eof,
                     );
                     // We need to be able to capture errors that happen in the recursive call
@@ -443,8 +443,8 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
             let (list_item_match_result, early_return) =
                 validate_list_item_contents_vs_list_item_contents(
-                    &input_cursor,
                     &schema_cursor,
+                    &input_cursor,
                     schema_str,
                     input_str,
                     got_eof,
@@ -466,8 +466,8 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 compare_node_kinds_check!(
                     schema_cursor,
                     input_cursor,
-                    input_str,
                     schema_str,
+                    input_str,
                     result
                 );
 
@@ -477,7 +477,7 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                     schema_cursor.goto_first_child();
 
                     let deeper_result = ListVsListValidator::validate(
-                        &walker.with_cursors(&input_cursor, &schema_cursor),
+                        &walker.with_cursors(&schema_cursor, &input_cursor),
                         got_eof,
                     );
                     result.join_other_result(&deeper_result);
@@ -485,10 +485,10 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             }
 
             // Recurse on next sibling if available!
-            if input_cursor.goto_next_sibling() && schema_cursor.goto_next_sibling() {
+            if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
                 trace!("Moving to next sibling list items for continued validation");
                 let new_matches = ListVsListValidator::validate(
-                    &walker.with_cursors(&input_cursor, &schema_cursor),
+                    &walker.with_cursors(&schema_cursor, &input_cursor),
                     got_eof,
                 );
                 result.join_other_result(&new_matches);
@@ -533,8 +533,8 @@ fn count_next_n_literal_lists(schema_cursor: &TreeCursor, schema_str: &str) -> u
 ///
 /// Walks into their actual paragraphs and runs textual container validation.
 fn validate_list_item_contents_vs_list_item_contents(
-    input_cursor: &TreeCursor,
     schema_cursor: &TreeCursor,
+    input_cursor: &TreeCursor,
     schema_str: &str,
     input_str: &str,
     got_eof: bool,
@@ -545,11 +545,11 @@ fn validate_list_item_contents_vs_list_item_contents(
     let mut input_cursor = input_cursor.clone();
 
     #[cfg(feature = "invariant_violations")]
-    if !both_are_list_items(&input_cursor.node(), &schema_cursor.node()) {
+    if !both_are_list_items(&schema_cursor.node(), &input_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "expected list_item nodes before validating list item contents"
         );
     }
@@ -558,11 +558,11 @@ fn validate_list_item_contents_vs_list_item_contents(
     input_cursor.goto_first_child();
 
     #[cfg(feature = "invariant_violations")]
-    if !both_are_markers(&input_cursor.node(), &schema_cursor.node()) {
+    if !both_are_markers(&schema_cursor.node(), &input_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "expected list_marker nodes while validating list item contents"
         );
     }
@@ -573,17 +573,17 @@ fn validate_list_item_contents_vs_list_item_contents(
     ) {
         (true, true) => {
             #[cfg(feature = "invariant_violations")]
-            if !both_are_paragraphs(&input_cursor.node(), &schema_cursor.node()) {
+            if !both_are_paragraphs(&schema_cursor.node(), &input_cursor.node()) {
                 invariant_violation!(
                     result,
-                    &input_cursor,
                     &schema_cursor,
+                    &input_cursor,
                     "expected paragraph nodes while validating list item contents"
                 );
             }
 
             let walker =
-                ValidatorWalker::from_cursors(&input_cursor, &schema_cursor, schema_str, input_str);
+                ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
 
             (
                 TextualContainerVsTextualContainerValidator::validate(&walker, got_eof),
@@ -783,7 +783,7 @@ mod tests {
         ValidatorTester::<ListVsListValidator>::from_strs(schema_str, input_str)
             .walk()
             .goto_first_child_then_unwrap()
-            .peek_nodes(|(i, s)| assert!(both_are_list_nodes(i, s)))
+            .peek_nodes(|(schema, input)| assert!(both_are_list_nodes(schema, input)))
             .validate(got_eof)
     }
 
@@ -1041,7 +1041,7 @@ Footer: test (footer isn't validated with_list_vs_list)
                 .walk()
                 .goto_first_child_then_unwrap()
                 .goto_next_sibling_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_list_nodes(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_list_nodes(schema, input)))
                 .validate_complete()
                 .destruct();
 

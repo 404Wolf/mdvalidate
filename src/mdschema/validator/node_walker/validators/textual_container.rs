@@ -77,8 +77,8 @@ fn validate_textual_container_vs_textual_container_impl(
     if !both_are_textual_containers(&schema_cursor.node(), &input_cursor.node()) {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "expected textual container nodes"
         );
     }
@@ -138,17 +138,17 @@ fn validate_textual_container_vs_textual_container_impl(
     schema_cursor.goto_first_child();
 
     loop {
-        let pair_result = if both_are_link_nodes(&input_cursor.node(), &schema_cursor.node())
-            || both_are_image_nodes(&input_cursor.node(), &schema_cursor.node())
+        let pair_result = if both_are_link_nodes(&schema_cursor.node(), &input_cursor.node())
+            || both_are_image_nodes(&schema_cursor.node(), &input_cursor.node())
         {
             let result = LinkVsLinkValidator::validate(
-                &walker.with_cursors(&input_cursor, &schema_cursor),
+                &walker.with_cursors(&schema_cursor, &input_cursor),
                 got_eof,
             );
             result
         } else {
             TextualVsTextualValidator::validate(
-                &walker.with_cursors(&input_cursor, &schema_cursor),
+                &walker.with_cursors(&schema_cursor, &input_cursor),
                 got_eof,
             )
         };
@@ -156,7 +156,7 @@ fn validate_textual_container_vs_textual_container_impl(
         result.join_other_result(&pair_result);
         result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
 
-        if !input_cursor.goto_next_sibling() || !schema_cursor.goto_next_sibling() {
+        if !schema_cursor.goto_next_sibling() || !input_cursor.goto_next_sibling() {
             break;
         }
     }
@@ -305,10 +305,10 @@ mod tests {
         .goto_first_child_then_unwrap()
         .goto_first_child_then_unwrap()
         .goto_next_sibling_then_unwrap()
-        .peek_nodes(|(input, schema)| {
-            let n = input;
-            assert!(is_heading_content_node(n));
+        .peek_nodes(|(schema, input)| {
             let n = schema;
+            assert!(is_heading_content_node(n));
+            let n = input;
             assert!(is_heading_content_node(n));
         })
         .validate_complete()
@@ -331,10 +331,10 @@ mod tests {
         .goto_first_child_then_unwrap()
         .goto_first_child_then_unwrap()
         .goto_next_sibling_then_unwrap()
-        .peek_nodes(|(input, schema)| {
-            let n = input;
-            assert!(is_heading_content_node(n));
+        .peek_nodes(|(schema, input)| {
             let n = schema;
+            assert!(is_heading_content_node(n));
+            let n = input;
             assert!(is_heading_content_node(n));
         })
         .validate_complete()
@@ -357,10 +357,10 @@ mod tests {
         .goto_first_child_then_unwrap()
         .goto_first_child_then_unwrap()
         .goto_next_sibling_then_unwrap()
-        .peek_nodes(|(input, schema)| {
-            let n = input;
-            assert!(is_heading_content_node(n));
+        .peek_nodes(|(schema, input)| {
             let n = schema;
+            assert!(is_heading_content_node(n));
+            let n = input;
             assert!(is_heading_content_node(n));
         })
         .validate_complete()

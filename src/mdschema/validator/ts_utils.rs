@@ -199,8 +199,8 @@ pub fn extract_list_marker<'a>(cursor: &TreeCursor<'a>, schema_str: &'a str) -> 
 macro_rules! both_are {
     ($fn_name:ident, $predicate:ident, $doc:expr) => {
         #[doc = $doc]
-        pub fn $fn_name(input_node: &Node, schema_node: &Node) -> bool {
-            $predicate(&input_node) && $predicate(&schema_node)
+        pub fn $fn_name(schema_node: &Node, input_node: &Node) -> bool {
+            $predicate(&schema_node) && $predicate(&input_node)
         }
     };
 }
@@ -287,12 +287,12 @@ both_are!(
 );
 
 /// Check if both nodes are top-level nodes (document or heading).
-pub fn both_are_matching_top_level_nodes(input_node: &Node, schema_node: &Node) -> bool {
-    if input_node.kind() != schema_node.kind() {
+pub fn both_are_matching_top_level_nodes(schema_node: &Node, input_node: &Node) -> bool {
+    if schema_node.kind() != input_node.kind() {
         return false;
     }
 
-    match input_node.kind() {
+    match schema_node.kind() {
         "document" => true,
         "atx_heading" => true,
         _ => false,

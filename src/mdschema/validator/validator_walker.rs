@@ -1,50 +1,50 @@
 use tree_sitter::TreeCursor;
 
 pub struct ValidatorWalker<'a> {
-    input_cursor: TreeCursor<'a>,
     schema_cursor: TreeCursor<'a>,
-    input_str: &'a str,
     schema_str: &'a str,
+    input_cursor: TreeCursor<'a>,
+    input_str: &'a str,
 }
 
 impl<'a> ValidatorWalker<'a> {
     pub fn new(
-        input_cursor: TreeCursor<'a>,
         schema_cursor: TreeCursor<'a>,
         schema_str: &'a str,
+        input_cursor: TreeCursor<'a>,
         input_str: &'a str,
     ) -> Self {
         Self {
-            input_cursor,
             schema_cursor,
-            input_str,
             schema_str,
+            input_cursor,
+            input_str,
         }
     }
 
     pub fn from_cursors(
-        input_cursor: &TreeCursor<'a>,
         schema_cursor: &TreeCursor<'a>,
         schema_str: &'a str,
+        input_cursor: &TreeCursor<'a>,
         input_str: &'a str,
     ) -> Self {
         Self::new(
-            input_cursor.clone(),
             schema_cursor.clone(),
             schema_str,
+            input_cursor.clone(),
             input_str,
         )
     }
 
     pub fn with_cursors(
         &self,
-        input_cursor: &TreeCursor<'a>,
         schema_cursor: &TreeCursor<'a>,
+        input_cursor: &TreeCursor<'a>,
     ) -> Self {
         Self::new(
-            input_cursor.clone(),
             schema_cursor.clone(),
             self.schema_str,
+            input_cursor.clone(),
             self.input_str,
         )
     }
@@ -66,6 +66,6 @@ impl<'a> ValidatorWalker<'a> {
     }
 
     pub fn cursors_mut(&mut self) -> (&mut TreeCursor<'a>, &mut TreeCursor<'a>) {
-        (&mut self.input_cursor, &mut self.schema_cursor)
+        (&mut self.schema_cursor, &mut self.input_cursor)
     }
 }

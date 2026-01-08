@@ -56,7 +56,7 @@ impl ValidatorImpl for CodeVsCodeValidator {
 }
 
 fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(walker.input_cursor(), walker.input_cursor());
+    let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
     let input_cursor = walker.input_cursor().clone();
     let schema_cursor = walker.schema_cursor().clone();
@@ -69,8 +69,8 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
     {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "code validation expects code block nodes"
         );
     }
@@ -91,20 +91,20 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
     };
 
     let (
-        Some((input_lang, (input_code, input_code_descendant_index))),
         Some((schema_lang, (schema_code, schema_code_descendant_index))),
-    ) = (&input_extracted, &schema_extracted)
+        Some((input_lang, (input_code, input_code_descendant_index))),
+    ) = (&schema_extracted, &input_extracted)
     else {
         #[cfg(feature = "invariant_violations")]
         // The only reason the "entire thing" would be wrong is because we're
         // doing something wrong in our usage of it. That would be a bug!
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
-            "Failed to extract code block contents from input or schema (input: {:?}, schema: {:?})",
-            input_extracted,
-            schema_extracted
+            &input_cursor,
+            "Failed to extract code block contents from schema or input (schema: {:?}, input: {:?})",
+            schema_extracted,
+            input_extracted
         );
     };
 
@@ -154,7 +154,7 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
             if let (
                 Some((input_lang_str, input_lang_descendant_index)),
                 Some((schema_lang_str, schema_lang_descendant_index)),
-            ) = (input_lang, schema_lang)
+            ) = (schema_lang, input_lang)
             {
                 if input_lang_str != schema_lang_str {
                     result.add_error(ValidationError::SchemaViolation(
@@ -219,7 +219,7 @@ mod tests {
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_codeblocks(schema, input)))
                 .validate_complete()
                 .destruct();
 
@@ -232,7 +232,7 @@ mod tests {
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str_negative)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_codeblocks(schema, input)))
                 .validate_complete()
                 .destruct();
 
@@ -251,7 +251,7 @@ fn main() {}
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_codeblocks(schema, input)))
                 .validate_complete()
                 .destruct();
 
@@ -271,7 +271,7 @@ fn main() {}
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(i, s)| assert!(both_are_codeblocks(i, s)))
+                .peek_nodes(|(schema, input)| assert!(both_are_codeblocks(schema, input)))
                 .validate_complete()
                 .destruct();
 

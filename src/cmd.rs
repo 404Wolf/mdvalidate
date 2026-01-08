@@ -102,7 +102,6 @@ pub fn process<R: Read>(
 
         let new_text = std::str::from_utf8(&buffer[..bytes_read])?;
         input_str.push_str(new_text);
-        dbg!(&input_str);
 
         validator.read_more_input(&input_str)?;
         validator.validate();
@@ -280,13 +279,19 @@ mod tests {
 
     #[test]
     fn test_validate_stream_input_against_matcher_stream_correctly() {
-        let schema_str = r#"# s `a:/.*/`
+        let schema_str = r#"
+# `a:/.*/`
 
-# `t:/.*/`
+# `b:/.*/`
+
+## `c:/.*/`
 "#;
-        let input_data = r#"# s 7
+        let input_data = r#"
+# a
 
-# `t:/.*/`
+# b
+
+## c
 "#;
 
         let cursor = Cursor::new(input_data.as_bytes());

@@ -37,7 +37,7 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     let mut input_cursor = walker.input_cursor().clone();
     let mut schema_cursor = walker.schema_cursor().clone();
 
-    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
+    compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
 
     if let Err(error) = ensure_at_link_start(&mut input_cursor) {
         result.add_error(error);
@@ -52,16 +52,16 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     let link_input_cursor = input_cursor.clone();
 
     #[cfg(feature = "invariant_violations")]
-    if !input_cursor.goto_first_child() || !schema_cursor.goto_first_child() {
+    if !schema_cursor.goto_first_child() || !input_cursor.goto_first_child() {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "link nodes must have children"
         );
     }
 
-    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
+    compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
 
     if is_link_destination_node(&schema_cursor.node()) {
         let destination_result = validate_link_destination(
@@ -92,16 +92,16 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     }
 
     #[cfg(feature = "invariant_violations")]
-    if !input_cursor.goto_next_sibling() || !schema_cursor.goto_next_sibling() {
+    if !schema_cursor.goto_next_sibling() || !input_cursor.goto_next_sibling() {
         invariant_violation!(
             result,
-            &input_cursor,
             &schema_cursor,
+            &input_cursor,
             "link nodes must have a destination"
         );
     }
 
-    compare_node_kinds_check!(schema_cursor, input_cursor, input_str, schema_str, result);
+    compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
 
     if is_link_destination_node(&schema_cursor.node()) {
         let destination_result = validate_link_destination(
@@ -162,8 +162,8 @@ fn compare_link_child_text(
     #[cfg(feature = "invariant_violations")]
     if !schema_text_cursor.goto_first_child() || !input_text_cursor.goto_first_child() {
         invariant_violation!(
-            &input_text_cursor,
             &schema_text_cursor,
+            &input_text_cursor,
             "link child nodes must contain text"
         );
     }
@@ -196,8 +196,8 @@ fn validate_link_destination(
         if !schema_text_cursor.goto_first_child() || !input_text_cursor.goto_first_child() {
             invariant_violation!(
                 result,
-                &input_text_cursor,
                 &schema_text_cursor,
+                &input_text_cursor,
                 "link destination nodes must contain text"
             );
         }
@@ -291,10 +291,10 @@ fn link_child_pos(schema_cursor: &TreeCursor, input_cursor: &TreeCursor) -> Opti
     }
 
     #[cfg(feature = "invariant_violations")]
-    if !both_are_text_nodes(&input_text_cursor.node(), &schema_text_cursor.node()) {
+    if !both_are_text_nodes(&schema_text_cursor.node(), &input_text_cursor.node()) {
         invariant_violation!(
-            &input_text_cursor,
             &schema_text_cursor,
+            &input_text_cursor,
             "link child nodes must both be text nodes"
         );
     }

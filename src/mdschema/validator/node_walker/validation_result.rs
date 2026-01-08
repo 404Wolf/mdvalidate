@@ -60,7 +60,7 @@ impl ValidationResult {
         input_cursor: &mut TreeCursor,
     ) {
         self.farthest_reached_pos()
-            .walk_cursors_to_pos(input_cursor, schema_cursor);
+            .walk_cursors_to_pos(schema_cursor, input_cursor);
     }
 
     /// Add an error to the `ValidationResult`.

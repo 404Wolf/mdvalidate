@@ -15,13 +15,13 @@ use crate::mdschema::validator::ts_utils::{
 /// # Arguments
 /// - `schema_cursor`: Cursor at schema node
 /// - `input_cursor`: Cursor at input node
-/// - `input_str`: The input markdown string
 /// - `schema_str`: The schema markdown string
+/// - `input_str`: The input markdown string
 pub fn compare_node_kinds(
     schema_cursor: &TreeCursor,
     input_cursor: &TreeCursor,
-    input_str: &str,
     schema_str: &str,
+    input_str: &str,
 ) -> Option<ValidationError> {
     let schema_node = schema_cursor.node();
     let input_node = input_cursor.node();
@@ -109,8 +109,8 @@ pub fn compare_node_kinds(
 /// compare_node_kinds_check!(
 ///     schema_cursor,
 ///     input_cursor,
-///     input_str,
 ///     schema_str,
+///     input_str,
 ///     result
 /// );
 /// ```
@@ -119,15 +119,15 @@ macro_rules! compare_node_kinds_check {
     (
         $schema_cursor:expr,
         $input_cursor:expr,
-        $input_str:expr,
         $schema_str:expr,
+        $input_str:expr,
         $result:expr
     ) => {
         if let Some(error) = crate::mdschema::validator::node_walker::helpers::compare_node_kinds::compare_node_kinds(
             &$schema_cursor,
             &$input_cursor,
-            $input_str,
             $schema_str,
+            $input_str,
         ) {
             $result.add_error(error);
             return $result;
@@ -154,7 +154,7 @@ mod tests {
         input_1_cursor.goto_first_child();
         input_2_cursor.goto_first_child();
 
-        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_2, input_1);
         assert!(result.is_none(), "Same list markers should match");
     }
 
@@ -171,7 +171,7 @@ mod tests {
         input_1_cursor.goto_first_child();
         input_2_cursor.goto_first_child();
 
-        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_2, input_1);
         assert!(result.is_none(), "Different unordered markers should match");
     }
 
@@ -188,7 +188,7 @@ mod tests {
         input_1_cursor.goto_first_child();
         input_2_cursor.goto_first_child();
 
-        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_2, input_1);
         assert!(result.is_none(), "Same heading levels should match");
     }
 
@@ -205,7 +205,7 @@ mod tests {
         input_1_cursor.goto_first_child();
         input_2_cursor.goto_first_child();
 
-        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_1, input_2);
+        let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_2, input_1);
         assert!(result.is_some(), "Different heading levels should not match");
     }
 }

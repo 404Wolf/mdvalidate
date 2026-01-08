@@ -13,14 +13,14 @@ use crate::mdschema::validator::{
 
 #[macro_export]
 macro_rules! invariant_violation {
-    (result, $input_cursor:expr, $schema_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
-        $crate::invariant_violation!($input_cursor, $schema_cursor, $message $(, $($args)*)?)
+    (result, $schema_cursor:expr, $input_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
+        $crate::invariant_violation!($schema_cursor, $input_cursor, $message $(, $($args)*)?)
     }};
-    ($input_cursor:expr, $schema_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
+    ($schema_cursor:expr, $input_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
         #[cfg(feature = "invariant_violations")]
         {
             let error_msg = $crate::mdschema::validator::errors::invariant_violation_message(
-                Some(($input_cursor, $schema_cursor)),
+                Some(($schema_cursor, $input_cursor)),
                 format!($message $(, $($args)*)?),
                 module_path!(),
             );
@@ -66,22 +66,22 @@ pub(crate) fn invariant_violation_message(
         None
     };
 
-    if let Some((input_cursor, schema_cursor)) = cursors {
-        let mut input_cursor = input_cursor.clone();
-        walk_to_root(&mut input_cursor);
-
+    if let Some((schema_cursor, input_cursor)) = cursors {
         let mut schema_cursor = schema_cursor.clone();
         walk_to_root(&mut schema_cursor);
 
+        let mut input_cursor = input_cursor.clone();
+        walk_to_root(&mut input_cursor);
+
         let base_msg = format!(
-            "{}:{}\n{}\ninput_idx={} schema_idx={}\n{}\n{}",
+            "{}:{}\n{}\nschema_idx={} input_idx={}\n{}\n{}",
             file,
             line,
             module_path,
-            input_cursor.descendant_index(),
             schema_cursor.descendant_index(),
+            input_cursor.descendant_index(),
             message,
-            pretty_print_cursor_pair(&input_cursor, &schema_cursor)
+            pretty_print_cursor_pair(&schema_cursor, &input_cursor)
         );
 
         match backtrace {
