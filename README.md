@@ -132,7 +132,7 @@ We're validating:
 
 You can build `mdvalidate` with `nix` using `nix build github:404wolf/mdvalidate`.
 
-Alternatively download a pre-built (static) binary from [releases](https://github.com/404Wolf/mdvalidate/releases) for use on x86.
+Alternatively download a pre-built (static) binary from [releases](https://github.com/404Wolf/mdvalidate/releases) for use on x86 or Mac (apple silicon).
 
 It is not officially supported, but you can also build directly with cargo via `cargo build --bin mdv`.
 
