@@ -11,6 +11,10 @@ use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::helpers::curly_matchers::extract_matcher_from_curly_delineated_text;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
+#[cfg(feature = "invariant_violations")]
+use crate::mdschema::validator::ts_utils::{
+    both_are_link_description_nodes, both_are_link_text_nodes, is_link_text_node,
+};
 use crate::mdschema::validator::ts_utils::{
     both_are_text_nodes, get_node_text, is_image_node, is_link_destination_node, is_link_node,
     waiting_at_end,
@@ -52,8 +56,8 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
     let link_input_cursor = input_cursor.clone();
 
-    #[cfg(feature = "invariant_violations")]
     if !schema_cursor.goto_first_child() || !input_cursor.goto_first_child() {
+        #[cfg(feature = "invariant_violations")]
         invariant_violation!(
             result,
             &schema_cursor,
@@ -64,31 +68,35 @@ fn validate_link_vs_link_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
     compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
 
-    if is_link_destination_node(&schema_cursor.node()) {
-        let destination_result = validate_link_destination(
+    // We're now at the alt
+    //
+    // ├─ (text[4]1..10)
+    // └─ (link[5]10..31)
+    //    ├─ (<alt>[6]11..15)
+    //    │  └─ (text[7]11..15)
+    //    └─ (<src>[8]17..30)
+    //       └─ (text[9]17..30)
+    #[cfg(feature = "invariant_violations")]
+    if !both_are_link_description_nodes(&schema_cursor.node(), &input_cursor.node()) {
+        invariant_violation!(
+            result,
             &schema_cursor,
             &input_cursor,
-            schema_str,
-            input_str,
-            got_eof,
+            "we should be at link text, but at {:?}",
+            input_cursor.node().kind()
         );
-        result.join_other_result(&destination_result);
+    }
 
-        if destination_result.has_errors() {
-            return result;
-        }
-    } else {
-        let child_result = compare_link_child_text(
-            &schema_cursor,
-            &input_cursor,
-            schema_str,
-            input_str,
-            got_eof,
-        );
-        result.join_other_result(&child_result);
-        if child_result.has_errors() {
-            return result;
-        }
+    let child_result = compare_link_child_text(
+        &schema_cursor,
+        &input_cursor,
+        schema_str,
+        input_str,
+        got_eof,
+    );
+    result.join_other_result(&child_result);
+    if child_result.has_errors() {
+        return result;
     }
 
     if let Some(pos) = link_child_pos(&schema_cursor, &input_cursor) {
@@ -168,8 +176,8 @@ fn compare_link_child_text(
     let mut schema_text_cursor = schema_cursor.clone();
     let mut input_text_cursor = input_cursor.clone();
 
-    #[cfg(feature = "invariant_violations")]
     if !schema_text_cursor.goto_first_child() || !input_text_cursor.goto_first_child() {
+        #[cfg(feature = "invariant_violations")]
         invariant_violation!(
             result,
             &schema_text_cursor,
@@ -178,78 +186,17 @@ fn compare_link_child_text(
         );
     }
 
-    let schema_text = get_node_text(&schema_text_cursor.node(), schema_str);
-    let input_text = get_node_text(&input_text_cursor.node(), input_str);
-
     let is_partial_match = waiting_at_end(got_eof, input_str, &input_text_cursor);
-
-    // Try to match schema matcher against input text
-    if let Some(matcher_result) = extract_matcher_from_curly_delineated_text(schema_text) {
-        match matcher_result {
-            Ok(matcher) => {
-                if let Some(matched_str) = matcher.match_str(input_text) {
-                    if let Some(id) = matcher.id() {
-                        result.set_match(id, json!(matched_str));
-                    }
-                } else if !is_partial_match {
-                    result.add_error(ValidationError::SchemaViolation(
-                        SchemaViolationError::NodeContentMismatch {
-                            schema_index: schema_text_cursor.descendant_index(),
-                            input_index: input_text_cursor.descendant_index(),
-                            expected: matcher.pattern().to_string(),
-                            actual: input_text.into(),
-                            kind: NodeContentMismatchKind::Matcher,
-                        },
-                    ));
-                }
-
-                return result;
-            }
-            Err(MatcherError::WasLiteralCode) => {}
-            Err(error) => {
-                result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
-                    error,
-                    schema_index: schema_text_cursor.descendant_index(),
-                }));
-                return result;
-            }
-        }
-    }
-
-    // Try to match input matcher against schema text
-    if let Some(matcher_result) = extract_matcher_from_curly_delineated_text(input_text) {
-        if let Ok(matcher) = matcher_result {
-            if let Some(matched_str) = matcher.match_str(schema_text) {
-                if let Some(id) = matcher.id() {
-                    result.set_match(id, json!(matched_str));
-                }
-            } else if !is_partial_match {
-                result.add_error(ValidationError::SchemaViolation(
-                    SchemaViolationError::NodeContentMismatch {
-                        schema_index: schema_text_cursor.descendant_index(),
-                        input_index: input_text_cursor.descendant_index(),
-                        expected: matcher.pattern().to_string(),
-                        actual: schema_text.into(),
-                        kind: NodeContentMismatchKind::Matcher,
-                    },
-                ));
-            }
-
-            return result;
-        }
-    }
-
-    // Fall back to literal text comparison
-    if let Some(error) = compare_text_contents(
+    let text_result = compare_text_contents(
         schema_str,
         input_str,
         &schema_text_cursor,
         &input_text_cursor,
         is_partial_match,
         false,
-    ) {
-        result.add_error(error);
-    }
+    );
+    // Only take errors and values, not position (parent already tracks position at link level)
+    result.join_data(text_result.data());
 
     result
 }
@@ -337,16 +284,16 @@ fn validate_link_destination(
         }
     }
 
-    if let Some(error) = compare_text_contents(
+    let text_result = compare_text_contents(
         schema_str,
         input_str,
         &schema_text_cursor,
         &input_text_cursor,
         is_partial_match,
         false,
-    ) {
-        result.add_error(error);
-    }
+    );
+    // Only take errors and values, not position (parent already tracks position at link level)
+    result.join_data(text_result.data());
 
     result
 }
@@ -397,16 +344,16 @@ mod tests {
 
         let (value, errors, farthest_reached_pos) = tester_walker.validate_incomplete().destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 5));
+        // Don't go "inside" the link source unless we are EOF. If we are EOF we scrape all the way to the very very end.
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
-        // Don't go "inside" the link source unless we are EOF. If we are EOF we scrape all the way to the very very end.
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 5));
 
         let (value, errors, farthest_reached_pos) = tester_walker.validate_complete().destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 6));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 6))
     }
 
     #[test]
@@ -422,8 +369,8 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
-        assert!(!errors.is_empty());
         assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 6));
+        assert!(!errors.is_empty());
     }
 
     #[test]
@@ -511,23 +458,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_link_vs_link_alt_text_matcher_in_input() {
-        let schema_str = "[hello](https://test.com)";
-        let input_str = "[{foo:/\\w+/}](https://test.com)";
-
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
-
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"foo": "hello"}));
-    }
-
-    #[test]
     fn test_validate_link_vs_link_alt_text_matcher_mismatch() {
         let schema_str = "[{foo:/\\d+/}](https://test.com)";
         let input_str = "[hello](https://test.com)";
@@ -544,26 +474,9 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_image_vs_image_alt_text_matcher_in_schema() {
+    fn test_validate_image_vs_image_alt_text_matcher() {
         let schema_str = "![{desc:/.+/}](image.png)";
         let input_str = "![test image](image.png)";
-
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
-
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"desc": "test image"}));
-    }
-
-    #[test]
-    fn test_validate_image_vs_image_alt_text_matcher_in_input() {
-        let schema_str = "![test image](image.png)";
-        let input_str = "![{desc:/.+/}](image.png)";
 
         let (value, errors, _) =
             ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)

@@ -1,6 +1,6 @@
 pub mod node_walker;
 
-pub use validation_result::ValidationResult;
+pub use validation_result::{ValidationResult, ValidationData};
 
 pub(self) mod helpers;
 mod validation_result;

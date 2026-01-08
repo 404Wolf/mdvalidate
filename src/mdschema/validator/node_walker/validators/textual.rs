@@ -90,16 +90,16 @@ pub(super) fn validate_textual_vs_textual_direct(
     compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
 
     let is_partial_match = waiting_at_end(got_eof, input_str, &input_cursor);
-    if let Some(error) = compare_text_contents(
+    let text_result = compare_text_contents(
         schema_str,
         input_str,
         &schema_cursor,
         &input_cursor,
         is_partial_match,
         false,
-    ) {
-        result.add_error(error);
-
+    );
+    result.join_other_result(&text_result);
+    if text_result.has_errors() {
         return result;
     }
 
@@ -152,8 +152,8 @@ prefix `test:/test/`
                 .validate_incomplete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(2, 2));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(2, 2));
     }
 }

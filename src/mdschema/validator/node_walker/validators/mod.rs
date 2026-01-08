@@ -25,7 +25,7 @@ pub trait Validator {
 
 impl<T: ValidatorImpl> Validator for T {
     #[instrument(skip_all, level = "trace", fields(
-        validator = std::any::type_name::<T>().strip_prefix("mdvalidate::mdschema::validator::node_walker::validators::").unwrap_or(std::any::type_name::<T>()),
+        v = std::any::type_name::<T>().strip_prefix("mdvalidate::mdschema::validator::node_walker::validators::").unwrap_or(std::any::type_name::<T>()),
         i = %walker.input_cursor().descendant_index(),
         s = %walker.schema_cursor().descendant_index(),
     ), ret)]

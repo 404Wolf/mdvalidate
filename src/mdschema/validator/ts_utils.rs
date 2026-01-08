@@ -138,6 +138,9 @@ is_node_kind!(is_link_destination_node, "link_destination");
 is_node_kind!(is_link_text_node, "link_text");
 is_node_kind!(is_image_node, "image");
 is_node_kind!(is_image_description_node, "image_description");
+pub fn is_link_description_node(node: &Node) -> bool {
+    is_link_text_node(node) || is_image_description_node(node)
+}
 is_node_kind!(is_paragraph_node, "paragraph");
 is_node_kind!(is_heading_content_node, "heading_content");
 is_node_kind!(is_list_marker_node, "list_marker");
@@ -244,6 +247,11 @@ both_are!(
     both_are_image_description_nodes,
     is_image_description_node,
     "Check if both nodes are image description nodes."
+);
+both_are!(
+    both_are_link_description_nodes,
+    is_link_description_node,
+    "Check if both nodes are link description nodes."
 );
 both_are!(
     both_are_text_nodes,

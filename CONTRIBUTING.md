@@ -7,6 +7,7 @@ Right now `mdvalidate` is in a super beta state. Contributions will be considere
 There's not a full list of general guidelines right now, but some worthy pointers:
 - When we are talking about a data structure that stores some reference to schema and the input, store the schema first.
 - Prefer `get_node_text` from `ts_utils` over direct `utf8_text` calls when reading schema node text.
+- In tests, keep assertion order consistent: position assertions first (if any), then errors, then values.
 
 # Debugging
 

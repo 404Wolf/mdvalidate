@@ -142,7 +142,7 @@ mod tests {
         errors::SchemaViolationError,
         node_pos_pair::NodePosPair,
         node_walker::validators::test_utils::ValidatorTester,
-        ts_utils::{both_are_headings, is_heading_node, parse_markdown},
+        ts_utils::{both_are_headings, is_heading_node, parse_markdown}, utils::test_logging,
     };
     use serde_json::json;
 
@@ -185,8 +185,8 @@ mod tests {
                 .validate_incomplete()
                 .destruct();
 
-        assert_eq!(value, json!({}));
         assert_eq!(errors, vec![]); // no errors yet
+        assert_eq!(value, json!({}));
     }
 
     #[test]
@@ -221,6 +221,43 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_heading_vs_heading_with_link() {
+        test_logging();
+        let schema_str = "# Heading [test](`test:/test/`)";
+        let input_str = "# Heading [test](test)";
+
+        let (value, errors, farthest_reached_pos) =
+            ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(schema, input)| assert!(both_are_headings(schema, input)))
+                .validate_complete()
+                .destruct();
+
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 5));
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({"test": "test"}));
+    }
+
+    #[test]
+    fn test_validate_heading_vs_heading_with_matcher() {
+        let schema_str = "# Heading `test:/test/`";
+        let input_str = "# Heading test";
+
+        let (value, errors, farthest_reached_pos) =
+            ValidatorTester::<HeadingVsHeadingValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(schema, input)| assert!(both_are_headings(schema, input)))
+                .validate_complete()
+                .destruct();
+
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 4));
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({"test": "test"}));
+    }
+
+    #[test]
     fn test_validate_heading_vs_heading_simple_headings() {
         let schema_str = "# Heading";
         let input_str = "# Heading";
@@ -233,9 +270,9 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
-        assert_eq!(value, json!({})); // No real match content
-        assert_eq!(errors, vec![]);
         assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({})); // No real match content
     }
 
     #[test]
@@ -251,7 +288,6 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
-        assert_eq!(value, json!({}));
         assert_eq!(
             errors,
             vec![ValidationError::SchemaViolation(
@@ -263,6 +299,7 @@ mod tests {
                 }
             )]
         );
+        assert_eq!(value, json!({}));
     }
     // TODO: tests for got_eof=false
 }

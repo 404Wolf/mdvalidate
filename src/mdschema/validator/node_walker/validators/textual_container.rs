@@ -314,9 +314,9 @@ mod tests {
         .validate_complete()
         .destruct();
 
+        assert_eq!(farthest_pos, NodePosPair::from_pos(9, 9));
         assert!(!errors.is_empty());
         assert_eq!(value, json!({}));
-        assert_eq!(farthest_pos, NodePosPair::from_pos(9, 9));
     }
 
     #[test]
@@ -340,8 +340,8 @@ mod tests {
         .validate_complete()
         .destruct();
 
-        assert_eq!(errors, vec![]);
         assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
+        assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
     }
 
@@ -366,8 +366,8 @@ mod tests {
         .validate_complete()
         .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 4));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"name": "Wolf"}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 4));
     }
 }

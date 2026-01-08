@@ -501,18 +501,18 @@ pub(super) fn validate_literal_matcher_vs_textual(
             );
         }
 
-        if let Some(error) = compare_text_contents(
+        let text_result = compare_text_contents(
             schema_str,
             input_str,
             &schema_cursor,
             &input_cursor,
             false,
             false,
-        ) {
-            result.add_error(error);
+        );
+        result.join_other_result(&text_result);
+        if text_result.has_errors() {
             return result;
         }
-        result.keep_farther_pos(&NodePosPair::from_cursors(&schema_cursor, &input_cursor));
     }
 
     // The schema cursor definitely has a text node after the code node, which
@@ -666,17 +666,16 @@ mod tests {
                 .validate_incomplete()
                 .destruct();
 
-        // shouldn't capture just yet
-        assert_eq!(value, json!({}));
-        assert_eq!(errors, vec![]);
-
         // We should NOT go farther for now
         // Schema:                     Input:
         // (document[0]0..12)          (document[0]0..4)
         // └─ (paragraph[1]0..12)      └─ (paragraph[1]0..4)
         //    └─ (code_span[2]0..12)      └─ (text[2]0..4)
         //       └─ (text[3]1..11)
+        // shouldn't capture just yet
         assert_eq!(pos_so_far, NodePosPair::from_pos(2, 2));
+        assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({}));
     }
 
     #[test]
@@ -692,9 +691,9 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 2));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"test": "test"}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 2));
     }
 
     #[test]
@@ -710,9 +709,9 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 2));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"test": "test"}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 2));
 
         let schema_tree = parse_markdown(schema_str).unwrap();
         let input_tree = parse_markdown(input_str).unwrap();
@@ -744,9 +743,9 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 2));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"test": "test"}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 2));
     }
 
     #[test]
@@ -924,9 +923,9 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 5));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 5));
     }
 
     #[test]
@@ -941,9 +940,9 @@ mod tests {
                 .validate_incomplete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(3, 3));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(3, 3));
     }
 
     #[test]
@@ -993,9 +992,9 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
 
         let (value, errors, farthest_reached_pos) =
             ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
@@ -1005,9 +1004,9 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(4, 4));
     }
 
     #[test]
@@ -1024,9 +1023,9 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 4));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 4));
 
         let (value, errors, farthest_reached_pos) =
             ValidatorTester::<MatcherVsTextValidator>::from_strs(schema_str, input_str)
@@ -1036,8 +1035,8 @@ mod tests {
                 .validate_complete()
                 .destruct();
 
+        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 4));
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({}));
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 4));
     }
 }

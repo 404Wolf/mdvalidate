@@ -258,13 +258,13 @@ mod tests {
         let result = NodeVsNodeValidator::validate(&walker, true);
 
         assert_eq!(
-            result.errors.len(),
+            result.errors().len(),
             1,
             "Expected exactly one error but found {:?}",
-            result.errors
+            result.errors()
         );
         assert!(
-            result.value.is_null() || result.value.as_object().map_or(true, |obj| obj.is_empty())
+            result.value().is_null() || result.value().as_object().map_or(true, |obj| obj.is_empty())
         );
     }
 
@@ -290,11 +290,11 @@ mod tests {
             ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
-        assert_eq!(result.errors, vec![]);
+        assert_eq!(result.errors(), &[]);
 
         assert_eq!(
-            result.value,
-            json!({
+            result.value(),
+            &json!({
                 "test": [
                     "test1",
                     "test2",
@@ -318,8 +318,8 @@ mod tests {
             ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, false);
 
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({}));
+        assert_eq!(result.errors(), &[]);
+        assert_eq!(result.value(), &json!({}));
 
         let schema_str2 = "This is *bold* text.";
         let input_str2 = "This is **bold** text.";
@@ -333,8 +333,8 @@ mod tests {
             ValidatorWalker::from_cursors(&schema_cursor, schema_str2, &input_cursor, input_str2);
         let result = NodeVsNodeValidator::validate(&walker, false);
 
-        assert!(!result.errors.is_empty());
-        assert_eq!(result.value, json!({}));
+        assert!(!result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -352,12 +352,12 @@ mod tests {
         let result = NodeVsNodeValidator::validate(&walker, true);
 
         assert_eq!(
-            result.errors,
-            vec![],
+            result.errors(),
+            &[],
             "Expected no errors, got: {:?}",
-            result.errors
+            result.errors()
         );
-        assert_eq!(result.value, json!({"name": "Alice"}));
+        assert_eq!(result.value(), &json!({"name": "Alice"}));
     }
 
     #[test]
@@ -375,12 +375,12 @@ mod tests {
         let result = NodeVsNodeValidator::validate(&walker, true);
 
         assert_eq!(
-            result.errors,
-            vec![],
+            result.errors(),
+            &[],
             "Expected no errors, got: {:?}",
-            result.errors
+            result.errors()
         );
-        assert_eq!(result.value, json!({}));
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -398,12 +398,12 @@ mod tests {
         let result = NodeVsNodeValidator::validate(&walker, true);
 
         assert_eq!(
-            result.errors,
-            vec![],
+            result.errors(),
+            &[],
             "Expected no errors, got: {:?}",
-            result.errors
+            result.errors()
         );
-        assert_eq!(result.value, json!({}));
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -420,8 +420,8 @@ mod tests {
             ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
-        assert_eq!(result.errors, vec![]);
-        assert_eq!(result.value, json!({"name": "Alice"}));
+        assert_eq!(result.errors(), &[]);
+        assert_eq!(result.value(), &json!({"name": "Alice"}));
     }
 
     #[test]
@@ -438,9 +438,9 @@ mod tests {
             ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
         let result = NodeVsNodeValidator::validate(&walker, true);
 
-        assert_ne!(result.errors, vec![]);
+        assert_ne!(result.errors(), &[]);
 
-        match result.errors.first() {
+        match result.errors().first() {
             Some(error) => match error {
                 ValidationError::SchemaViolation(
                     SchemaViolationError::ChildrenLengthMismatch { expected, .. },
@@ -473,11 +473,11 @@ mod tests {
         let result = NodeVsNodeValidator::validate(&walker, true);
 
         assert_eq!(
-            result.errors,
-            vec![],
+            result.errors(),
+            &[],
             "Expected no errors, got: {:?}",
-            result.errors
+            result.errors()
         );
-        assert_eq!(result.value, json!({}));
+        assert_eq!(result.value(), &json!({}));
     }
 }

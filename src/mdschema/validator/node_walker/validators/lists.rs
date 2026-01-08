@@ -180,8 +180,8 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
                 let has_errors = new_matches.has_errors();
                 validate_so_far += 1;
-                values_at_level.push(new_matches.value);
-                result.errors.extend(new_matches.errors);
+                values_at_level.push(new_matches.value().clone());
+                result.join_errors(new_matches.errors());
                 if early_return || has_errors {
                     return result;
                 }
@@ -316,8 +316,8 @@ fn validate_list_vs_list_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                         got_eof,
                     );
                     // We need to be able to capture errors that happen in the recursive call
-                    result.errors.extend(next_result.errors);
-                    values_at_level.push(next_result.value);
+                    result.join_errors(next_result.errors());
+                    values_at_level.push(next_result.value().clone());
                 }
             } else {
                 trace!("No more sibling pairs found");
@@ -961,8 +961,8 @@ mod tests {
 
         let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(result.errors, vec![],);
-        assert_eq!(result.value, json!({"url": "https://404wolf.com"}));
+        assert_eq!(result.errors(), &[],);
+        assert_eq!(result.value(), &json!({"url": "https://404wolf.com"}));
     }
 
     #[test]
@@ -972,8 +972,8 @@ mod tests {
         let result = validate_lists(schema_str, input_str, false);
 
         assert_eq!(
-            result.errors,
-            vec![ValidationError::SchemaViolation(
+            result.errors(),
+            &[ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     kind: NodeContentMismatchKind::Literal,
                     schema_index: 14,
@@ -1563,15 +1563,15 @@ Footer: test (footer isn't validated with_list_vs_list)
         let result = validate_lists(schema_str, input_str, true);
 
         // Error reported immediately - extra items are definitive
-        assert_eq!(result.errors.len(), 1);
-        assert_eq!(result.value, json!({"test": ["test1", "test2"]}));
+        assert_eq!(result.errors().len(), 1);
+        assert_eq!(result.value(), &json!({"test": ["test1", "test2"]}));
 
         // Same with EOF
         let result = validate_lists(schema_str, input_str, true);
 
         assert_eq!(
-            result.errors,
-            vec![ValidationError::SchemaViolation(
+            result.errors(),
+            &[ValidationError::SchemaViolation(
                 SchemaViolationError::ChildrenLengthMismatch {
                     schema_index: 2,
                     input_index: 6,
