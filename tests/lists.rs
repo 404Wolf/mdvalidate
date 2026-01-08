@@ -6,20 +6,6 @@ mod helpers;
 use mdvalidate::mdschema::validator::errors::{SchemaViolationError, ValidationError};
 
 test_case!(
-    unordered_list_literal,
-    r#"
-- a
-- b
-"#,
-    r#"
-- a
-- b
-"#,
-    json!({}),
-    vec![]
-);
-
-test_case!(
     ordered_list_literal,
     r#"
 1. a
@@ -42,6 +28,24 @@ test_case!(
 - apple
 "#,
     json!({"item": "apple"}),
+    vec![]
+);
+
+test_case!(
+    list_matcher_no_limit,
+    r#"
+- a
+- b
+    - `items:/.*/`{1,1}
+        - `items2:/.*/`{1,}
+"#,
+    r#"
+- a
+- b
+    - b
+        - c
+"#,
+    json!({"items": ["b", {"items2": ["c"]}]}),
     vec![]
 );
 
