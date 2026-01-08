@@ -1,4 +1,4 @@
-use mdv_utils::PrettyPrint;
+use mdvalidate_utils::PrettyPrint;
 use tree_sitter::TreeCursor;
 
 #[cfg(test)]
