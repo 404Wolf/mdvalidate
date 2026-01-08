@@ -1,5 +1,4 @@
 #[allow(dead_code)]
-
 use tracing::instrument;
 
 use crate::mdschema::validator::{
@@ -37,10 +36,13 @@ impl<T: ValidatorImpl> Validator for T {
 #[macro_export]
 macro_rules! trace_cursors {
     ($schema_cursor:expr, $input_cursor:expr) => {{
-        let schema_idx = $schema_cursor.descendant_index();
-        let input_idx = $input_cursor.descendant_index();
-
-        eprintln!("(S={}, I={})", schema_idx, input_idx);
+        println!(
+            "{}",
+            crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair(
+                &$schema_cursor,
+                &$input_cursor,
+            )
+        );
     }};
 }
 
@@ -49,8 +51,7 @@ mod test_utils {
     use tree_sitter::{Node, Tree, TreeCursor};
 
     use crate::mdschema::validator::{
-        node_walker::utils::pretty_print_cursor_pair,
-        ts_utils::{parse_markdown, walk_to_root},
+        node_walker::utils::pretty_print_cursor_pair, ts_utils::parse_markdown,
         validator_walker::ValidatorWalker,
     };
 
@@ -157,15 +158,9 @@ mod test_utils {
         }
 
         pub fn print(&mut self) -> &mut Self {
-            let mut input_cursor = self.input_cursor.clone();
-            walk_to_root(&mut input_cursor);
-
-            let mut schema_cursor = self.schema_cursor.clone();
-            walk_to_root(&mut schema_cursor);
-
             println!(
                 "{}",
-                pretty_print_cursor_pair(&schema_cursor, &input_cursor)
+                pretty_print_cursor_pair(&self.schema_cursor, &self.input_cursor)
             );
             self
         }

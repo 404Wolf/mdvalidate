@@ -1,7 +1,9 @@
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
+use crate::compare_node_kinds_check;
 use crate::invariant_violation;
+use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 use crate::mdschema::validator::node_walker::validators::matchers::MatcherVsTextValidator;
 use crate::mdschema::validator::ts_utils::{
@@ -12,8 +14,6 @@ use crate::mdschema::validator::{
     node_walker::{ValidationResult, validators::Validator},
     ts_utils::waiting_at_end,
 };
-use crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents;
-use crate::compare_node_kinds_check;
 
 /// Validate two textual elements.
 ///
@@ -122,17 +122,15 @@ mod tests {
         let schema_str = "`code`! test";
         let input_str = "`code` test";
 
-        let (value, errors, _) =
-            ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(schema, input)| assert!(both_are_inline_code(schema, input)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_inline_code(s, i)))
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -143,17 +141,15 @@ prefix `test:/test/`
 "#;
         let input_str = r#"prefix t"#;
 
-        let (value, errors, farthest_reached_pos) =
-            ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(schema, input)| assert!(both_are_text_nodes(schema, input)))
-                .validate_incomplete()
-                .destruct();
+        let result = ValidatorTester::<TextualVsTextualValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_text_nodes(s, i)))
+            .validate_incomplete();
 
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(2, 2));
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(2, 2));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({}));
     }
 }

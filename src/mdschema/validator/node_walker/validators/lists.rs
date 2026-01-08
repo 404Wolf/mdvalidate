@@ -779,7 +779,7 @@ mod tests {
         ValidatorTester::<ListVsListValidator>::from_strs(schema_str, input_str)
             .walk()
             .goto_first_child_then_unwrap()
-            .peek_nodes(|(schema, input)| assert!(both_are_list_nodes(schema, input)))
+            .peek_nodes(|(s, i)| assert!(both_are_list_nodes(s, i)))
             .validate(got_eof)
     }
 
@@ -908,21 +908,19 @@ mod tests {
     fn test_validate_list_vs_list_literal_list_items_matching() {
         let schema_str = "- test1\n- test2";
         let input_str = "- test1\n- test2";
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
     fn test_validate_list_vs_list_literal_list_items_different() {
         let schema_str = "- test1\n- test2";
         let input_str = "- test1\n- different";
-        let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+        assert_eq!(result.errors(), &[ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     kind: NodeContentMismatchKind::Literal,
                     schema_index: 9,
@@ -938,11 +936,9 @@ mod tests {
     fn test_validate_list_vs_list_literal_list_items_with_nesting_mismatch() {
         let schema_str = "- test1\n  - nested1";
         let input_str = "- test1\n  - nested_different";
-        let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+        assert_eq!(result.errors(), &[ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     kind: NodeContentMismatchKind::Literal,
                     schema_index: 10,
@@ -989,10 +985,10 @@ mod tests {
     fn test_validate_list_vs_list_literal_list_items_with_nesting() {
         let schema_str = "- test1\n- test2\n  - nested1";
         let input_str = "- test1\n- test2\n  - nested1";
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -1011,10 +1007,10 @@ Footer: test (footer isn't validated with_list_vs_list)
 
 Footer: test (footer isn't validated with_list_vs_list)
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(errors, vec![], "Expected no errors, got: {:?}", errors);
-        assert_eq!(value, json!({"id": "test2"}));
+        assert!(result.errors().is_empty(), "Expected no errors, got: {:?}", result.errors());
+        assert_eq!(result.value(), &json!({"id": "test2"}));
     }
 
     #[test]
@@ -1032,17 +1028,15 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test1
 - test2
 "#;
-        let (value, errors, _) =
-            ValidatorTester::<ListVsListValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_next_sibling_then_unwrap()
-                .peek_nodes(|(schema, input)| assert!(both_are_list_nodes(schema, input)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<ListVsListValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_next_sibling_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_list_nodes(s, i)))
+            .validate_complete();
 
-        assert_eq!(errors, vec![], "Expected no errors, got: {:?}", errors);
-        assert_eq!(value, json!({"item": ["test1", "test2"]}));
+        assert!(result.errors().is_empty(), "Expected no errors, got: {:?}", result.errors());
+        assert_eq!(result.value(), &json!({"item": ["test1", "test2"]}));
     }
 
     #[test]
@@ -1065,11 +1059,11 @@ Footer: test (footer isn't validated with_list_vs_list)
 - literal4
 - literal5
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![], "Expected no errors, got: {:?}", errors);
+        assert!(result.errors().is_empty(), "Expected no errors, got: {:?}", result.errors());
         assert_eq!(
-            value,
+            *result.value(),
             json!({"matcher1": ["match1_1"], "matcher2": ["match2_1"]})
         );
     }
@@ -1086,11 +1080,9 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test1
 - test2
 "#;
-        let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+        assert_eq!(result.errors(), &[ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     kind: NodeContentMismatchKind::Literal,
                     schema_index: 9,
@@ -1123,12 +1115,10 @@ Footer: test (footer isn't validated with_list_vs_list)
 
 Footer: test (footer isn't validated with_list_vs_list)
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(value, json!({}));
-        assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+        assert_eq!(result.value(), &json!({}));
+        assert_eq!(result.errors(), &[ValidationError::SchemaViolation(
                 SchemaViolationError::ChildrenLengthMismatch {
                     schema_index: 1,
                     input_index: 1,
@@ -1156,12 +1146,10 @@ Footer: test (footer isn't validated with_list_vs_list)
 
 Footer: test (footer isn't validated with_list_vs_list)
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(value, json!({})); // we stop early. TODO: capture as much as we can
-        assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+        assert_eq!(result.value(), &json!({})); // we stop early. TODO: capture as much as we can
+        assert_eq!(result.errors(), &[ValidationError::SchemaViolation(
                 SchemaViolationError::ChildrenLengthMismatch {
                     schema_index: 1,
                     input_index: 1,
@@ -1176,10 +1164,10 @@ Footer: test (footer isn't validated with_list_vs_list)
     fn test_validate_list_vs_list_with_simple_matcher() {
         let schema_str = r#"- `test:/test\d/`{2,2}"#;
         let input_str = "- test1\n- test2";
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![],);
-        assert_eq!(value, json!({"test": ["test1", "test2"]}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": ["test1", "test2"]}));
     }
 
     #[test]
@@ -1194,11 +1182,11 @@ Footer: test (footer isn't validated with_list_vs_list)
 - line2test1
 - line2test2
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![]);
+        assert!(result.errors().is_empty());
         assert_eq!(
-            value,
+            *result.value(),
             json!({"testA": ["test1", "test2"], "testB": ["line2test1", "line2test2"]})
         );
     }
@@ -1214,13 +1202,11 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test2
 - line2test1
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
         // even with eof=false we should know that there is an error by now
 
         // Single error: test2 doesn't match testB's pattern - we return early on mismatch
-        assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+        assert_eq!(result.errors(), &[ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     kind: NodeContentMismatchKind::Matcher,
                     schema_index: 11,
@@ -1233,7 +1219,7 @@ Footer: test (footer isn't validated with_list_vs_list)
         );
 
         // We return early on mismatch, so only testA is captured
-        assert_eq!(value, json!({"testA": ["test1"]}));
+        assert_eq!(result.value(), &json!({"testA": ["test1"]}));
     }
 
     #[test]
@@ -1247,10 +1233,10 @@ Footer: test (footer isn't validated with_list_vs_list)
     - deep1
 "#;
 
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![],);
-        assert_eq!(value, json!({"test": ["test1", {"deep": ["deep1"]}]}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": ["test1", {"deep": ["deep1"]}]}));
     }
 
     #[test]
@@ -1267,11 +1253,11 @@ Footer: test (footer isn't validated with_list_vs_list)
         - deeper1
         - deeper2
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![],);
+        assert!(result.errors().is_empty());
         assert_eq!(
-            value,
+            *result.value(),
             json!({
                 "test": [
                     "test1",
@@ -1311,11 +1297,11 @@ Footer: test (footer isn't validated with_list_vs_list)
         - deepest3
         - deepest4
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![],);
+        assert!(result.errors().is_empty());
         assert_eq!(
-            value,
+            *result.value(),
             json!({
                 "barbar": [
                     "barbar1",
@@ -1357,9 +1343,9 @@ Footer: test (footer isn't validated with_list_vs_list)
 - Item 1
     "#;
         // Use validate_lists (at list level) for partial validation
-        let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(errors, vec![]);
+        assert!(result.errors().is_empty());
     }
 
     #[test]
@@ -1370,9 +1356,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let input_str = r#"
 - Item
     "#;
-        let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(errors, vec![]);
+        assert!(result.errors().is_empty());
     }
 
     #[test]
@@ -1383,11 +1369,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let input_str = r#"
 - Itjm
     "#;
-        let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+        assert_eq!(result.errors(), &[ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
                     schema_index: 5,
                     input_index: 5,
@@ -1407,9 +1391,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let input_str = r#"
 -
     "#;
-        let (_, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![]);
+        assert!(result.errors().is_empty());
     }
 
     #[test]
@@ -1420,11 +1404,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let input_str = r#"
 - Test
     "#;
-        let (_, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+        assert_eq!(result.errors(), &[ValidationError::SchemaViolation(
                 SchemaViolationError::MalformedNodeStructure {
                     schema_index: 3,
                     input_index: 4,
@@ -1442,11 +1424,9 @@ Footer: test (footer isn't validated with_list_vs_list)
         let input_str = r#"
 -
     "#;
-        let (_, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(
-            errors,
-            vec![ValidationError::SchemaViolation(
+        assert_eq!(result.errors(), &[ValidationError::SchemaViolation(
                 SchemaViolationError::MalformedNodeStructure {
                     schema_index: 4,
                     input_index: 3,
@@ -1467,9 +1447,9 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test1
     - deep1
 "#;
-        let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
         assert!(
-            !errors.is_empty(),
+            !result.errors().is_empty(),
             "Expected errors due to mismatched list kinds at second level"
         );
     }
@@ -1488,18 +1468,18 @@ Footer: test (footer isn't validated with_list_vs_list)
     - deep3
     - deep4
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
         // Should stop at max (3) and report error for too many items
         assert_eq!(
-            errors.len(),
+            result.errors().len(),
             1,
             "Should error when max is exceeded - extra items are definitive"
         );
 
         // Should only capture 3 items even though 4 were provided
         assert_eq!(
-            value,
+            *result.value(),
             json!({"test": ["test1", {"deep": ["deep1", "deep2", "deep3"]}]})
         );
     }
@@ -1515,10 +1495,10 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test2
 - test3
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"test": ["test1", "test2", "test3"]}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": ["test1", "test2", "test3"]}));
 
         // Negative case: below minimum
         let schema_str = r#"
@@ -1527,10 +1507,10 @@ Footer: test (footer isn't validated with_list_vs_list)
         let input_str = r#"
 - test1
 "#;
-        let (_, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
         assert!(
-            !errors.is_empty(),
+            !result.errors().is_empty(),
             "Expected errors when list has fewer items than minimum"
         );
     }
@@ -1545,10 +1525,10 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test1
 - test2
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"test": ["test1", "test2"]}));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({"test": ["test1", "test2"]}));
 
         // Negative case: exceeds maximum - reports error immediately
         let schema_str = r#"
@@ -1594,10 +1574,10 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test3
 - test4
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![], "Expected no errors when list meets minimum");
-        assert_eq!(value, json!({"test": ["test1", "test2", "test3", "test4"]}));
+        assert!(result.errors().is_empty(), "Expected no errors when list meets minimum");
+        assert_eq!(result.value(), &json!({"test": ["test1", "test2", "test3", "test4"]}));
 
         // Negative case: below minimum
         let schema_str = r#"
@@ -1608,10 +1588,10 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test2
 "#;
 
-        let (_, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
         assert!(
-            !errors.is_empty(),
+            !result.errors().is_empty(),
             "Expected errors when list has fewer items than minimum"
         );
     }
@@ -1629,11 +1609,11 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test4
 - test5
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![], "Expected no errors for unlimited matcher");
+        assert!(result.errors().is_empty(), "Expected no errors for unlimited matcher");
         assert_eq!(
-            value,
+            *result.value(),
             json!({"test": ["test1", "test2", "test3", "test4", "test5"]})
         );
 
@@ -1646,10 +1626,10 @@ Footer: test (footer isn't validated with_list_vs_list)
         let tester = ValidatorTester::<ListVsListValidator>::from_strs(schema_str, input_str);
         let mut tester_walker = tester.walk();
         if tester_walker.goto_first_child_then().is_ok() {
-            let (_, errors, _) = tester_walker.validate(true).destruct();
+            let result = tester_walker.validate(true);
 
             assert!(
-                errors.is_empty() || errors[0].to_string().contains("kind"),
+                result.errors().is_empty() || result.errors()[0].to_string().contains("kind"),
                 "Empty list should be acceptable for {{0,}} matcher or fail on kind mismatch"
             );
         }
@@ -1665,11 +1645,11 @@ Footer: test (footer isn't validated with_list_vs_list)
 - Item 1
 - Item 3
 "#;
-        let (_, errors, _) = validate_list_items(schema_str, input_str, true).destruct();
+        let result = validate_list_items(schema_str, input_str, true);
 
-        assert_eq!(errors.len(), 1);
+        assert_eq!(result.errors().len(), 1);
         assert_eq!(
-            errors[0],
+            result.errors()[0],
             ValidationError::SchemaViolation(SchemaViolationError::NodeContentMismatch {
                 // TODO: make sure these indexes are correct
                 schema_index: 9,
@@ -1695,16 +1675,14 @@ Footer: test (footer isn't validated with_list_vs_list)
 - Item 1
 - Item 2
 "#;
-        let (_, errors, _) =
-            ValidatorTester::<ListVsListValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_next_sibling_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<ListVsListValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_next_sibling_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
+        assert!(result.errors().is_empty());
     }
 
     #[test]
@@ -1718,12 +1696,12 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test2
   - deepy
 "#;
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
-        assert_eq!(errors, vec![]);
+        assert!(result.errors().is_empty());
 
         assert_eq!(
-            value,
+            *result.value(),
             json!({
                 "test": [
                     "test1",
@@ -1751,20 +1729,20 @@ Footer: test (footer isn't validated with_list_vs_list)
 - test
 "#;
         // With got_eof=true, we should get exactly one error about too many items
-        let (value, errors, _) = validate_lists(schema_str, input_str, true).destruct();
+        let result = validate_lists(schema_str, input_str, true);
 
         // Should only capture the first item (max is 1)
-        assert_eq!(value, json!({"test": ["test"]}));
+        assert_eq!(result.value(), &json!({"test": ["test"]}));
 
         // Should have exactly one error indicating too many items
         assert_eq!(
-            errors.len(),
+            result.errors().len(),
             1,
             "Expected exactly one error for too many items"
         );
         assert!(
             matches!(
-                &errors[0],
+                &result.errors()[0],
                 ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
                     expected: ChildrenCount::Range {
                         min: 1,
@@ -1775,15 +1753,15 @@ Footer: test (footer isn't validated with_list_vs_list)
                 })
             ),
             "Expected ChildrenLengthMismatch error, got: {:?}",
-            errors[0]
+            result.errors()[0]
         );
 
         // With got_eof=false, we should STILL get an error - extra items won't disappear
-        let (value, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
-        assert_eq!(value, json!({"test": ["test"]}));
+        assert_eq!(result.value(), &json!({"test": ["test"]}));
         assert_eq!(
-            errors.len(),
+            result.errors().len(),
             1,
             "Should report error even when got_eof=false - extra items are definitive"
         );
@@ -1798,12 +1776,10 @@ Footer: test (footer isn't validated with_list_vs_list)
 "#;
         let input_str = "-";
 
-        let (_, errors, _) = validate_lists(schema_str, input_str, false).destruct();
+        let result = validate_lists(schema_str, input_str, false);
 
         // Should have no errors when got_eof=false - we're waiting for more input
-        assert_eq!(
-            errors,
-            vec![],
+        assert_eq!(result.errors(), &[],
             "Should not report error when streaming and only marker received"
         );
     }

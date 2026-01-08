@@ -12,9 +12,7 @@ use crate::mdschema::validator::node_walker::helpers::compare_text_contents::com
 use crate::mdschema::validator::node_walker::helpers::curly_matchers::extract_matcher_from_curly_delineated_text;
 use crate::mdschema::validator::node_walker::validators::ValidatorImpl;
 #[cfg(feature = "invariant_violations")]
-use crate::mdschema::validator::ts_utils::{
-    both_are_link_description_nodes, both_are_link_text_nodes, is_link_text_node,
-};
+use crate::mdschema::validator::ts_utils::both_are_link_description_nodes;
 use crate::mdschema::validator::ts_utils::{
     both_are_text_nodes, get_node_text, is_image_node, is_link_destination_node, is_link_node,
     waiting_at_end,
@@ -342,18 +340,16 @@ mod tests {
             .goto_first_child_then_unwrap()
             .goto_first_child_then_unwrap();
 
-        let (value, errors, farthest_reached_pos) = tester_walker.validate_incomplete().destruct();
-
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(5, 5));
+        let result = tester_walker.validate_incomplete();
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(5, 5));
         // Don't go "inside" the link source unless we are EOF. If we are EOF we scrape all the way to the very very end.
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({}));
 
-        let (value, errors, farthest_reached_pos) = tester_walker.validate_complete().destruct();
-
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 6));
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        let result = tester_walker.validate_complete();
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(6, 6));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -361,16 +357,14 @@ mod tests {
         let schema_str = "[hi](https://test.com)";
         let input_str = "[hi](https://different.com)";
 
-        let (_, errors, farthest_reached_pos) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(farthest_reached_pos, NodePosPair::from_pos(6, 6));
-        assert!(!errors.is_empty());
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(6, 6));
+        assert!(!result.errors().is_empty());
     }
 
     #[test]
@@ -378,16 +372,14 @@ mod tests {
         let schema_str = "[test]({foo:/\\w+/})";
         let input_str = "[test](hello)";
 
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate(true)
-                .destruct();
+        let result = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate(true);
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"foo": "hello"}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({"foo": "hello"}));
     }
 
     #[test]
@@ -395,16 +387,14 @@ mod tests {
         let schema_str = "[test](hello)";
         let input_str = "[test]({foo:/\\w+/})";
 
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate(true)
-                .destruct();
+        let result = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate(true);
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"foo": "hello"}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({"foo": "hello"}));
     }
 
     #[test]
@@ -412,16 +402,14 @@ mod tests {
         let schema_str = "![hi](https://test.com)";
         let input_str = "![hi](https://test.com)";
 
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({}));
     }
 
     #[test]
@@ -429,15 +417,13 @@ mod tests {
         let schema_str = "![hi](https://test.com)";
         let input_str = "![hi](https://different.com)";
 
-        let (_value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert!(!errors.is_empty());
+        assert!(!result.errors().is_empty());
     }
 
     #[test]
@@ -445,16 +431,14 @@ mod tests {
         let schema_str = "[{foo:/\\w+/}](https://test.com)";
         let input_str = "[hello](https://test.com)";
 
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"foo": "hello"}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({"foo": "hello"}));
     }
 
     #[test]
@@ -462,15 +446,13 @@ mod tests {
         let schema_str = "[{foo:/\\d+/}](https://test.com)";
         let input_str = "[hello](https://test.com)";
 
-        let (_value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert!(!errors.is_empty());
+        assert!(!result.errors().is_empty());
     }
 
     #[test]
@@ -478,16 +460,14 @@ mod tests {
         let schema_str = "![{desc:/.+/}](image.png)";
         let input_str = "![test image](image.png)";
 
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"desc": "test image"}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({"desc": "test image"}));
     }
 
     #[test]
@@ -495,15 +475,16 @@ mod tests {
         let schema_str = "[{text:/\\w+/}]({url:/.+/})";
         let input_str = "[hello](https://test.com)";
 
-        let (value, errors, _) =
-            ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .goto_first_child_then_unwrap()
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<LinkVsLinkValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_first_child_then_unwrap()
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"text": "hello", "url": "https://test.com"}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(
+            result.value(),
+            &json!({"text": "hello", "url": "https://test.com"})
+        );
     }
 }

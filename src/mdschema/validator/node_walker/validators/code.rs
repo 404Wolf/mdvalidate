@@ -215,28 +215,25 @@ mod tests {
         let schema_str = "```rust\nfn main() {}\n```";
         let input_str = "```rust\nfn main() {}\n```";
 
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(schema, input)| assert!(both_are_codeblocks(schema, input)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_codeblocks(s, i)))
+            .validate_complete();
 
-        assert_eq!(errors, vec![], "Expected no errors, got {:?}", errors);
-        assert_eq!(value, json!({}));
+        assert!(result.errors().is_empty(), "Expected no errors, got {:?}", result.errors());
+        assert_eq!(result.value(), &json!({}));
 
         // negative case: change input so it is not the same as the schema
         let input_str_negative = "```rust\nfn main() { println!(\"hi\"); }\n```";
-        let (_value, errors, _farthest_reached_pos) =
+        let result =
             ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str_negative)
                 .walk()
                 .goto_first_child_then_unwrap()
-                .peek_nodes(|(schema, input)| assert!(both_are_codeblocks(schema, input)))
-                .validate_complete()
-                .destruct();
+                .peek_nodes(|(s, i)| assert!(both_are_codeblocks(s, i)))
+                .validate_complete();
 
-        assert!(!errors.is_empty());
+        assert!(!result.errors().is_empty());
     }
 
     #[test]
@@ -247,16 +244,14 @@ fn main() {}
         let input_str = r#"```rust
 fn main() {}
 ```"#;
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(schema, input)| assert!(both_are_codeblocks(schema, input)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_codeblocks(s, i)))
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({ "lang": "rust" }));
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({ "lang": "rust" }));
     }
 
     #[test]
@@ -267,15 +262,13 @@ fn main() {}
         let input_str = r#"```rust
 fn main() {}
 ```"#;
-        let (value, errors, _farthest_reached_pos) =
-            ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
-                .walk()
-                .goto_first_child_then_unwrap()
-                .peek_nodes(|(schema, input)| assert!(both_are_codeblocks(schema, input)))
-                .validate_complete()
-                .destruct();
+        let result = ValidatorTester::<CodeVsCodeValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_codeblocks(s, i)))
+            .validate_complete();
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({ "lang": "rust", "code": "fn main() {}" }))
+        assert!(result.errors().is_empty());
+        assert_eq!(result.value(), &json!({ "lang": "rust", "code": "fn main() {}" }))
     }
 }

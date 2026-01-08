@@ -4,6 +4,7 @@ use tree_sitter::TreeCursor;
 #[cfg(test)]
 use serde_json::Value;
 
+use crate::mdschema::validator::ts_utils::walk_to_root;
 #[cfg(test)]
 use crate::mdschema::validator::{errors::ValidationError, validator::Validator};
 
@@ -24,15 +25,16 @@ pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, 
 }
 
 pub fn pretty_print_cursor_pair(schema_cursor: &TreeCursor, input_cursor: &TreeCursor) -> String {
-    pretty_print_cursor_pair_with_highlight(schema_cursor, input_cursor, None)
-}
-
-pub fn pretty_print_cursor_pair_with_highlight(
-    schema_cursor: &TreeCursor,
-    input_cursor: &TreeCursor,
-    highlight_index: Option<usize>,
-) -> String {
     use tabled::{Table, Tabled, settings::Style};
+
+    let schema_cursor_descendant_index = schema_cursor.descendant_index();
+    let input_cursor_descendant_index = input_cursor.descendant_index();
+
+    let mut schema_cursor = schema_cursor.clone();
+    let mut input_cursor = input_cursor.clone();
+
+    walk_to_root(&mut schema_cursor);
+    walk_to_root(&mut input_cursor);
 
     #[derive(Tabled)]
     struct Content {
@@ -42,15 +44,12 @@ pub fn pretty_print_cursor_pair_with_highlight(
         input: String,
     }
 
-    let mut schema_str = schema_cursor.node().pretty_print();
-    let mut input_str = input_cursor.node().pretty_print();
-
-    if let Some(idx) = highlight_index {
-        // Mark the position with a dot
-        let marker = format!(" <-- Index {}", idx);
-        schema_str.push_str(&marker);
-        input_str.push_str(&marker);
-    }
+    let schema_str = schema_cursor
+        .node()
+        .pretty_print_with_highlight(&[schema_cursor_descendant_index]);
+    let input_str = input_cursor
+        .node()
+        .pretty_print_with_highlight(&[input_cursor_descendant_index]);
 
     let content = Content {
         schema: schema_str,

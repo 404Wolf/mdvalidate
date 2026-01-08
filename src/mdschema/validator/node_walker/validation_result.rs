@@ -151,7 +151,7 @@ impl ValidationResult {
 
         // Make the descendant index pair the maximum of the two (as far as we got)
         self.farthest_reached_pos
-            .keep_farther_pos(&other.farthest_reached_pos());
+            .keep_farther_pos(other.farthest_reached_pos());
     }
 
     /// Join in just the value from another value
@@ -166,13 +166,8 @@ impl ValidationResult {
     }
 
     /// Get the farthest reached position as a descendant index pair.
-    pub fn farthest_reached_pos(&self) -> NodePosPair {
-        self.farthest_reached_pos
-    }
-
-    /// Get the farthest reached position as a descendant index pair as a mutable reference to our internal one
-    pub fn farthest_reached_pos_mut(&mut self) -> &mut NodePosPair {
-        &mut self.farthest_reached_pos
+    pub fn farthest_reached_pos(&self) -> &NodePosPair {
+        &self.farthest_reached_pos
     }
 
     /// Destruct the result into (value, errors, farthest_reached_pos).

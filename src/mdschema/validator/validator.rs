@@ -237,10 +237,9 @@ impl ValidatorState for Validator {
     }
 
     fn push_validation_result(&mut self, result: ValidationResult) {
-        let result_descendant_index_pair = result.farthest_reached_pos();
         self.join_new_matches(result.value().clone());
         self.errors_so_far.extend(result.errors().to_vec());
-        self.farthest_reached_pos = result_descendant_index_pair;
+        self.farthest_reached_pos = *result.farthest_reached_pos();
     }
 
     fn farthest_reached_pos(&self) -> NodePosPair {

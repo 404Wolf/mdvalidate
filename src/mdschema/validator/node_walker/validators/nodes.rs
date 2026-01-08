@@ -16,7 +16,7 @@ use crate::mdschema::validator::ts_utils::{
     both_are_textual_nodes, is_heading_node,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::{compare_node_children_lengths_check, trace_cursors};
+use crate::{compare_node_children_lengths_check};
 
 /// Validate two arbitrary nodes against each other.
 ///
@@ -233,11 +233,10 @@ mod tests {
 
         let walker =
             ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
-        let (value, errors, farthest_reached_pos) =
-            NodeVsNodeValidator::validate(&walker, true).destruct();
+        let result = NodeVsNodeValidator::validate(&walker, true);
 
-        assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"a": "a", "b": "b", "c": "c"}));
+        assert_eq!(result.errors(), &vec![]);
+        assert_eq!(result.value(), &json!({"a": "a", "b": "b", "c": "c"}));
     }
 
     #[test]
@@ -264,7 +263,11 @@ mod tests {
             result.errors()
         );
         assert!(
-            result.value().is_null() || result.value().as_object().map_or(true, |obj| obj.is_empty())
+            result.value().is_null()
+                || result
+                    .value()
+                    .as_object()
+                    .map_or(true, |obj| obj.is_empty())
         );
     }
 

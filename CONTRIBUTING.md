@@ -8,6 +8,7 @@ There's not a full list of general guidelines right now, but some worthy pointer
 - When we are talking about a data structure that stores some reference to schema and the input, store the schema first.
 - Prefer `get_node_text` from `ts_utils` over direct `utf8_text` calls when reading schema node text.
 - In tests, keep assertion order consistent: position assertions first (if any), then errors, then values.
+- Avoid using `ValidationResult::destruct`; prefer accessors like `result.errors()`, `result.value()`, and `result.farthest_reached_pos()`.
 
 # Debugging
 
