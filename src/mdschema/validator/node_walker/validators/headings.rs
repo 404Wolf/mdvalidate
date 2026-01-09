@@ -263,7 +263,10 @@ mod tests {
             .peek_nodes(|(s, i)| assert!(both_are_headings(s, i)))
             .validate_complete();
 
-        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(12, 10));
+        assert_eq!(
+            *result.farthest_reached_pos(),
+            NodePosPair::from_pos(12, 10)
+        );
         assert!(result.errors().is_empty());
         assert_eq!(result.value(), &json!({"a": "a", "b": "b"}));
     }

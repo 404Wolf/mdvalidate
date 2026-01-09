@@ -15,6 +15,7 @@ use crate::mdschema::validator::ts_types::{both_are_table_cells, both_are_table_
 use crate::mdschema::validator::ts_types::{both_are_table_delimiter_rows, both_are_tables};
 use crate::mdschema::validator::ts_utils::waiting_at_end;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use tree_sitter::TreeCursor;
 
 /// Validate two tables.
 pub(super) struct TableVsTableValidator;
@@ -22,6 +23,28 @@ pub(super) struct TableVsTableValidator;
 impl ValidatorImpl for TableVsTableValidator {
     fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         validate_impl(walker, got_eof)
+    }
+}
+
+/// Returns true if we should early return with an error (result was modified).
+fn goto_next_sibling_pair_or_exit<'a>(
+    schema_cursor: &TreeCursor<'a>,
+    input_cursor: &TreeCursor<'a>,
+    walker: &ValidatorWalker,
+    got_eof: bool,
+    result: &mut ValidationResult,
+) -> bool {
+    if !waiting_at_end(got_eof, walker.input_str(), input_cursor) {
+        result.add_error(ValidationError::SchemaViolation(
+            SchemaViolationError::MalformedNodeStructure {
+                schema_index: schema_cursor.descendant_index(),
+                input_index: input_cursor.descendant_index(),
+                kind: MalformedStructureKind::MismatchingTableCells,
+            },
+        ));
+        true
+    } else {
+        false
     }
 }
 
@@ -134,21 +157,16 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
                         (true, true) => {}
                         (false, false) => break 'col_iter,
                         (true, false) => {
-                            // If the schema has another cell but the input
-                            // doesn't, it may just be because we are in an
-                            // incomplete state.
-                            if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
-                                // don't continue FOR NOW. We will want to revalidate the entire table.
-                                return need_to_restart_result;
-                            } else {
-                                result.add_error(ValidationError::SchemaViolation(
-                                    SchemaViolationError::MalformedNodeStructure {
-                                        schema_index: schema_cursor.descendant_index(),
-                                        input_index: input_cursor.descendant_index(),
-                                        kind: MalformedStructureKind::MismatchingTableCells,
-                                    },
-                                ));
+                            if goto_next_sibling_pair_or_exit(
+                                &schema_cursor,
+                                &input_cursor,
+                                walker,
+                                got_eof,
+                                &mut result,
+                            ) {
                                 return result;
+                            } else {
+                                return need_to_restart_result;
                             }
                         }
                         (false, true) => {}
@@ -174,21 +192,16 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
                 }
                 (false, false) => break 'row_iter,
                 (true, false) => {
-                    // If the schema has another cell but the input
-                    // doesn't, it may just be because we are in an
-                    // incomplete state.
-                    if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
-                        // don't continue FOR NOW. We will want to revalidate the entire table.
-                        return need_to_restart_result;
-                    } else {
-                        result.add_error(ValidationError::SchemaViolation(
-                            SchemaViolationError::MalformedNodeStructure {
-                                schema_index: schema_cursor.descendant_index(),
-                                input_index: input_cursor.descendant_index(),
-                                kind: MalformedStructureKind::MismatchingTableCells,
-                            },
-                        ));
+                    if goto_next_sibling_pair_or_exit(
+                        &schema_cursor,
+                        &input_cursor,
+                        walker,
+                        got_eof,
+                        &mut result,
+                    ) {
                         return result;
+                    } else {
+                        return need_to_restart_result;
                     }
                 }
                 _ => {

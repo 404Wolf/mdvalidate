@@ -1,10 +1,10 @@
-use mdvalidate_utils::PrettyPrint;
 use tree_sitter::TreeCursor;
 
 #[cfg(test)]
 use serde_json::Value;
 
 use crate::mdschema::validator::ts_utils::walk_to_root;
+use mdvalidate_utils::PrettyPrint;
 #[cfg(test)]
 use crate::mdschema::validator::{errors::ValidationError, validator::Validator};
 
@@ -46,10 +46,14 @@ pub fn pretty_print_cursor_pair(schema_cursor: &TreeCursor, input_cursor: &TreeC
 
     let schema_str = schema_cursor
         .node()
-        .pretty_print_with_highlight(&[schema_cursor_descendant_index]);
+        .get_pretty_printer()
+        .highlight(&[schema_cursor_descendant_index])
+        .print("");
     let input_str = input_cursor
         .node()
-        .pretty_print_with_highlight(&[input_cursor_descendant_index]);
+        .get_pretty_printer()
+        .highlight(&[input_cursor_descendant_index])
+        .print("");
 
     let content = Content {
         schema: schema_str,

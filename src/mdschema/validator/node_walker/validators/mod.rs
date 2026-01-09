@@ -11,6 +11,7 @@ pub(super) mod links;
 pub(super) mod lists;
 pub(super) mod matchers;
 pub(crate) mod nodes;
+pub(super) mod quotes;
 pub(super) mod tables;
 pub(super) mod textual;
 pub(super) mod textual_container;

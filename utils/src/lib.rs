@@ -1,3 +1,3 @@
 mod node_print;
 
-pub use node_print::PrettyPrint;
+pub use node_print::{PrettyPrint, Printer};

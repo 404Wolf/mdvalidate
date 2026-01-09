@@ -1,23 +1,7 @@
-[workspace]
-members = [".", "utils"]
-resolver = "2"
-
-[package]
-name = "mdvalidate"
-version = "0.2.3"
-description = "Markdown schema validation engine"
-license = "MIT"
-documentation = "https://github.com/404wolf/mdvalidate"
-homepage = "https://github.com/404wolf/mdvalidate"
-edition = "2024"
-
 [[bin]]
 name = "mdv"
 path = "src/main.rs"
 publish = true
-
-[lib]
-path = "src/lib.rs"
 
 [dependencies]
 ariadne = "0.5.1"
@@ -48,6 +32,22 @@ ptree = "0.5.2"
 default = ["invariant_violations"]
 invariant_violations = []
 
+[lib]
+path = "src/lib.rs"
+
+[package]
+name = "mdvalidate"
+version = "0.2.3"
+description = "Markdown schema validation engine"
+license = "MIT"
+documentation = "https://github.com/404wolf/mdvalidate"
+homepage = "https://github.com/404wolf/mdvalidate"
+edition = "2024"
+
 [[test]]
 name = "tests"
 path = "tests/mod.rs"
+
+[workspace]
+members = [".", "utils"]
+resolver = "2"

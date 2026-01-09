@@ -602,6 +602,7 @@ dependencies = [
 name = "mdvalidate-utils"
 version = "0.0.1"
 dependencies = [
+ "clap",
  "ptree",
  "tree-sitter",
  "tree-sitter-markdown-fork",
