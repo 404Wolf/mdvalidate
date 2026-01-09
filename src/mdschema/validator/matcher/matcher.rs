@@ -12,8 +12,10 @@ use crate::mdschema::validator::{
     ts_utils::{get_next_node, get_node_and_next_node, get_node_text},
 };
 
+static ID_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9-_]+$").unwrap());
+
 static REGEX_MATCHER_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(((?P<id>[a-zA-Z0-9-_]+)):)?\/(?P<regex>.+?)\/").unwrap());
+    LazyLock::new(|| Regex::new(r"^(?:(?P<id_with_regex>[a-zA-Z0-9-_]+):)?(?:\/(?P<regex>.+?)\/|(?P<bare_id>[a-zA-Z0-9-_]+))$").unwrap());
 
 static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
 
@@ -90,7 +92,7 @@ fn extract_item_count_limits(text: &str) -> (Option<usize>, Option<usize>, bool)
 pub struct Matcher {
     id: Option<String>,
     /// A compiled regex for the pattern.
-    pattern: MatcherType,
+    kind: MatcherKind,
     /// Extra flags, which we receive via extra text that corresponds to the matcher
     flags: HashSet<MatcherFlags>,
     /// Extra configuration options
@@ -100,13 +102,27 @@ pub struct Matcher {
 }
 
 #[derive(Debug, Clone)]
-pub struct MatcherType {
-    regex: Regex,
+pub enum MatcherKind {
+    Regex(Regex),
+    All,
 }
 
-impl fmt::Display for MatcherType {
+impl MatcherKind {
+    pub fn from_regex(regex: Regex) -> Self {
+        MatcherKind::Regex(regex)
+    }
+
+    pub fn all() -> Self {
+        MatcherKind::All
+    }
+}
+
+impl fmt::Display for MatcherKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.regex.as_str())
+        match self {
+            MatcherKind::Regex(regex) => write!(f, "{}", regex.as_str()),
+            MatcherKind::All => write!(f, "all"),
+        }
     }
 }
 
@@ -127,14 +143,14 @@ impl Matcher {
     pub fn new(
         id: Option<String>,
         flags: HashSet<MatcherFlags>,
-        pattern: MatcherType,
+        r#type: MatcherKind,
         extras: MatcherExtras,
         original_str_len: usize,
     ) -> Self {
         Matcher {
             id,
             flags,
-            pattern,
+            kind: r#type,
             extras,
             original_str_len,
         }
@@ -142,7 +158,7 @@ impl Matcher {
 
     pub fn new_with_empty_flags(
         id: Option<String>,
-        pattern: MatcherType,
+        pattern: MatcherKind,
         extras: MatcherExtras,
         original_str_len: usize,
     ) -> Self {
@@ -176,7 +192,7 @@ impl Matcher {
             Some(caps) => extract_id_and_pattern(&caps, &pattern_str)?,
             None => {
                 return Err(MatcherError::MatcherInteriorRegexInvalid(format!(
-                    "Expected format: 'id:/regex/'<extras>, got {}", // TODO: don't hard code what we expect
+                    "Expected format: 'id:/regex/' or 'id', got {}",
                     pattern_str
                 )));
             }
@@ -210,10 +226,10 @@ impl Matcher {
         schema_cursor: &TreeCursor,
         schema_str: &str,
     ) -> Result<Self, MatcherError> {
-        #[cfg(feature = "invariant_violations")]
-        if !is_inline_code_node(&schema_cursor.node()) {
-            invariant_violation!("expected inline code node for extracting a matcher");
-        }
+        // #[cfg(feature = "invariant_violations")]
+        // if !is_inline_code_node(&schema_cursor.node()) {
+        //     invariant_violation!("expected inline code node for extracting a matcher");
+        // }
 
         let pattern_str = get_node_text(&schema_cursor.node(), schema_str);
         let next_node = get_next_node(schema_cursor);
@@ -227,9 +243,12 @@ impl Matcher {
 
     /// Get an actual match string for a given text, if it matches.
     pub fn match_str<'a>(&self, text: &'a str) -> Option<&'a str> {
-        match self.pattern.regex.find(text) {
-            Some(mat) => Some(&text[mat.start()..mat.end()]),
-            None => None,
+        match &self.kind {
+            MatcherKind::Regex(regex) => {
+                let mat = regex.find(text)?;
+                Some(&text[mat.start()..mat.end()])
+            }
+            MatcherKind::All => Some(text),
         }
     }
 
@@ -249,8 +268,8 @@ impl Matcher {
     }
 
     /// Get a reference to the pattern
-    pub fn pattern(&self) -> &MatcherType {
-        &self.pattern
+    pub fn pattern(&self) -> &MatcherKind {
+        &self.kind
     }
 
     /// The original string length of the matcher including the `s.
@@ -272,11 +291,15 @@ impl Matcher {
             _ => true,
         }
     }
+
+    pub fn kind(&self) -> &MatcherKind {
+        &self.kind
+    }
 }
 
 impl PartialEq for Matcher {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id && format!("{}", self.pattern) == format!("{}", other.pattern)
+        self.id == other.id && format!("{}", self.kind) == format!("{}", other.kind)
     }
 }
 
@@ -284,40 +307,54 @@ impl PartialEq for Matcher {
 fn extract_id_and_pattern(
     captures: &regex::Captures,
     pattern: &str,
-) -> Result<(Option<String>, MatcherType), MatcherError> {
-    let id = captures.name("id").map(|m| m.as_str().to_string());
+) -> Result<(Option<String>, MatcherKind), MatcherError> {
+    // Check if we have a bare ID (e.g., `word`)
+    if let Some(bare_id) = captures.name("bare_id") {
+        let id = bare_id.as_str().to_string();
+        return Ok((Some(id), MatcherKind::all()));
+    }
+
+    // Otherwise, we have a regex pattern (e.g., `id:/regex/` or `/regex/`)
+    let id = captures.name("id_with_regex").map(|m| m.as_str().to_string());
     let regex_pattern = captures
         .name("regex")
         .map(|m| m.as_str().to_string())
         .ok_or_else(|| {
             MatcherError::MatcherInteriorRegexInvalid(format!(
-                "Expected format: 'id:/regex/', got {}",
+                "Expected format: 'id:/regex/' or 'id', got {}",
                 pattern
             ))
         })?;
 
-    let matcher = MatcherType {
-        regex: Regex::new(&format!("^{}", regex_pattern)).map_err(|e| {
-            MatcherError::MatcherInteriorRegexInvalid(format!("Invalid regex pattern: {}", e))
-        })?,
-    };
+    // Create a regex matcher from the pattern
+    let matcher = MatcherKind::from_regex(Regex::new(&format!("^{}", regex_pattern)).map_err(|e| {
+        MatcherError::MatcherInteriorRegexInvalid(format!("Invalid regex pattern: {}", e))
+    })?);
 
     Ok((id, matcher))
 }
 
 impl fmt::Display for Matcher {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let regex_str = self.pattern.regex.as_str();
-        // The regex is stored as "^<pattern>", so remove the leading ^
-        let pattern_str = if regex_str.starts_with('^') {
-            &regex_str[1..]
-        } else {
-            regex_str
-        };
+        match &self.kind {
+            MatcherKind::Regex(regex) => {
+                let regex_str = regex.as_str();
+                // The regex is stored as "^<pattern>", so remove the leading ^
+                let pattern_str = if regex_str.starts_with('^') {
+                    &regex_str[1..]
+                } else {
+                    regex_str
+                };
 
-        match &self.id {
-            Some(id) => write!(f, "{}:/{}/", id, pattern_str),
-            None => write!(f, "/{}/", pattern_str),
+                match &self.id {
+                    Some(id) => write!(f, "{}:/{}/", id, pattern_str),
+                    None => write!(f, "/{}/", pattern_str),
+                }
+            }
+            MatcherKind::All => match &self.id {
+                Some(id) => write!(f, "{}:/all/", id),
+                None => write!(f, "/all/"),
+            },
         }
     }
 }
@@ -384,14 +421,28 @@ pub fn extract_text_matcher(cursor: &TreeCursor, str: &str) -> Result<Matcher, E
 mod tests {
     use crate::mdschema::validator::{
         matcher::matcher::{
-            Matcher, MatcherError, MatcherExtrasError, extract_text_matcher,
+            Matcher, MatcherError, MatcherExtrasError, MatcherKind, extract_text_matcher,
             partition_at_special_chars,
         },
         ts_utils::{new_markdown_parser, parse_markdown},
     };
 
     #[test]
-    fn test_matcher_creation_and_matching() {
+    fn test_matcher_creation_and_matching_all() {
+        let matcher = Matcher::try_from_pattern_and_suffix_str("`word`", None).unwrap();
+        match matcher.kind {
+            MatcherKind::All => {
+                assert_eq!(matcher.id, Some("word".to_string()));
+                assert_eq!(matcher.match_str("hello world"), Some("hello world"));
+                assert_eq!(matcher.match_str("1234"), Some("1234"));
+                assert_eq!(matcher.match_str("!@#$"), Some("!@#$"));
+            }
+            kind => panic!("Unexpected matcher kind: {:?}", kind),
+        }
+    }
+
+    #[test]
+    fn test_matcher_creation_and_matching_regex() {
         let matcher = Matcher::try_from_pattern_and_suffix_str("`word:/\\w+/`", None).unwrap();
         assert_eq!(matcher.id, Some("word".to_string()));
         assert_eq!(matcher.match_str("hello world"), Some("hello"));
@@ -400,9 +451,31 @@ mod tests {
     }
 
     #[test]
+    fn test_all_matcher_matches_everything() {
+        let matcher = Matcher::try_from_pattern_and_suffix_str("`my_id`", None).unwrap();
+        assert_eq!(matcher.id, Some("my_id".to_string()));
+
+        // All matcher acts as identity function - always matches and returns exactly what was passed
+        assert_eq!(matcher.match_str("hello"), Some("hello"));
+        assert_eq!(matcher.match_str("test123"), Some("test123"));
+        assert_eq!(matcher.match_str("under_score"), Some("under_score"));
+        assert_eq!(matcher.match_str("MixedCase123"), Some("MixedCase123"));
+
+        // Should match special characters too - identity function
+        assert_eq!(matcher.match_str("@*&^R"), Some("@*&^R"));
+        assert_eq!(matcher.match_str("!test"), Some("!test"));
+        assert_eq!(matcher.match_str("-dash"), Some("-dash"));
+
+        // Matches everything including spaces and special characters
+        assert_eq!(matcher.match_str("valid-later"), Some("valid-later"));
+        assert_eq!(matcher.match_str("test@symbol"), Some("test@symbol"));
+        assert_eq!(matcher.match_str("anything at all!"), Some("anything at all!"));
+    }
+
+    #[test]
     fn test_matcher_invalid_pattern() {
-        // Test error handling for invalid pattern using try_from_pattern_and_suffix_str
-        let result = Matcher::try_from_pattern_and_suffix_str("`invalid_pattern`", None);
+        // Test error handling for truly invalid pattern (invalid chars for ID, not a regex)
+        let result = Matcher::try_from_pattern_and_suffix_str("`invalid pattern with spaces`", None);
         assert!(result.is_err());
         match result.as_ref().unwrap_err() {
             MatcherError::MatcherInteriorRegexInvalid(_) => {

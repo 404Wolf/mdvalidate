@@ -33,12 +33,12 @@ pub(super) mod quotes;
 pub(super) mod tables;
 pub(super) mod textual;
 
-pub trait ValidatorImpl {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
+pub trait ValidatorImpl: Default {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
 }
 
 pub trait Validator {
-    fn validate(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
+    fn validate(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
 }
 
 impl<T: ValidatorImpl> Validator for T {
@@ -47,8 +47,8 @@ impl<T: ValidatorImpl> Validator for T {
         i = %walker.input_cursor().descendant_index(),
         s = %walker.schema_cursor().descendant_index(),
     ), ret)]
-    fn validate(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-        Self::validate_impl(walker, got_eof)
+    fn validate(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        self.validate_impl(walker, got_eof)
     }
 }
 
@@ -107,7 +107,7 @@ mod test_utils {
         input_str: &'a str,
     }
 
-    impl<'a, V: Validator> ValidationTesterWalker<'a, V> {
+    impl<'a, V: Validator + Default> ValidationTesterWalker<'a, V> {
         pub fn validate(&mut self, got_eof: bool) -> ValidationResult {
             self.print();
 
@@ -117,7 +117,7 @@ mod test_utils {
                 &self.input_cursor,
                 self.input_str,
             );
-            V::validate(&walker, got_eof)
+            V::default().validate(&walker, got_eof)
         }
 
         pub fn validate_complete(&mut self) -> ValidationResult {

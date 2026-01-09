@@ -11,7 +11,7 @@ use crate::mdschema::validator::{
     node_walker::{
         ValidationResult,
         validators::{
-            Validator, ValidatorImpl, containers::TextualContainerVsTextualContainerValidator,
+            Validator, ValidatorImpl, containers::ContainerVsContainerValidator,
         },
     },
     ts_types::*,
@@ -88,10 +88,11 @@ use crate::compare_node_kinds_check;
 ///
 /// Note that a limitation here is that you cannot have a variable-length list
 /// that is not the final list in your schema.
+#[derive(Default)]
 pub(super) struct ListVsListValidator;
 
 impl ValidatorImpl for ListVsListValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
@@ -308,7 +309,7 @@ impl ValidatorImpl for ListVsListValidator {
                 // If there are more items to validate AT THE SAME LEVEL, recurse to
                 // validate them. We now use the *next* schema node too.
                 if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
-                    let next_result = ListVsListValidator::validate(
+                    let next_result = ListVsListValidator::default().validate(
                         &walker.with_cursors(&schema_cursor, &input_cursor),
                         got_eof,
                     );
@@ -329,7 +330,7 @@ impl ValidatorImpl for ListVsListValidator {
                             schema_cursor.node().kind()
                         );
 
-                        let next_result = ListVsListValidator::validate(
+                        let next_result = ListVsListValidator::default().validate(
                             &walker.with_cursors(&schema_cursor, &input_cursor),
                             got_eof,
                         );
@@ -494,7 +495,7 @@ impl ValidatorImpl for ListVsListValidator {
                         input_cursor.goto_first_child();
                         schema_cursor.goto_first_child();
 
-                        let deeper_result = ListVsListValidator::validate(
+                        let deeper_result = ListVsListValidator::default().validate(
                             &walker.with_cursors(&schema_cursor, &input_cursor),
                             got_eof,
                         );
@@ -505,7 +506,7 @@ impl ValidatorImpl for ListVsListValidator {
                 // Recurse on next sibling if available!
                 if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
                     trace!("Moving to next sibling list items for continued validation");
-                    let new_matches = ListVsListValidator::validate(
+                    let new_matches = ListVsListValidator::default().validate(
                         &walker.with_cursors(&schema_cursor, &input_cursor),
                         got_eof,
                     );
@@ -605,7 +606,7 @@ fn validate_list_item_contents_vs_list_item_contents(
                 ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
 
             (
-                TextualContainerVsTextualContainerValidator::validate(&walker, got_eof),
+                ContainerVsContainerValidator::default().validate(&walker, got_eof),
                 false,
             )
         }

@@ -5,9 +5,12 @@
 //!   paragraphs/emphasis and validates them with matcher support and link-aware
 //!   handling.
 use log::trace;
+use serde_json::Value;
 use tree_sitter::TreeCursor;
 
+use crate::mdschema::validator::matcher::matcher::MatcherKind;
 use crate::mdschema::validator::node_walker::helpers::count_non_literal_matchers_in_children::count_non_literal_matchers_in_children;
+use crate::mdschema::validator::ts_utils::get_node_text;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::*,
@@ -57,10 +60,21 @@ use crate::{compare_node_kinds_check, invariant_violation};
 ///      check that there is a text node in the input, maybe error, and if there is,
 ///      validate that the contents of the rest of it is the same.
 ///    - Then move to the next node pair, hopping two nodes at once for the schema node.
-pub(super) struct TextualContainerVsTextualContainerValidator;
+#[derive(Default)]
+pub(super) struct ContainerVsContainerValidator {
+    allow_repeating: bool,
+}
 
-impl ValidatorImpl for TextualContainerVsTextualContainerValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+impl ContainerVsContainerValidator {
+    pub fn with_allow_repeating() -> Self {
+        Self {
+            allow_repeating: true,
+        }
+    }
+}
+
+impl ValidatorImpl for ContainerVsContainerValidator {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
@@ -86,7 +100,8 @@ impl ValidatorImpl for TextualContainerVsTextualContainerValidator {
         );
 
         if is_repeated_matcher_paragraph(&schema_cursor, walker.schema_str()) {
-            return ParagraphVsRepeatedMatcherParagraphValidator::validate(walker, got_eof);
+            return ParagraphVsRepeatedMatcherParagraphValidator::default()
+                .validate(walker, got_eof);
         }
 
         match count_non_literal_matchers_in_children(&schema_cursor, walker.schema_str()) {
@@ -160,15 +175,11 @@ impl ValidatorImpl for TextualContainerVsTextualContainerValidator {
             let pair_result = if both_are_link_nodes(&schema_cursor.node(), &input_cursor.node())
                 || both_are_image_nodes(&schema_cursor.node(), &input_cursor.node())
             {
-                LinkVsLinkValidator::validate(
-                    &walker.with_cursors(&schema_cursor, &input_cursor),
-                    got_eof,
-                )
+                LinkVsLinkValidator::default()
+                    .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof)
             } else {
-                let new_result = TextualVsTextualValidator::validate(
-                    &walker.with_cursors(&schema_cursor, &input_cursor),
-                    got_eof,
-                );
+                let new_result = TextualVsTextualValidator::default()
+                    .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                 new_result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
                 new_result
             };
@@ -218,10 +229,11 @@ impl ValidatorImpl for TextualContainerVsTextualContainerValidator {
 ///     ]
 /// }
 /// ```
+#[derive(Default)]
 pub(super) struct ParagraphVsRepeatedMatcherParagraphValidator;
 
 impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), &walker.input_cursor());
 
@@ -241,6 +253,12 @@ impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
             );
         }
 
+        let next_schema_cursor = {
+            let mut schema_cursor = schema_cursor.clone();
+            schema_cursor.goto_next_sibling();
+            schema_cursor
+        };
+
         if !schema_cursor.goto_first_child() {
             #[cfg(feature = "invariant_violations")]
             invariant_violation!(
@@ -256,35 +274,20 @@ impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
                 let mut matches = vec![];
 
                 let extras = matcher.extras();
-                let expected_range = ChildrenLengthRange::from_matcher_extras(extras);
 
-                if !input_cursor.goto_first_child() {
-                    result.add_error(ValidationError::SchemaViolation(
-                        SchemaViolationError::NotEnoughNodesForRepeatingParagraph {
-                            schema_index: schema_cursor.descendant_index(),
-                            input_index: input_cursor.descendant_index(),
-                            expected: expected_range,
-                            actual: 0,
-                        },
-                    ));
-                    return result;
-                }
+                let n = extras.max_items().unwrap_or(usize::MAX);
+                for _ in 0..n {
+                    // compare the ENTIRE text of the paragraph
+                    let input_paragraph_text =
+                        get_node_text(&input_cursor.node(), walker.input_str());
 
-                loop {
-                    let current_match = TextualVsTextualValidator::validate(
-                        &walker.with_cursors(&schema_cursor, &input_cursor),
-                        got_eof,
-                    );
-
-                    if current_match.has_errors() {
-                        result.join_errors(current_match.errors());
-                        return result;
+                    match matcher.match_str(input_paragraph_text) {
+                        Some(matched) => matches.push(matched),
+                        None => {}
                     }
 
-                    matches.push(current_match.value().clone());
-
                     let prev_sibling = input_cursor.clone();
-                    if input_cursor.goto_next_sibling() {
+                    if input_cursor.goto_next_sibling() && is_paragraph_node(&input_cursor.node()) {
                         // continue
                     } else {
                         input_cursor.reset_to(&prev_sibling);
@@ -292,8 +295,23 @@ impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
                     }
                 }
 
+                if matches.len() < extras.min_items().unwrap_or(0) {
+                    todo!("Too few items for repeating matcher");
+                }
+
+                input_cursor.goto_next_sibling();
+                result.sync_cursor_pos(&next_schema_cursor, &input_cursor);
+
                 if let Some(id) = matcher.id() {
-                    result.set_match(id, serde_json::Value::Array(matches.into_iter().collect()));
+                    result.set_match(
+                        id,
+                        serde_json::Value::Array(
+                            matches
+                                .iter()
+                                .map(|s| Value::String(s.to_string()))
+                                .collect(),
+                        ),
+                    );
                 }
 
                 result
@@ -317,14 +335,14 @@ impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
 ///
 /// For example,
 ///
-/// ```
+/// ```md
 /// `test:/test/`{,}
 /// ```
 ///
 /// Contains a document with one child, which is a repeated paragraph matcher,
 /// whereas
 ///
-/// ```
+/// ```md
 /// `test:/test/` test
 /// ```
 ///
@@ -352,7 +370,7 @@ fn is_repeated_matcher_paragraph(schema_cursor: &TreeCursor, schema_str: &str) -
     schema_cursor.goto_first_child(); // note we know there is one because we checked above
 
     match Matcher::try_from_schema_cursor(&schema_cursor, schema_str) {
-        Ok(matcher) if matcher.is_repeated() => true,
+        Ok(matcher) if matcher.is_repeated() && matches!(matcher.kind(), MatcherKind::All) => true,
         Ok(_) => false,
         Err(_) => false,
     }
@@ -362,8 +380,9 @@ fn is_repeated_matcher_paragraph(schema_cursor: &TreeCursor, schema_str: &str) -
 mod tests {
     use serde_json::json;
 
-    use super::{TextualContainerVsTextualContainerValidator, is_repeated_matcher_paragraph};
+    use super::{ContainerVsContainerValidator, is_repeated_matcher_paragraph};
     use crate::mdschema::validator::{
+        errors::{SchemaViolationError, ValidationError},
         node_pos_pair::NodePosPair,
         node_walker::validators::{
             containers::ParagraphVsRepeatedMatcherParagraphValidator, test_utils::ValidatorTester,
@@ -395,7 +414,7 @@ mod tests {
 
     #[test]
     fn test_is_repeated_matcher_paragraph_simple_repeating_matcher() {
-        let schema_str = "`test:/test/`{,}";
+        let schema_str = "`test`{,}";
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child();
@@ -405,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_is_repeated_matcher_paragraph_matcher_non_repeating() {
-        let schema_str = "`test:/test/` test";
+        let schema_str = "`test` test";
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child();
@@ -438,15 +457,16 @@ mod tests {
         let schema_str = "# Test Wolf [hi](https://example.com)";
         let input_str = "# Test Wolf [hi](https://foobar.com)";
 
-        let result = ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
-            schema_str, input_str,
-        )
-        .walk()
-        .goto_first_child_then_unwrap()
-        .goto_first_child_then_unwrap()
-        .goto_next_sibling_then_unwrap()
-        .peek_nodes(|(s, i)| assert!(is_heading_content_node(s) && is_heading_content_node(i)))
-        .validate_complete();
+        let result =
+            ValidatorTester::<ContainerVsContainerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .goto_first_child_then_unwrap()
+                .goto_next_sibling_then_unwrap()
+                .peek_nodes(|(s, i)| {
+                    assert!(is_heading_content_node(s) && is_heading_content_node(i))
+                })
+                .validate_complete();
 
         assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(9, 9));
         assert!(!result.errors().is_empty());
@@ -458,15 +478,16 @@ mod tests {
         let schema_str = "# Test Wolf";
         let input_str = "# Test Wolf";
 
-        let result = ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
-            schema_str, input_str,
-        )
-        .walk()
-        .goto_first_child_then_unwrap()
-        .goto_first_child_then_unwrap()
-        .goto_next_sibling_then_unwrap()
-        .peek_nodes(|(s, i)| assert!(is_heading_content_node(s) && is_heading_content_node(i)))
-        .validate_complete();
+        let result =
+            ValidatorTester::<ContainerVsContainerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .goto_first_child_then_unwrap()
+                .goto_next_sibling_then_unwrap()
+                .peek_nodes(|(s, i)| {
+                    assert!(is_heading_content_node(s) && is_heading_content_node(i))
+                })
+                .validate_complete();
 
         assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(4, 4));
         assert_eq!(result.errors(), &vec![]);
@@ -478,15 +499,16 @@ mod tests {
         let schema_str = "# Test `name:/[a-zA-Z]+/`";
         let input_str = "# Test Wolf";
 
-        let result = ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
-            schema_str, input_str,
-        )
-        .walk()
-        .goto_first_child_then_unwrap()
-        .goto_first_child_then_unwrap()
-        .goto_next_sibling_then_unwrap()
-        .peek_nodes(|(s, i)| assert!(is_heading_content_node(s) && is_heading_content_node(i)))
-        .validate_complete();
+        let result =
+            ValidatorTester::<ContainerVsContainerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .goto_first_child_then_unwrap()
+                .goto_next_sibling_then_unwrap()
+                .peek_nodes(|(s, i)| {
+                    assert!(is_heading_content_node(s) && is_heading_content_node(i))
+                })
+                .validate_complete();
 
         assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(6, 4));
         assert_eq!(result.errors(), &vec![]);
@@ -498,15 +520,14 @@ mod tests {
         let schema_str = "# Heading [test]({a:/a/}) `b:/b/`";
         let input_str = "# Heading [test](a) b";
 
-        let result = ValidatorTester::<TextualContainerVsTextualContainerValidator>::from_strs(
-            schema_str, input_str,
-        )
-        .walk()
-        .goto_first_child_then_unwrap()
-        .goto_first_child_then_unwrap()
-        .goto_next_sibling_then_unwrap()
-        .peek_nodes(|(s, i)| assert!(both_are_textual_containers(s, i)))
-        .validate_complete();
+        let result =
+            ValidatorTester::<ContainerVsContainerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .goto_first_child_then_unwrap()
+                .goto_next_sibling_then_unwrap()
+                .peek_nodes(|(s, i)| assert!(both_are_textual_containers(s, i)))
+                .validate_complete();
 
         let errors = result.errors().to_vec();
         let value = result.value().clone();
@@ -522,11 +543,13 @@ mod tests {
     #[test]
     fn test_paragraph_vs_repeated_matcher_paragraph_simple() {
         let schema_str = r#"
-`items:/.*/`{,}
+`items`{,}
 "#;
         let input_str = r#"
 foo
+
 bar
+
 buzz
 "#;
 
@@ -538,14 +561,109 @@ buzz
         .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
         .validate_complete();
 
-        let errors = result.errors().to_vec();
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(1, 5));
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(*result.value(), json!({"items": ["foo", "bar", "buzz"]}));
+    }
+
+    #[test]
+    fn test_paragraph_vs_repeated_matcher_paragraph_simple_with_stuff_after() {
+        let schema_str = r#"
+`items`{,}
+
+# Test
+"#;
+        let input_str = r#"
+foo
+
+bar
+
+buzz
+
+# Test
+"#;
+
+        let result = ValidatorTester::<ParagraphVsRepeatedMatcherParagraphValidator>::from_strs(
+            schema_str, input_str,
+        )
+        .walk()
+        .goto_first_child_then_unwrap()
+        .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+        .validate_complete();
+
+        assert_eq!(
+            *result.farthest_reached_pos(),
+            NodePosPair::from_pos(5, 7) // at the subsequent heading
+        );
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(*result.value(), json!({"items": ["foo", "bar", "buzz"]}));
+    }
+
+    #[test]
+    fn test_paragraph_vs_repeated_matcher_paragraph_with_italic() {
+        let schema_str = r#"
+`items`{,}
+"#;
+        let input_str = r#"
+foo
+
+bar *italic*
+
+buzz
+"#;
+
+        let result = ValidatorTester::<ParagraphVsRepeatedMatcherParagraphValidator>::from_strs(
+            schema_str, input_str,
+        )
+        .walk()
+        .goto_first_child_then_unwrap()
+        .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+        .validate_complete();
+
+        let _errors = result.errors().to_vec();
         let value = result.value().clone();
 
-        // assert_eq!(
-        //     *result.farthest_reached_pos(),
-        //     NodePosPair::from_pos(12, 10)
-        // );
-        // assert_eq!(errors, vec![]);
-        assert_eq!(value, json!({"items": ["foo", "bar", "buzz"]}));
+        assert_eq!(value, json!({"items": ["foo", "bar *italic*", "buzz"]}));
+    }
+
+    #[test]
+    fn test_paragraph_vs_paragraph_with_normal_matcher() {
+        let schema_str = r#"
+`data:/test/`
+"#;
+        let input_str = r#"
+test
+"#;
+
+        let result =
+            ValidatorTester::<ContainerVsContainerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+                .validate_complete();
+
+        // Should have no errors since "test" matches the pattern "^test"
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(*result.value(), json!({"data": "test"}));
+    }
+
+    #[test]
+    fn test_paragraph_vs_paragraph_with_normal_matcher_mismatch() {
+        let schema_str = r#"
+`data:/test/`
+"#;
+        let input_str = r#"
+foo
+"#;
+
+        let result =
+            ValidatorTester::<ContainerVsContainerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+                .validate_complete();
+
+        // Should have an error since "foo" doesn't match the pattern "^test"
+        assert!(!result.errors().is_empty());
     }
 }

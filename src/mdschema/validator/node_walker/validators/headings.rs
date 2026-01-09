@@ -10,7 +10,7 @@ use crate::invariant_violation;
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::compare_node_kinds::compare_node_kinds;
-use crate::mdschema::validator::node_walker::validators::containers::TextualContainerVsTextualContainerValidator;
+use crate::mdschema::validator::node_walker::validators::containers::ContainerVsContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
 use crate::mdschema::validator::ts_types::*;
 use crate::mdschema::validator::ts_utils::waiting_at_end;
@@ -20,10 +20,11 @@ use crate::mdschema::validator::validator_walker::ValidatorWalker;
 ///
 /// Checks that they are the same kind of heading, and and then delegates to
 /// `TextualContainerVsTextualContainerValidator::validate`.
+#[derive(Default)]
 pub(super) struct HeadingVsHeadingValidator;
 
 impl ValidatorImpl for HeadingVsHeadingValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
@@ -99,10 +100,8 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         }
 
         // Now that we're at the heading content, use `validate_text_vs_text`
-        TextualContainerVsTextualContainerValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        )
+        ContainerVsContainerValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof)
     }
 }
 

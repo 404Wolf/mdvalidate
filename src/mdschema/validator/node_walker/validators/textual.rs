@@ -26,11 +26,12 @@ use crate::mdschema::validator::{
 ///    text node and the next node is a `code_span`. If so, delegate to
 ///    `MatcherVsTextValidator::validate`.
 /// 2. Otherwise, check that the node kind and text contents are the same.
+#[derive(Default)]
 pub(super) struct TextualVsTextualValidator;
 
 impl ValidatorImpl for TextualVsTextualValidator {
     #[track_caller]
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         validate_textual_vs_textual_impl(walker, got_eof)
     }
 }
@@ -48,7 +49,7 @@ fn validate_textual_vs_textual_impl(walker: &ValidatorWalker, got_eof: bool) -> 
     };
 
     if current_node_is_code_node || current_node_is_text_node_and_next_node_code_node {
-        return MatcherVsTextValidator::validate(walker, got_eof);
+        return MatcherVsTextValidator::default().validate(walker, got_eof);
     }
 
     validate_textual_vs_textual_direct(

@@ -17,14 +17,14 @@ use crate::mdschema::validator::{
 ///
 /// For example,
 ///
-/// ```
+/// ```text
 /// `test:/test/`{,}
 /// ```
 ///
 /// Contains a document with one child, which is a repeated paragraph matcher,
 /// whereas
 ///
-/// ```
+/// ```text
 /// `test:/test/` test
 /// ```
 ///

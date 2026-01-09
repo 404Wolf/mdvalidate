@@ -17,7 +17,7 @@ pub fn extract_matcher_from_curly_delineated_text(
     let suffix = caps.name("suffix").map(|m| m.as_str());
 
     Some(Matcher::try_from_pattern_and_suffix_str(
-        &format!("`{}`{}", matcher_str, suffix.unwrap_or("")),
+        &format!("`{}`", matcher_str),
         suffix,
     ))
 }

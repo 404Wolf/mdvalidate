@@ -5,12 +5,10 @@
 //!   based on node kinds and performs shared structural checks.
 use log::trace;
 
-use crate::mdschema::validator::errors::{SchemaError, ValidationError};
 use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::mdschema::validator::node_walker::helpers::check_repeating_matchers::check_repeating_matchers;
 use crate::mdschema::validator::node_walker::validators::code::CodeVsCodeValidator;
-use crate::mdschema::validator::node_walker::validators::containers::TextualContainerVsTextualContainerValidator;
+use crate::mdschema::validator::node_walker::validators::containers::ContainerVsContainerValidator;
 use crate::mdschema::validator::node_walker::validators::headings::HeadingVsHeadingValidator;
 use crate::mdschema::validator::node_walker::validators::links::LinkVsLinkValidator;
 use crate::mdschema::validator::node_walker::validators::lists::ListVsListValidator;
@@ -30,10 +28,11 @@ use crate::{compare_node_children_lengths_check, compare_node_kinds_check, invar
 /// - Code blocks -> `CodeVsCodeValidator::validate`
 /// - Lists -> `ListVsListValidator::validate`
 /// - Headings/documents -> recursively validate children
+#[derive(Default)]
 pub struct NodeVsNodeValidator;
 
 impl ValidatorImpl for NodeVsNodeValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         validate_node_vs_node_impl(walker, got_eof)
     }
 }
@@ -52,75 +51,43 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     if both_are_textual_nodes(&schema_node, &input_node) {
         trace!("Both are textual nodes, validating text vs text");
 
-        return TextualVsTextualValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        return TextualVsTextualValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are codeblock nodes
     else if both_are_codeblocks(&schema_node, &input_node) {
-        return CodeVsCodeValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        return CodeVsCodeValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     } else if both_are_quotes(&schema_node, &input_node) {
-        return QuoteVsQuoteValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        return QuoteVsQuoteValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are tables
     else if both_are_tables(&schema_node, &input_node) {
-        return TableVsTableValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        return TableVsTableValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are textual containers
     else if both_are_textual_containers(&schema_node, &input_node) {
-        // If we have top level textual containers, they CANNOT have repeating
-        // matchers. `validate_textual_container_vs_textual_container` allows
-        // the containers to contain repeating matchers since the same utility
-        // is used for list validation.
-
-        if let Some(repeating_matcher_index) =
-            check_repeating_matchers(&schema_cursor, walker.schema_str())
-        {
-            result.add_error(ValidationError::SchemaError(
-                SchemaError::RepeatingMatcherInTextContainer {
-                    schema_index: repeating_matcher_index,
-                },
-            ));
-            return result;
-        }
-
-        return TextualContainerVsTextualContainerValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        return ContainerVsContainerValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are textual nodes
     else if both_are_textual_nodes(&schema_node, &input_node) {
-        return TextualVsTextualValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        return TextualVsTextualValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are link nodes or image nodes
     else if both_are_link_nodes(&schema_node, &input_node)
         || both_are_image_nodes(&schema_node, &input_node)
     {
-        return LinkVsLinkValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        return LinkVsLinkValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are list nodes
     else if both_are_list_nodes(&schema_node, &input_node) {
-        return ListVsListValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        return ListVsListValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are ruler nodes
     else if both_are_rulers(&schema_node, &input_node) {
@@ -129,10 +96,8 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         // First, if they are headings, validate the headings themselves.
         trace!("Both are heading nodes, validating heading vs heading");
 
-        let heading_result = HeadingVsHeadingValidator::validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        let heading_result = HeadingVsHeadingValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
 
         result.join_other_result(&heading_result);
 
@@ -161,10 +126,8 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             input_cursor.goto_first_child(),
         ) {
             (true, true) => {
-                let new_result = NodeVsNodeValidator::validate(
-                    &walker.with_cursors(&schema_cursor, &input_cursor),
-                    got_eof,
-                );
+                let new_result = NodeVsNodeValidator::default()
+                    .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                 result.join_other_result(&new_result);
                 result.sync_cursor_pos(&schema_cursor, &input_cursor);
             }
@@ -186,10 +149,8 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 input_cursor.goto_next_sibling(),
             ) {
                 (true, true) => {
-                    let new_result = NodeVsNodeValidator::validate(
-                        &walker.with_cursors(&schema_cursor, &input_cursor),
-                        got_eof,
-                    );
+                    let new_result = NodeVsNodeValidator::default()
+                        .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                     result.join_other_result(&new_result);
                     result.sync_cursor_pos(&schema_cursor, &input_cursor);
                 }
@@ -242,6 +203,7 @@ mod tests {
     use crate::mdschema::validator::{
         errors::{SchemaViolationError, ValidationError},
         node_pos_pair::NodePosPair,
+        ts_types::both_are_paragraphs,
     };
 
     #[test]
@@ -474,5 +436,60 @@ mod tests {
 
         assert_eq!(result.errors(), []);
         assert_eq!(result.value(), &json!({}));
+    }
+
+    #[test]
+    fn test_node_vs_node_repeated_paragraph_nothing_after() {
+        let schema_str = r#"
+`items`{,}
+"#;
+        let input_str = r#"
+foo
+
+bar
+
+buzz
+"#;
+
+        let result = ValidatorTester::<NodeVsNodeValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+            .validate_complete();
+
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(1, 5));
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(*result.value(), json!({"items": ["foo", "bar", "buzz"]}));
+    }
+
+    #[test]
+    fn test_node_vs_node_repeated_paragraph_heading_after() {
+        let schema_str = r#"
+`items`{,}
+
+# Test
+"#;
+        let input_str = r#"
+foo
+
+bar
+
+buzz
+
+# Test
+"#;
+
+        let result = ValidatorTester::<NodeVsNodeValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+            .validate_complete();
+
+        assert_eq!(
+            *result.farthest_reached_pos(),
+            NodePosPair::from_pos(5, 7) // at the subsequent heading
+        );
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(*result.value(), json!({"items": ["foo", "bar", "buzz"]}));
     }
 }

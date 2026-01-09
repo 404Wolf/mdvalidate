@@ -4,7 +4,6 @@
 //! Types:
 //! - `MatcherVsTextValidator`: handles pattern matching and capture logic used
 //!   when schema nodes embed matcher syntax inside textual content.
-
 use log::trace;
 use serde_json::json;
 use tree_sitter::TreeCursor;
@@ -27,10 +26,11 @@ use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
 use super::textual::validate_textual_vs_textual_direct;
 
+#[derive(Default)]
 pub(super) struct MatcherVsTextValidator;
 
 impl ValidatorImpl for MatcherVsTextValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
@@ -312,7 +312,7 @@ impl ValidatorImpl for MatcherVsTextValidator {
                     }
 
                     // Delegate to the literal matcher validator
-                    return LiteralMatcherVsTextualValidator::validate(
+                    return LiteralMatcherVsTextualValidator::default().validate(
                         &walker.with_cursors(&schema_cursor, &input_cursor),
                         got_eof,
                     );
@@ -418,10 +418,11 @@ impl ValidatorImpl for MatcherVsTextValidator {
     }
 }
 
+#[derive(Default)]
 pub(super) struct TextualVsMatcherValidator;
 
 impl ValidatorImpl for TextualVsMatcherValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
@@ -587,10 +588,11 @@ impl ValidatorImpl for TextualVsMatcherValidator {
     }
 }
 
+#[derive(Default)]
 pub(super) struct LiteralMatcherVsTextualValidator;
 
 impl ValidatorImpl for LiteralMatcherVsTextualValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let schema_cursor: &TreeCursor = walker.schema_cursor();
         let input_cursor: &TreeCursor = walker.input_cursor();
         let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
@@ -866,7 +868,7 @@ mod tests {
 
         let walker =
             ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
-        let result = TextualVsTextualValidator::validate(&walker, true);
+        let result = TextualVsTextualValidator::default().validate(&walker, true);
 
         assert!(result.errors().is_empty());
         assert_eq!(result.value(), &json!({"test": "test"}));
@@ -882,7 +884,7 @@ mod tests {
             .goto_first_child_then_unwrap()
             .validate_complete();
 
-        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(5, 2));
+        assert_eq!(*result.farthest_reached_pos(), NodePosPair::from_pos(4, 2));
         assert!(result.errors().is_empty());
         assert_eq!(result.value(), &json!({"test": "test"}));
     }

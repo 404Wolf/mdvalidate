@@ -13,7 +13,7 @@ use crate::mdschema::validator::errors::{
 };
 use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::mdschema::validator::node_walker::validators::containers::TextualContainerVsTextualContainerValidator;
+use crate::mdschema::validator::node_walker::validators::containers::ContainerVsContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
 #[cfg(feature = "invariant_violations")]
 use crate::mdschema::validator::ts_types::*;
@@ -22,10 +22,11 @@ use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use tree_sitter::TreeCursor;
 
 /// Validate two tables.
+#[derive(Default)]
 pub(super) struct TableVsTableValidator;
 
 impl ValidatorImpl for TableVsTableValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         validate_impl(walker, got_eof)
     }
 }
@@ -148,7 +149,7 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
                 // jump to the next sibling pair. If there is no next sibling
                 // pair we are done.
                 'col_iter: loop {
-                    let cell_result = TextualContainerVsTextualContainerValidator::validate(
+                    let cell_result = ContainerVsContainerValidator::default().validate(
                         &walker.with_cursors(&schema_cursor, &input_cursor),
                         got_eof,
                     );

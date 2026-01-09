@@ -162,6 +162,62 @@ To match inline code blocks literally instead of treating them as matchers, add 
   valid={false}
 />
 
+# Everything Matchers
+
+If a matcher has no regex pattern (just a label in backticks), it will match everything available in the current context as an identity function. The syntax is simply `` `label` ``, where the label follows the naming rules below.
+
+## Naming Rules
+
+Matcher labels (both for regex matchers and everything matchers) must follow these rules:
+
+- Must contain only alphanumeric characters (a-z, A-Z, 0-9), hyphens (`-`), and underscores (`_`)
+- Cannot contain spaces or other special characters
+- Valid examples: `user_name`, `item-count`, `id123`, `MyData`
+- Invalid examples: `user name` (space), `data@field` (special char), `item.count` (period)
+
+## Behavior
+
+Everything matchers act as an identity function - they **always** match and return exactly what was passed to them, including special characters, spaces, and any other content:
+
+<SchemaAndInput
+  schema={"`foo`"}
+  input={"anything goes here"}
+  valid={true}
+  output={'{"foo":"anything goes here"}'}
+/>
+
+<SchemaAndInput
+  schema={"`text`"}
+  input={"hello world 123!"}
+  valid={true}
+  output={'{"text":"hello world 123!"}'}
+/>
+
+<SchemaAndInput
+  schema={"`data`"}
+  input={"@*&^R special chars"}
+  valid={true}
+  output={'{"data":"@*&^R special chars"}'}
+/>
+
+When used in a paragraph context, everything matchers will capture all spanning elements including formatting like italics:
+
+<SchemaAndInput
+  schema={"`content`"}
+  input={"*italic text* and regular text"}
+  valid={true}
+  output={'{"content":"*italic text* and regular text"}'}
+/>
+
+<SchemaAndInput
+  schema={"Prefix: `data`"}
+  input={"Prefix: *some italic* and more"}
+  valid={true}
+  output={'{"data":"*some italic* and more"}'}
+/>
+
+Everything matchers never fail to match - they accept any input and return it unchanged under the specified label.
+
 ### Escaping the Exclamation Mark
 
 <TODO />

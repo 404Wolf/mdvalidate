@@ -24,10 +24,11 @@ use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::compare_node_kinds_check;
 
 /// Validate two link-like nodes (links or images) against each other.
+#[derive(Default)]
 pub(super) struct LinkVsLinkValidator;
 
 impl ValidatorImpl for LinkVsLinkValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 

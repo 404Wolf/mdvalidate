@@ -51,10 +51,11 @@ use crate::mdschema::validator::{
 ///
 /// Note you cannot yet enforce regex on the actual code content.
 /// ```
+#[derive(Default)]
 pub(super) struct CodeVsCodeValidator;
 
 impl ValidatorImpl for CodeVsCodeValidator {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let _got_eof = got_eof;
         validate_code_vs_code_impl(walker)
     }

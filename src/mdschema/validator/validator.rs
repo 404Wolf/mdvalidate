@@ -177,7 +177,7 @@ impl Validator {
             farthest_reached_pos.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
 
             let walker = ValidatorWalker::new(schema_cursor, &schema_str, input_cursor, &input_str);
-            NodeVsNodeValidator::validate(&walker, got_eof)
+            NodeVsNodeValidator::default().validate(&walker, got_eof)
         };
 
         self.push_validation_result(validation_result);
