@@ -1,6 +1,7 @@
 sign-commit = false
 sign-tag = false
 push = true
+tag = true
 tag-prefix = "v"
 
 pre-release-commit-message = "release: {{version}}"

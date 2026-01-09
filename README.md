@@ -14,6 +14,112 @@ We plan to eventually support converting a Markdown schema into a JSON schema de
 
 You can find the full docs [here](https://404wolf.github.io/mdvalidate/)!
 
+## Kitchen Sink Example (current + planned)
+
+Schema:
+
+````md
+# Release Notes `version:/v\d+\.\d+\.\d+/`
+
+> Build `build:/[A-F0-9]{7}/` by `_:/\w+/`
+
+## Highlights
+
+- `feature:/[A-Za-z][\w -]+/`{2,4}
+  - `detail:/[a-z][\w -]+/`{,2}
+
+Inline: `code`! and `bang`!!
+
+```{lang:/\w+/}
+{snippet}
+```
+
+```{runtime:/\w+/}
+{checked:!python -m py_compile -}
+```
+
+`html_block:html`d2
+
+| Key | Value |
+| :-- | :---- |
+| `key:/\w+/` | `value:/.+/` |
+| `key:/\w+/` | `value:/.+/` |{1,3}
+
+```mds
+<?xml version="1.0"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="h1" type="xs:string"/>
+</xs:schema>
+```
+````
+
+Input:
+
+````md
+# Release Notes v1.4.2
+
+> Build 7A9F3C1 by wolf
+
+## Highlights
+
+- Fast paths
+  - fewer allocations
+- Safer IO
+
+Inline: `code` and `bang`!
+
+```rust
+fn main() {}
+```
+
+```python
+print("ok")
+```
+
+<div>
+  <img src="./logo.png" />
+</div>
+
+| Key | Value |
+| :-- | :---- |
+| host | localhost |
+| port | 8080 |
+
+<h1>Hello</h1>
+````
+
+Output:
+
+```json
+{
+  "build": "7A9F3C1",
+  "checked": "print(\"ok\")",
+  "detail": [
+    "fewer allocations"
+  ],
+  "feature": [
+    "Fast paths",
+    "Safer IO"
+  ],
+  "html_block": "<div>\n  <img src=\"./logo.png\" />\n</div>",
+  "key": [
+    "host",
+    "port"
+  ],
+  "lang": "rust",
+  "runtime": "python",
+  "snippet": "fn main() {}",
+  "value": [
+    "localhost",
+    "8080"
+  ],
+  "version": "v1.4.2"
+}
+```
+
+Notes:
+- Planned but not implemented yet: `html` matcher, table row repetition, `mds` XML schema blocks, execution validation.
+
 ## Mini Example
 
 Here’s a simple schema that will validate all grocery lists of a specific shape.

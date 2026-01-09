@@ -1,7 +1,6 @@
-use core::panic;
-use std::os::raw::c_short;
-use std::rc::Rc;
-use thiserror::Error;
+// use std::os::raw::c_short;
+// use std::rc::Rc;
+// use thiserror::Error;
 
 use crate::invariant_violation;
 use crate::mdschema::validator::errors::{
@@ -207,40 +206,40 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
     result
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum MDTableError {
-    #[error("Column count mismatch: expected {expected}, got {got}")]
-    ColumnCountMismatch { expected: usize, got: usize },
-}
+// #[derive(Debug, Clone, PartialEq, Eq, Error)]
+// pub enum MDTableError {
+//     #[error("Column count mismatch: expected {expected}, got {got}")]
+//     ColumnCountMismatch { expected: usize, got: usize },
+// }
 
-struct MDTable {
-    columns: usize,
-    rows: Vec<Vec<Rc<str>>>,
-}
+// struct MDTable {
+//     columns: usize,
+//     rows: Vec<Vec<Rc<str>>>,
+// }
 
-impl MDTable {
-    pub fn new(column_count: usize) -> Self {
-        MDTable {
-            columns: column_count,
-            rows: Vec::new(),
-        }
-    }
+// impl MDTable {
+//     pub fn new(column_count: usize) -> Self {
+//         MDTable {
+//             columns: column_count,
+//             rows: Vec::new(),
+//         }
+//     }
 
-    pub fn add_row(&mut self, row: Vec<Rc<str>>) -> Result<(), MDTableError> {
-        if row.len() != self.columns {
-            return Err(MDTableError::ColumnCountMismatch {
-                expected: self.columns,
-                got: row.len(),
-            });
-        }
-        self.rows.push(row);
-        Ok(())
-    }
+//     pub fn add_row(&mut self, row: Vec<Rc<str>>) -> Result<(), MDTableError> {
+//         if row.len() != self.columns {
+//             return Err(MDTableError::ColumnCountMismatch {
+//                 expected: self.columns,
+//                 got: row.len(),
+//             });
+//         }
+//         self.rows.push(row);
+//         Ok(())
+//     }
 
-    pub fn iter_rows(&self) -> impl Iterator<Item = &Vec<Rc<str>>> {
-        self.rows.iter()
-    }
-}
+//     pub fn iter_rows(&self) -> impl Iterator<Item = &Vec<Rc<str>>> {
+//         self.rows.iter()
+//     }
+// }
 
 #[cfg(test)]
 mod tests {

@@ -206,6 +206,9 @@ mod tests {
         input_2_cursor.goto_first_child();
 
         let result = compare_node_kinds(&input_2_cursor, &input_1_cursor, input_2, input_1);
-        assert!(result.is_some(), "Different heading levels should not match");
+        assert!(
+            result.is_some(),
+            "Different heading levels should not match"
+        );
     }
 }
