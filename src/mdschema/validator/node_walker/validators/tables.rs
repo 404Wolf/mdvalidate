@@ -264,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_table_vs_table_simple_literal_incomplete() {
+    fn test_validate_table_vs_table_simple_literal_incomplete_missing_last_cell() {
         let schema_str = r#"
 |c1|`foo:/test/`|
 |-|-|
@@ -308,6 +308,32 @@ mod tests {
         assert_eq!(
             *result.farthest_reached_pos(),
             NodePosPair::from_pos(15, 14)
+        );
+    }
+
+    #[test]
+    fn test_validate_table_vs_table_simple_literal_incomplete_missing_row() {
+        let schema_str = r#"
+|c1|`foo:/test/`|
+|-|-|
+|r1|r2|
+            "#;
+        let input_str = r#"
+|c1|test|
+|-|-|
+"#;
+
+        let result = ValidatorTester::<TableVsTableValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_tables(s, i)))
+            .validate_incomplete();
+
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(result.value(), &json!({}));
+        assert_eq!(
+            *result.farthest_reached_pos(),
+            NodePosPair::from_pos(1, 1) // we'll have to revalidate the entire table
         );
     }
 
