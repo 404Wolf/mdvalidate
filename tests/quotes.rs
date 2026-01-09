@@ -46,3 +46,15 @@ test_case!(
     json!({}),
     vec![]
 );
+
+test_case!(
+    blockquote_with_matcher,
+    r#"> This is `code:/.*/`
+"#,
+    r#"> This is test123
+"#,
+    json!({
+        "code": "test123"
+    }),
+    vec![]
+);
