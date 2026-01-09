@@ -1,14 +1,11 @@
 name: Release
-
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   build:
     strategy:
@@ -18,23 +15,18 @@ jobs:
             name: linux-x86_64
           - os: macos-latest
             name: macos-universal
-
     runs-on: ${{ matrix.os }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Install Nix
         if: matrix.os == 'ubuntu-latest'
         uses: cachix/install-nix-action@v31
-
       - name: Setup Rust
         if: matrix.os == 'macos-latest'
         uses: actions-rust-lang/setup-rust-toolchain@v1
-
       - name: Build
         run: |
           if [ "${{ matrix.os }}" == "macos-latest" ]; then
@@ -42,7 +34,6 @@ jobs:
           else
             nix build
           fi
-
       - name: Package artifact
         run: |
           mkdir -p dist
@@ -52,7 +43,6 @@ jobs:
             cp -r result/* dist/
           fi
           tar -czf mdv-${{ matrix.name }}.tar.gz -C dist .
-
       - name: Upload release artifact
         if: startsWith(github.ref, 'refs/tags/')
         uses: ncipollo/release-action@v1
