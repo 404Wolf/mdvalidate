@@ -11,14 +11,15 @@ use crate::invariant_violation;
 use crate::mdschema::validator::errors::{
     MalformedStructureKind, SchemaViolationError, ValidationError,
 };
+use crate::mdschema::validator::matcher::matcher_extras::MatcherExtras;
 use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::containers::ContainerVsContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
-#[cfg(feature = "invariant_violations")]
 use crate::mdschema::validator::ts_types::*;
-use crate::mdschema::validator::ts_utils::waiting_at_end;
+use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use log::trace;
 use tree_sitter::TreeCursor;
 
 /// Validate two tables.
@@ -149,10 +150,8 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
                 // jump to the next sibling pair. If there is no next sibling
                 // pair we are done.
                 'col_iter: loop {
-                    let cell_result = ContainerVsContainerValidator::default().validate(
-                        &walker.with_cursors(&schema_cursor, &input_cursor),
-                        got_eof,
-                    );
+                    let cell_result = ContainerVsContainerValidator::default()
+                        .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                     result.join_other_result(&cell_result);
 
                     match (
@@ -224,40 +223,64 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
     result
 }
 
-// #[derive(Debug, Clone, PartialEq, Eq, Error)]
-// pub enum MDTableError {
-//     #[error("Column count mismatch: expected {expected}, got {got}")]
-//     ColumnCountMismatch { expected: usize, got: usize },
-// }
+/// We say that a row is repeated if there is a repeater directly after the row.
+///
+/// Example:
+/// ```markdown
+/// |c1|c2|
+/// |-|-|
+/// |r1|r2|{1,2} (a row like this row can appear 1-2 times)
+/// ```
+fn try_get_repeated_row_bounds(
+    schema_cursor: &TreeCursor,
+    schema_str: &str,
+) -> Option<(Option<usize>, Option<usize>)> {
+    #[cfg(feature = "invariant_violations")]
+    if !is_table_data_row_node(&schema_cursor.node()) {
+        invariant_violation!(
+            "is_repeated_row only works for data row nodes. Title row nodes cannot be repeated. Got {:?}",
+            schema_cursor.node().kind()
+        )
+    }
 
-// struct MDTable {
-//     columns: usize,
-//     rows: Vec<Vec<Rc<str>>>,
-// }
+    let mut schema_cursor = schema_cursor.clone();
 
-// impl MDTable {
-//     pub fn new(column_count: usize) -> Self {
-//         MDTable {
-//             columns: column_count,
-//             rows: Vec::new(),
-//         }
-//     }
+    if !schema_cursor.goto_first_child() {
+        // If there are no children then we can't be a repeated row.
 
-//     pub fn add_row(&mut self, row: Vec<Rc<str>>) -> Result<(), MDTableError> {
-//         if row.len() != self.columns {
-//             return Err(MDTableError::ColumnCountMismatch {
-//                 expected: self.columns,
-//                 got: row.len(),
-//             });
-//         }
-//         self.rows.push(row);
-//         Ok(())
-//     }
+        return None;
+    }
 
-//     pub fn iter_rows(&self) -> impl Iterator<Item = &Vec<Rc<str>>> {
-//         self.rows.iter()
-//     }
-// }
+    #[cfg(feature = "invariant_violations")]
+    if !is_table_cell_node(&schema_cursor.node()) {
+        invariant_violation!("at this point we should be at a table cell")
+    }
+
+    // Go to the last sibling
+    while schema_cursor.goto_next_sibling() {}
+
+    if schema_cursor.goto_first_child() && is_text_node(&schema_cursor.node()) {
+        let node_str = get_node_text(&schema_cursor.node(), schema_str);
+
+        match MatcherExtras::try_from_extras_str(node_str) {
+            Ok(extras) if extras.had_min_max() => Some((extras.min_items(), extras.max_items())),
+            Ok(extras) => {
+                trace!("Got non-repeating extras: {:?}", extras);
+
+                None
+            }
+            Err(error) => {
+                trace!("Error parsing matcher extras: {:?}", error);
+
+                None
+            }
+        }
+    } else {
+        trace!("Unexpected node kind: {:?}", schema_cursor.node().kind());
+
+        None
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -266,8 +289,72 @@ mod tests {
     use crate::mdschema::validator::{
         errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
         node_pos_pair::NodePosPair,
+        ts_utils::parse_markdown,
     };
     use serde_json::json;
+
+    #[test]
+    fn test_is_repeated_row_is_repeated() {
+        let schema_str = r#"
+|c1|c2|
+|-|-|
+|r1|r2|{1,2}
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> table
+        schema_cursor.goto_first_child(); // table -> header row
+        schema_cursor.goto_next_sibling(); // header row -> delimiter row
+        schema_cursor.goto_next_sibling(); // delimiter row -> data row
+        assert!(is_table_data_row_node(&schema_cursor.node()));
+
+        assert_eq!(
+            try_get_repeated_row_bounds(&schema_cursor, schema_str).unwrap(),
+            (Some(1), Some(2))
+        )
+    }
+
+    #[test]
+    fn test_is_repeated_row_is_repeated_broken() {
+        let schema_str = r#"
+|c1|c2|
+|-|-|
+|r1|r2|{1,2
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> table
+        schema_cursor.goto_first_child(); // table -> header row
+        schema_cursor.goto_next_sibling(); // header row -> delimiter row
+        schema_cursor.goto_next_sibling(); // delimiter row -> data row
+        assert!(is_table_data_row_node(&schema_cursor.node()));
+
+        assert_eq!(
+            try_get_repeated_row_bounds(&schema_cursor, schema_str),
+            None
+        )
+    }
+
+    #[test]
+    fn test_is_repeated_row_is_not_repeated() {
+        let schema_str = r#"
+|c1|c2|
+|-|-|
+|r1|r2|
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> table
+        schema_cursor.goto_first_child(); // table -> header row
+        schema_cursor.goto_next_sibling(); // header row -> delimiter row
+        schema_cursor.goto_next_sibling(); // delimiter row -> data row
+        assert!(is_table_data_row_node(&schema_cursor.node()));
+
+        assert_eq!(
+            try_get_repeated_row_bounds(&schema_cursor, schema_str),
+            None
+        )
+    }
 
     #[test]
     fn test_validate_table_vs_table_simple_literal() {
