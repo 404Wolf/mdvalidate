@@ -11,7 +11,7 @@ use crate::mdschema::validator::errors::{ChildrenCount, SchemaViolationError, Va
 /// # Arguments
 /// - `schema_cursor`: Cursor at schema node
 /// - `input_cursor`: Cursor at input node
-/// - `got_eof`: Whether we've reached end of file
+/// * `got_eof`: Whether we have received the full input document.
 pub fn compare_node_children_lengths(
     schema_cursor: &TreeCursor,
     input_cursor: &TreeCursor,

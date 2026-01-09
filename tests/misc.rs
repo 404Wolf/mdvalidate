@@ -86,21 +86,17 @@ test_case!(
 "#,
     json!({}),
     vec![
-        ValidationError::SchemaViolation(
-            SchemaViolationError::NodeTypeMismatch {
-                schema_index: 1,
-                input_index: 1,
-                expected: "atx_heading".to_string(),
-                actual: "tight_list".to_string(),
-            }
-        ),
-        ValidationError::SchemaViolation(
-            SchemaViolationError::NodeTypeMismatch {
-                schema_index: 7,
-                input_index: 6,
-                expected: "tight_list".to_string(),
-                actual: "atx_heading".to_string(),
-            }
-        )
+        ValidationError::SchemaViolation(SchemaViolationError::NodeTypeMismatch {
+            schema_index: 1,
+            input_index: 1,
+            expected: "atx_heading".to_string(),
+            actual: "tight_list".to_string(),
+        }),
+        ValidationError::SchemaViolation(SchemaViolationError::NodeTypeMismatch {
+            schema_index: 7,
+            input_index: 6,
+            expected: "tight_list".to_string(),
+            actual: "atx_heading".to_string(),
+        })
     ]
 );

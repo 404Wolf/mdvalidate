@@ -4,9 +4,9 @@ use tree_sitter::TreeCursor;
 use serde_json::Value;
 
 use crate::mdschema::validator::ts_utils::walk_to_root;
-use mdvalidate_utils::PrettyPrint;
 #[cfg(test)]
 use crate::mdschema::validator::{errors::ValidationError, validator::Validator};
+use mdvalidate_utils::PrettyPrint;
 
 #[cfg(test)]
 pub fn validate_str(schema: &str, input: &str) -> (Value, Vec<ValidationError>, Validator) {

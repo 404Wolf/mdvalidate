@@ -1,3 +1,8 @@
+//! Table validator for node-walker comparisons.
+//!
+//! Types:
+//! - `TableVsTableValidator`: validates table structure (rows, headers, cells)
+//!   and delegates cell content checks to textual container validation.
 // use std::os::raw::c_short;
 // use std::rc::Rc;
 // use thiserror::Error;
@@ -8,11 +13,10 @@ use crate::mdschema::validator::errors::{
 };
 use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
+use crate::mdschema::validator::node_walker::validators::containers::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
 #[cfg(feature = "invariant_violations")]
-use crate::mdschema::validator::ts_types::{both_are_table_cells, both_are_table_headers};
-use crate::mdschema::validator::ts_types::{both_are_table_delimiter_rows, both_are_tables};
+use crate::mdschema::validator::ts_types::*;
 use crate::mdschema::validator::ts_utils::waiting_at_end;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use tree_sitter::TreeCursor;
@@ -256,11 +260,11 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_utils::ValidatorTester;
     use super::*;
     use crate::mdschema::validator::{
         errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
-        node_walker::validators::test_utils::ValidatorTester,
-        ts_types::both_are_tables,
+        node_pos_pair::NodePosPair,
     };
     use serde_json::json;
 

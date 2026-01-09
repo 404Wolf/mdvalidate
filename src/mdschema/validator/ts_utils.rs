@@ -4,9 +4,9 @@ use crate::invariant_violation;
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
 use tree_sitter_markdown::language;
 
-use crate::mdschema::validator::{errors::ValidationError, validator::ValidatorState};
 #[cfg(feature = "invariant_violations")]
-use crate::mdschema::validator::ts_types::is_marker_node;
+use crate::mdschema::validator::ts_types::*;
+use crate::mdschema::validator::{errors::ValidationError, validator::ValidatorState};
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -342,8 +342,10 @@ pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<Valida
 }
 
 #[cfg(test)]
+#[allow(unused_imports)]
 mod tests {
-    use crate::mdschema::validator::ts_types::{is_list_node, is_textual_node};
+    #[allow(unused_imports)]
+    use crate::mdschema::validator::ts_types::*;
     use crate::mdschema::validator::utils::parse_markdown_and_get_tree;
 
     use super::*;

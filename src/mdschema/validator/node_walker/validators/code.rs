@@ -1,3 +1,8 @@
+//! Code block validator for node-walker comparisons.
+//!
+//! Types:
+//! - `CodeVsCodeValidator`: validates code block language and content, with
+//!   optional matcher-based captures in schema text.
 use serde_json::json;
 
 use crate::invariant_violation;
@@ -60,8 +65,6 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
 
     let schema_cursor = walker.schema_cursor().clone();
     let input_cursor = walker.input_cursor().clone();
-    let schema_str = walker.schema_str();
-    let input_str = walker.input_str();
 
     #[cfg(feature = "invariant_violations")]
     if input_cursor.node().kind() != "fenced_code_block"
@@ -75,14 +78,14 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
         );
     }
 
-    let input_extracted = match extract_codeblock_contents(&input_cursor, input_str) {
+    let input_extracted = match extract_codeblock_contents(&input_cursor, walker.input_str()) {
         Ok(value) => value,
         Err(error) => {
             result.add_error(error);
             return result;
         }
     };
-    let schema_extracted = match extract_codeblock_contents(&schema_cursor, schema_str) {
+    let schema_extracted = match extract_codeblock_contents(&schema_cursor, walker.schema_str()) {
         Ok(value) => value,
         Err(error) => {
             result.add_error(error);
@@ -204,8 +207,8 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::node_walker::validators::test_utils::ValidatorTester;
-    use crate::mdschema::validator::ts_types::both_are_codeblocks;
+    use super::super::test_utils::ValidatorTester;
+    use crate::mdschema::validator::ts_types::*;
 
     use super::*;
 
@@ -221,7 +224,11 @@ mod tests {
             .peek_nodes(|(s, i)| assert!(both_are_codeblocks(s, i)))
             .validate_complete();
 
-        assert!(result.errors().is_empty(), "Expected no errors, got {:?}", result.errors());
+        assert!(
+            result.errors().is_empty(),
+            "Expected no errors, got {:?}",
+            result.errors()
+        );
         assert_eq!(result.value(), &json!({}));
 
         // negative case: change input so it is not the same as the schema
@@ -269,6 +276,9 @@ fn main() {}
             .validate_complete();
 
         assert!(result.errors().is_empty());
-        assert_eq!(result.value(), &json!({ "lang": "rust", "code": "fn main() {}" }))
+        assert_eq!(
+            result.value(),
+            &json!({ "lang": "rust", "code": "fn main() {}" })
+        )
     }
 }

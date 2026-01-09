@@ -1,7 +1,9 @@
 use serde_json::json;
 use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::errors::{NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError};
+use crate::mdschema::validator::errors::{
+    NodeContentMismatchKind, SchemaError, SchemaViolationError, ValidationError,
+};
 use crate::mdschema::validator::matcher::matcher::MatcherError;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::curly_matchers::extract_matcher_from_curly_delineated_text;
@@ -11,8 +13,8 @@ use crate::mdschema::validator::ts_utils::get_node_text;
 /// Handles both literal text and curly-delimited matchers.
 ///
 /// # Arguments
-/// - `schema_str`: The full schema markdown string
-/// - `input_str`: The full input markdown string
+/// * `schema_str`: The full input document (so far).
+/// * `input_str`: The full schema document.
 /// - `schema_cursor`: Cursor at schema text node
 /// - `input_cursor`: Cursor at input text node
 /// - `is_partial_match`: Whether we're doing a partial match (not at EOF)
@@ -187,7 +189,14 @@ mod tests {
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let result = compare_text_contents(schema_str, input_str, &schema_cursor, &input_cursor, false, false);
+        let result = compare_text_contents(
+            schema_str,
+            input_str,
+            &schema_cursor,
+            &input_cursor,
+            false,
+            false,
+        );
         // Result depends on whether we found matching nodes, so just verify it doesn't panic
         let _ = result;
     }
@@ -209,7 +218,14 @@ mod tests {
         input_cursor.goto_first_child();
 
         // With strip_extras=true, should handle the "!" prefix
-        let result = compare_text_contents(schema_str, input_str, &schema_cursor, &input_cursor, false, true);
+        let result = compare_text_contents(
+            schema_str,
+            input_str,
+            &schema_cursor,
+            &input_cursor,
+            false,
+            true,
+        );
         // Just verify no panic
         let _ = result;
     }
@@ -231,7 +247,14 @@ mod tests {
         input_cursor.goto_first_child();
 
         // With is_partial_match=true, partial content should be acceptable
-        let result = compare_text_contents(schema_str, input_str, &schema_cursor, &input_cursor, true, false);
+        let result = compare_text_contents(
+            schema_str,
+            input_str,
+            &schema_cursor,
+            &input_cursor,
+            true,
+            false,
+        );
         let _ = result;
     }
 
@@ -253,10 +276,21 @@ mod tests {
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let result = compare_text_contents(schema_str, input_str, &schema_cursor, &input_cursor, false, false);
+        let result = compare_text_contents(
+            schema_str,
+            input_str,
+            &schema_cursor,
+            &input_cursor,
+            false,
+            false,
+        );
 
         // Should match and capture
-        assert!(!result.has_errors(), "Expected no errors but got: {:?}", result.errors());
+        assert!(
+            !result.has_errors(),
+            "Expected no errors but got: {:?}",
+            result.errors()
+        );
         assert_eq!(result.value(), &json!({"test": "testing"}));
     }
 
@@ -276,10 +310,20 @@ mod tests {
         schema_cursor.goto_first_child();
         input_cursor.goto_first_child();
 
-        let result = compare_text_contents(schema_str, input_str, &schema_cursor, &input_cursor, false, false);
+        let result = compare_text_contents(
+            schema_str,
+            input_str,
+            &schema_cursor,
+            &input_cursor,
+            false,
+            false,
+        );
 
         // Should have an error
-        assert!(result.has_errors(), "Expected error for non-matching matcher");
+        assert!(
+            result.has_errors(),
+            "Expected error for non-matching matcher"
+        );
         assert_eq!(result.errors().len(), 1);
     }
 }

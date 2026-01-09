@@ -1,3 +1,8 @@
+//! Heading validator for node-walker comparisons.
+//!
+//! Types:
+//! - `HeadingVsHeadingValidator`: confirms heading kinds align and delegates
+//!   content checks to textual container validation.
 use log::trace;
 use tree_sitter::TreeCursor;
 
@@ -5,12 +10,9 @@ use crate::invariant_violation;
 use crate::mdschema::validator::errors::ValidationError;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::compare_node_kinds::compare_node_kinds;
-use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
+use crate::mdschema::validator::node_walker::validators::containers::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
-use crate::mdschema::validator::ts_types::{
-    both_are_headings, is_heading_content_node, is_heading_node, is_marker_node,
-    is_textual_container_node,
-};
+use crate::mdschema::validator::ts_types::*;
 use crate::mdschema::validator::ts_utils::waiting_at_end;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 
@@ -24,9 +26,6 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
     fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
-
-        let schema_str = walker.schema_str();
-        let input_str = walker.input_str();
 
         let mut schema_cursor = walker.schema_cursor().clone();
         let mut input_cursor = walker.input_cursor().clone();
@@ -43,9 +42,12 @@ impl ValidatorImpl for HeadingVsHeadingValidator {
         }
 
         // This also checks the *type* of heading that they are at
-        if let Some(error) =
-            compare_node_kinds(&schema_cursor, &input_cursor, schema_str, input_str)
-        {
+        if let Some(error) = compare_node_kinds(
+            &schema_cursor,
+            &input_cursor,
+            walker.schema_str(),
+            walker.input_str(),
+        ) {
             if waiting_at_end(got_eof, walker.input_str(), &input_cursor)
                 && both_are_headings(&schema_cursor.node(), &input_cursor.node())
             {
@@ -137,12 +139,11 @@ fn ensure_at_heading_content(cursor: &mut TreeCursor) -> Result<bool, Validation
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_utils::ValidatorTester;
     use super::*;
     use crate::mdschema::validator::{
         errors::{NodeContentMismatchKind, SchemaViolationError},
         node_pos_pair::NodePosPair,
-        node_walker::validators::test_utils::ValidatorTester,
-        ts_types::{both_are_headings, is_heading_node},
         ts_utils::parse_markdown,
     };
     use serde_json::json;

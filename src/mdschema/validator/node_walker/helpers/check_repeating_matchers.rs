@@ -2,7 +2,7 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError},
-    ts_types::is_inline_code_node,
+    ts_types::*,
 };
 
 pub fn check_repeating_matchers(schema_cursor: &TreeCursor, schema_str: &str) -> Option<usize> {

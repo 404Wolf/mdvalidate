@@ -196,11 +196,6 @@ pub enum SchemaError {
     /// A repeating matcher in a textual container
     RepeatingMatcherInTextContainer { schema_index: usize },
 
-    /// List node uses a non-repeating matcher.
-    ///
-    /// List nodes must use matchers with repetition syntax like `{1,}`.
-    BadListMatcher { schema_index: usize },
-
     /// Matcher has invalid extras syntax.
     ///
     /// For example, `test:/1/`!{1,2} is invalid.
@@ -277,9 +272,7 @@ impl fmt::Display for SchemaError {
             SchemaError::RepeatingMatcherInTextContainer { .. } => {
                 write!(f, "Repeating matcher cannot be used in text container")
             }
-            SchemaError::BadListMatcher { .. } => {
-                write!(f, "List node requires repeating matcher syntax")
-            }
+
             SchemaError::InvalidMatcherExtras { error, .. } => {
                 write!(f, "Invalid matcher extras: {}", error)
             }
@@ -768,25 +761,6 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                                 .with_color(Color::Red),
                         )
                         .with_help("Text containers like paragraphs and headings cannot contain repeating matchers. Use repetition syntax only with list items.")
-                        .finish()
-                }
-                SchemaError::BadListMatcher { schema_index } => {
-                    let schema_node = find_node_by_index(tree.root_node(), *schema_index);
-                    let schema_content =
-                        node_content_by_index(tree.root_node(), *schema_index, source_content)?;
-                    let schema_range = schema_node.start_byte()..schema_node.end_byte();
-
-                    Report::build(ReportKind::Error, (filename, schema_range.clone()))
-                        .with_message("Bad list matcher")
-                        .with_label(
-                            Label::new((filename, schema_range))
-                                .with_message(format!(
-                                    "No matchers found in children of list node: '{}'",
-                                    schema_content
-                                ))
-                                .with_color(Color::Red),
-                        )
-                        .with_help("List nodes require repeating matcher syntax like `label:/pattern/`{1,}")
                         .finish()
                 }
                 SchemaError::UnclosedMatcher { schema_index } => {

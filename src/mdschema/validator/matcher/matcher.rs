@@ -8,7 +8,7 @@ use tree_sitter::TreeCursor;
 
 use crate::mdschema::validator::{
     matcher::matcher_extras::{MatcherExtrasError, partition_at_special_chars},
-    ts_types::is_text_node,
+    ts_types::*,
     ts_utils::{get_next_node, get_node_and_next_node, get_node_text},
 };
 
@@ -210,6 +210,11 @@ impl Matcher {
         schema_cursor: &TreeCursor,
         schema_str: &str,
     ) -> Result<Self, MatcherError> {
+        #[cfg(feature = "invariant_violations")]
+        if !is_inline_code_node(&schema_cursor.node()) {
+            invariant_violation!("expected inline code node for extracting a matcher");
+        }
+
         let pattern_str = get_node_text(&schema_cursor.node(), schema_str);
         let next_node = get_next_node(schema_cursor);
         let extras_str = next_node

@@ -1,3 +1,8 @@
+//! Textual node validator for node-walker comparisons.
+//!
+//! Types:
+//! - `TextualVsTextualValidator`: compares text and inline code nodes, delegating
+//!   to matcher validation when schema content contains matcher syntax.
 use tracing::instrument;
 use tree_sitter::TreeCursor;
 
@@ -9,7 +14,7 @@ use crate::mdschema::validator::node_walker::validators::matchers::MatcherVsText
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     node_walker::{ValidationResult, validators::Validator},
-    ts_types::{both_are_textual_nodes, is_inline_code_node, is_text_node},
+    ts_types::*,
     ts_utils::{get_next_node, waiting_at_end},
 };
 
@@ -108,12 +113,9 @@ pub(super) fn validate_textual_vs_textual_direct(
 mod tests {
     use serde_json::json;
 
+    use super::super::test_utils::ValidatorTester;
     use super::TextualVsTextualValidator;
-    use crate::mdschema::validator::{
-        node_pos_pair::NodePosPair,
-        node_walker::validators::test_utils::ValidatorTester,
-        ts_types::{both_are_inline_code, both_are_text_nodes},
-    };
+    use crate::mdschema::validator::{node_pos_pair::NodePosPair, ts_types::*};
 
     #[test]
     fn test_validate_textual_vs_textual_with_literal_matcher() {

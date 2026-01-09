@@ -1,3 +1,8 @@
+//! Node dispatch validator.
+//!
+//! Types:
+//! - `NodeVsNodeValidator`: routes node-vs-node checks to the specific validator
+//!   based on node kinds and performs shared structural checks.
 use log::trace;
 
 use crate::mdschema::validator::errors::{SchemaError, ValidationError};
@@ -5,19 +10,15 @@ use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::check_repeating_matchers::check_repeating_matchers;
 use crate::mdschema::validator::node_walker::validators::code::CodeVsCodeValidator;
+use crate::mdschema::validator::node_walker::validators::containers::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::headings::HeadingVsHeadingValidator;
 use crate::mdschema::validator::node_walker::validators::links::LinkVsLinkValidator;
 use crate::mdschema::validator::node_walker::validators::lists::ListVsListValidator;
 use crate::mdschema::validator::node_walker::validators::quotes::QuoteVsQuoteValidator;
 use crate::mdschema::validator::node_walker::validators::tables::TableVsTableValidator;
 use crate::mdschema::validator::node_walker::validators::textual::TextualVsTextualValidator;
-use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
-use crate::mdschema::validator::ts_types::{
-    both_are_codeblocks, both_are_headings, both_are_image_nodes, both_are_link_nodes,
-    both_are_list_nodes, both_are_matching_top_level_nodes, both_are_quotes, both_are_rulers,
-    both_are_tables, both_are_textual_containers, both_are_textual_nodes,
-};
+use crate::mdschema::validator::ts_types::*;
 use crate::mdschema::validator::ts_utils::waiting_at_end;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::{compare_node_children_lengths_check, compare_node_kinds_check, invariant_violation};
@@ -39,9 +40,6 @@ impl ValidatorImpl for NodeVsNodeValidator {
 
 fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
-
-    let schema_str = walker.schema_str();
-    let input_str = walker.input_str();
 
     let schema_node = walker.schema_cursor().node();
     let input_node = walker.input_cursor().node();
@@ -85,7 +83,8 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         // the containers to contain repeating matchers since the same utility
         // is used for list validation.
 
-        if let Some(repeating_matcher_index) = check_repeating_matchers(&schema_cursor, schema_str)
+        if let Some(repeating_matcher_index) =
+            check_repeating_matchers(&schema_cursor, walker.schema_str())
         {
             result.add_error(ValidationError::SchemaError(
                 SchemaError::RepeatingMatcherInTextContainer {
@@ -169,7 +168,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 result.join_other_result(&new_result);
                 result.sync_cursor_pos(&schema_cursor, &input_cursor);
             }
-            (true, false) if waiting_at_end(got_eof, input_str, &input_cursor) => {
+            (true, false) if waiting_at_end(got_eof, walker.input_str(), &input_cursor) => {
                 // Stop for now. We will revalidate from here later.
                 result.set_farthest_reached_pos(parent_pos);
                 return result;
@@ -194,7 +193,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                     result.join_other_result(&new_result);
                     result.sync_cursor_pos(&schema_cursor, &input_cursor);
                 }
-                (true, false) if waiting_at_end(got_eof, input_str, &input_cursor) => {
+                (true, false) if waiting_at_end(got_eof, walker.input_str(), &input_cursor) => {
                     // Stop for now. We will revalidate from here later.
                     result.set_farthest_reached_pos(parent_pos);
                     return result;
@@ -208,7 +207,13 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         return result;
     } else {
         // otherwise, at the minimum check the type
-        compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
+        compare_node_kinds_check!(
+            schema_cursor,
+            input_cursor,
+            walker.schema_str(),
+            walker.input_str(),
+            result
+        );
 
         if result.has_errors() {
             return result;
@@ -232,10 +237,11 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 mod tests {
     use serde_json::json;
 
+    use super::super::test_utils::ValidatorTester;
+    use super::NodeVsNodeValidator;
     use crate::mdschema::validator::{
         errors::{ChildrenCount, SchemaViolationError, ValidationError},
         node_pos_pair::NodePosPair,
-        node_walker::validators::{nodes::NodeVsNodeValidator, test_utils::ValidatorTester},
     };
 
     #[test]
@@ -429,8 +435,8 @@ mod tests {
                     SchemaViolationError::ChildrenLengthMismatch { expected, .. },
                 ) => {
                     assert_eq!(
-                        *expected,
-                        ChildrenCount::SpecificCount(0),
+                        expected,
+                        &ChildrenCount::SpecificCount(0),
                         "expected should be 0 for empty schema"
                     );
                 }

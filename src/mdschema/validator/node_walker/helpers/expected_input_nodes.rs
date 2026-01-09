@@ -7,7 +7,7 @@ use crate::mdschema::validator::{
         matcher::{Matcher, MatcherError},
         matcher_extras::{get_after_extras, get_all_extras},
     },
-    ts_types::{is_inline_code_node, is_text_node},
+    ts_types::*,
     ts_utils::{get_next_node, get_node_text},
 };
 

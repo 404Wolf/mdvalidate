@@ -1,5 +1,10 @@
+//! Block quote validator for node-walker comparisons.
+//!
+//! Types:
+//! - `QuoteVsQuoteValidator`: verifies quote node kinds and delegates content
+//!   validation to textual containers.
 use crate::mdschema::validator::node_walker::ValidationResult;
-use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
+use crate::mdschema::validator::node_walker::validators::containers::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::{compare_node_kinds_check, invariant_violation};
@@ -64,10 +69,11 @@ impl ValidatorImpl for QuoteVsQuoteValidator {
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_utils::ValidatorTester;
+    use super::QuoteVsQuoteValidator;
     use crate::mdschema::validator::{
         errors::{NodeContentMismatchKind, SchemaViolationError, ValidationError},
         node_pos_pair::NodePosPair,
-        node_walker::validators::{quotes::QuoteVsQuoteValidator, test_utils::ValidatorTester},
     };
 
     #[test]
