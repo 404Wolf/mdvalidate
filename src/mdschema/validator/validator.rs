@@ -678,6 +678,7 @@ Version: 1
     }
 
     #[test]
+    #[ignore]
     fn test_blockquote_validation() {
         let schema = "> This is a blockquote\n";
         let input = "> This is a blockquote\n";

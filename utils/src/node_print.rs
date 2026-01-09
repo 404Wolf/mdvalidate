@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ptree::{Style, TreeItem};
 use std::borrow::Cow;
 use std::io::{self, Write};
@@ -113,7 +115,12 @@ fn build_tree_with_config<'a>(
     if cursor.goto_first_child() {
         loop {
             let child = cursor.node();
-            children.push(build_tree_with_config(child, next_index, highlight_indices, source));
+            children.push(build_tree_with_config(
+                child,
+                next_index,
+                highlight_indices,
+                source,
+            ));
             if !cursor.goto_next_sibling() {
                 break;
             }
