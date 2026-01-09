@@ -325,11 +325,8 @@ mod tests {
 
     use super::{TextualContainerVsTextualContainerValidator, is_repeated_matcher_paragraph};
     use crate::mdschema::validator::{
-        errors::{SchemaError, ValidationError},
-        node_pos_pair::NodePosPair,
-        node_walker::validators::test_utils::ValidatorTester,
-        ts_types::*,
-        ts_utils::parse_markdown,
+        node_pos_pair::NodePosPair, node_walker::validators::test_utils::ValidatorTester,
+        ts_types::*, ts_utils::parse_markdown,
     };
 
     #[test]
