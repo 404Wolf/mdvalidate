@@ -169,6 +169,12 @@ node_kind_pair!(
     ["paragraph", "heading_content", "list_item", "table_cell"]
 );
 node_kind_pair!(
+    is_quote_node,
+    both_are_quotes,
+    "Check if both nodes are quote nodes.",
+    ["block_quote"]
+);
+node_kind_pair!(
     is_table_delimiter_row_node,
     both_are_table_delimiter_rows,
     "Check if both nodes are table delimiter rows.",

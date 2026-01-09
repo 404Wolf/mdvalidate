@@ -8,14 +8,15 @@ use crate::mdschema::validator::node_walker::validators::code::CodeVsCodeValidat
 use crate::mdschema::validator::node_walker::validators::headings::HeadingVsHeadingValidator;
 use crate::mdschema::validator::node_walker::validators::links::LinkVsLinkValidator;
 use crate::mdschema::validator::node_walker::validators::lists::ListVsListValidator;
+use crate::mdschema::validator::node_walker::validators::quotes::QuoteVsQuoteValidator;
 use crate::mdschema::validator::node_walker::validators::tables::TableVsTableValidator;
 use crate::mdschema::validator::node_walker::validators::textual::TextualVsTextualValidator;
 use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
 use crate::mdschema::validator::ts_types::{
     both_are_codeblocks, both_are_headings, both_are_image_nodes, both_are_link_nodes,
-    both_are_list_nodes, both_are_matching_top_level_nodes, both_are_rulers, both_are_tables,
-    both_are_textual_containers, both_are_textual_nodes,
+    both_are_list_nodes, both_are_matching_top_level_nodes, both_are_quotes, both_are_rulers,
+    both_are_tables, both_are_textual_containers, both_are_textual_nodes,
 };
 use crate::mdschema::validator::ts_utils::waiting_at_end;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
@@ -61,6 +62,11 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     // Both are codeblock nodes
     else if both_are_codeblocks(&schema_node, &input_node) {
         return CodeVsCodeValidator::validate(
+            &walker.with_cursors(&schema_cursor, &input_cursor),
+            got_eof,
+        );
+    } else if both_are_quotes(&schema_node, &input_node) {
+        return QuoteVsQuoteValidator::validate(
             &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
