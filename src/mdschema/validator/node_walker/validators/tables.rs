@@ -3,6 +3,7 @@ use std::os::raw::c_short;
 use std::rc::Rc;
 use thiserror::Error;
 
+use crate::invariant_violation;
 use crate::mdschema::validator::errors::{
     MalformedStructureKind, SchemaViolationError, ValidationError,
 };
@@ -15,8 +16,6 @@ use crate::mdschema::validator::ts_types::{both_are_table_cells, both_are_table_
 use crate::mdschema::validator::ts_types::{both_are_table_delimiter_rows, both_are_tables};
 use crate::mdschema::validator::ts_utils::waiting_at_end;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::trace_cursors;
-use crate::{invariant_violation, mdschema::validator::ts_utils::get_node_text};
 
 /// Validate two tables.
 pub(super) struct TableVsTableValidator;
@@ -123,7 +122,6 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
                 // jump to the next sibling pair. If there is no next sibling
                 // pair we are done.
                 'col_iter: loop {
-                    trace_cursors!(schema_cursor, input_cursor);
                     let cell_result = TextualContainerVsTextualContainerValidator::validate(
                         &walker.with_cursors(&schema_cursor, &input_cursor),
                         got_eof,
@@ -176,6 +174,24 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
                     }
                 }
                 (false, false) => break 'row_iter,
+                (true, false) => {
+                    // If the schema has another cell but the input
+                    // doesn't, it may just be because we are in an
+                    // incomplete state.
+                    if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                        // don't continue FOR NOW. We will want to revalidate the entire table.
+                        return need_to_restart_result;
+                    } else {
+                        result.add_error(ValidationError::SchemaViolation(
+                            SchemaViolationError::MalformedNodeStructure {
+                                schema_index: schema_cursor.descendant_index(),
+                                input_index: input_cursor.descendant_index(),
+                                kind: MalformedStructureKind::MismatchingTableCells,
+                            },
+                        ));
+                        return result;
+                    }
+                }
                 _ => {
                     invariant_violation!(
                         result,
