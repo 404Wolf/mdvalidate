@@ -1,6 +1,5 @@
 use log::trace;
 
-use crate::compare_node_children_lengths_check;
 use crate::mdschema::validator::errors::{SchemaError, ValidationError};
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::helpers::check_repeating_matchers::check_repeating_matchers;
@@ -18,6 +17,7 @@ use crate::mdschema::validator::ts_types::{
     both_are_textual_containers, both_are_textual_nodes, is_heading_node,
 };
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use crate::{compare_node_children_lengths_check, compare_node_kinds_check};
 
 /// Validate two arbitrary nodes against each other.
 ///
@@ -38,7 +38,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
     let schema_str = walker.schema_str();
-    let _input_str = walker.input_str();
+    let input_str = walker.input_str();
 
     let schema_node = walker.schema_cursor().node();
     let input_node = walker.input_cursor().node();
@@ -56,25 +56,22 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             got_eof,
         );
     }
-
     // Both are codeblock nodes
-    if both_are_codeblocks(&schema_node, &input_node) {
+    else if both_are_codeblocks(&schema_node, &input_node) {
         return CodeVsCodeValidator::validate(
             &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
-
     // Both are tables
-    if both_are_tables(&schema_node, &input_node) {
+    else if both_are_tables(&schema_node, &input_node) {
         return TableVsTableValidator::validate(
             &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
-
     // Both are textual containers
-    if both_are_textual_containers(&schema_node, &input_node) {
+    else if both_are_textual_containers(&schema_node, &input_node) {
         // If we have top level textual containers, they CANNOT have repeating
         // matchers. `validate_textual_container_vs_textual_container` allows
         // the containers to contain repeating matchers since the same utility
@@ -95,17 +92,15 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             got_eof,
         );
     }
-
     // Both are textual nodes
-    if both_are_textual_nodes(&schema_node, &input_node) {
+    else if both_are_textual_nodes(&schema_node, &input_node) {
         return TextualVsTextualValidator::validate(
             &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
-
     // Both are link nodes or image nodes
-    if both_are_link_nodes(&schema_node, &input_node)
+    else if both_are_link_nodes(&schema_node, &input_node)
         || both_are_image_nodes(&schema_node, &input_node)
     {
         return LinkVsLinkValidator::validate(
@@ -113,24 +108,21 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             got_eof,
         );
     }
-
     // Both are list nodes
-    if both_are_list_nodes(&schema_node, &input_node) {
+    else if both_are_list_nodes(&schema_node, &input_node) {
         return ListVsListValidator::validate(
             &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
     }
-
     // Both are ruler nodes
-    if both_are_rulers(&schema_node, &input_node) {
+    else if both_are_rulers(&schema_node, &input_node) {
         trace!("Both are rulers. No extra validation happens for rulers.");
     }
-
     // Both are heading nodes or document nodes
     //
     // Crawl down one layer to get to the actual children
-    if both_are_matching_top_level_nodes(&schema_node, &input_node) {
+    else if both_are_matching_top_level_nodes(&schema_node, &input_node) {
         // First, if they are headings, validate the headings themselves.
         if is_heading_node(&schema_node) && is_heading_node(&input_node) {
             trace!("Both are heading nodes, validating heading vs heading");
@@ -190,7 +182,11 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         }
 
         return result;
+    } else {
+        // otherwise, at the minimum check the type
+        compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
     }
+
     result
 }
 

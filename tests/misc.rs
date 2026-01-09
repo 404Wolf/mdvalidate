@@ -71,3 +71,36 @@ print("hi")
     json!({"lang": "python", "code": "print(\"hi\")", "name": "Wolf", "num": "2", "items": ["apples", "bananas"]}),
     vec![]
 );
+
+test_case!(
+    complicated_multiple_doc_children_example_fails,
+    r#"
+# Hi `name:/[A-Z][a-z]*/`
+
+- item
+"#,
+    r#"
+- item
+
+# Hi Wolf
+"#,
+    json!({"lang": "python", "name": "Wolf", "num": "2"}),
+    vec![
+        ValidationError::SchemaViolation(
+            SchemaViolationError::NodeTypeMismatch {
+                schema_index: 1,
+                input_index: 1,
+                expected: "atx_heading(atx_h1_marker)".to_string(),
+                actual: "atx_heading(atx_h2_marker)".to_string(),
+            }
+        ),
+        ValidationError::SchemaViolation(
+            SchemaViolationError::NodeTypeMismatch {
+                schema_index: 2,
+                input_index: 2,
+                expected: "atx_h1_marker".to_string(),
+                actual: "atx_h2_marker".to_string(),
+            }
+        )
+    ]
+);
