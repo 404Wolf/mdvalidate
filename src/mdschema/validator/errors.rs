@@ -394,6 +394,7 @@ pub enum SchemaViolationError {
 pub enum MalformedStructureKind {
     MissingListItemContent,
     HadExtraListItem,
+    MismatchingTableCells,
 }
 
 impl fmt::Display for SchemaViolationError {
