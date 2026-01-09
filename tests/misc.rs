@@ -84,22 +84,22 @@ test_case!(
 
 # Hi Wolf
 "#,
-    json!({"lang": "python", "name": "Wolf", "num": "2"}),
+    json!({}),
     vec![
         ValidationError::SchemaViolation(
             SchemaViolationError::NodeTypeMismatch {
                 schema_index: 1,
                 input_index: 1,
-                expected: "atx_heading(atx_h1_marker)".to_string(),
-                actual: "atx_heading(atx_h2_marker)".to_string(),
+                expected: "atx_heading".to_string(),
+                actual: "tight_list".to_string(),
             }
         ),
         ValidationError::SchemaViolation(
             SchemaViolationError::NodeTypeMismatch {
-                schema_index: 2,
-                input_index: 2,
-                expected: "atx_h1_marker".to_string(),
-                actual: "atx_h2_marker".to_string(),
+                schema_index: 7,
+                input_index: 6,
+                expected: "tight_list".to_string(),
+                actual: "atx_heading".to_string(),
             }
         )
     ]

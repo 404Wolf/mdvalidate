@@ -131,6 +131,14 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 &walker.with_cursors(&schema_cursor, &input_cursor),
                 got_eof,
             );
+            
+            // If heading validation produced errors (e.g., mismatched heading levels),
+            // don't validate children as they will also mismatch
+            if !heading_result.errors().is_empty() {
+                result.join_other_result(&heading_result);
+                return result;
+            }
+            
             result.join_other_result(&heading_result);
             result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
             result.sync_cursor_pos(&schema_cursor, &input_cursor);
