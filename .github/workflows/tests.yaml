@@ -1,13 +1,75 @@
 name: Tests
+
 on:
   push:
+
 jobs:
-  check:
+  test:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      actions: write
+
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Install Nix
         uses: cachix/install-nix-action@v31
-      - name: Run cargo test
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Restore Nix store
+        id: nix-cache
+        uses: nix-community/cache-nix-action/restore@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+
+      - name: Restore Cargo cache
+        uses: actions/cache/restore@v4
+        id: cargo-cache
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Build project
+        run: nix develop --command cargo build
+
+      - name: Run tests
         run: nix develop --command cargo test
+
+      - name: Save Cargo cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+      - name: Save Nix store
+        uses: nix-community/cache-nix-action/save@v7
+        if: always()
+        with:
+          primary-key: ${{ steps.nix-cache.outputs.primary-key }}
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-last-accessed: P7D
+          purge-primary-key: never
