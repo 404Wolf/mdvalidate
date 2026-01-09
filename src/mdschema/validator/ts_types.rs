@@ -127,6 +127,24 @@ node_kind_pair!(
     ["thematic_break"]
 );
 node_kind_pair!(
+    is_table_node,
+    both_are_tables,
+    "Check if both nodes are tables.",
+    ["table"]
+);
+node_kind_pair!(
+    is_table_cell_node,
+    both_are_table_cells,
+    "Check if both nodes are table cells.",
+    ["table_cell"]
+);
+node_kind_pair!(
+    is_table_header_node,
+    both_are_table_headers,
+    "Check if both nodes are table headers.",
+    ["table_header_row"]
+);
+node_kind_pair!(
     is_list_node,
     both_are_list_nodes,
     "Check if both nodes are list nodes.",
@@ -148,7 +166,13 @@ node_kind_pair!(
     is_textual_container_node,
     both_are_textual_containers,
     "Check if both nodes are textual containers.",
-    ["paragraph", "heading_content", "list_item"]
+    ["paragraph", "heading_content", "list_item", "table_cell"]
+);
+node_kind_pair!(
+    is_table_delimiter_row_node,
+    both_are_table_delimiter_rows,
+    "Check if both nodes are table delimiter rows.",
+    ["table_delimiter_row"]
 );
 node_predicate_pair!(
     is_marker_node,

@@ -11,6 +11,7 @@ pub(super) mod links;
 pub(super) mod lists;
 pub(super) mod matchers;
 pub(crate) mod nodes;
+pub(super) mod tables;
 pub(super) mod textual;
 pub(super) mod textual_container;
 
@@ -31,19 +32,6 @@ impl<T: ValidatorImpl> Validator for T {
     fn validate(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         Self::validate_impl(walker, got_eof)
     }
-}
-
-#[macro_export]
-macro_rules! trace_cursors {
-    ($schema_cursor:expr, $input_cursor:expr) => {{
-        println!(
-            "{}",
-            crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair(
-                &$schema_cursor,
-                &$input_cursor,
-            )
-        );
-    }};
 }
 
 #[cfg(test)]
