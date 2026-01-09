@@ -8,6 +8,7 @@ use crate::mdschema::validator::node_walker::validators::code::CodeVsCodeValidat
 use crate::mdschema::validator::node_walker::validators::headings::HeadingVsHeadingValidator;
 use crate::mdschema::validator::node_walker::validators::links::LinkVsLinkValidator;
 use crate::mdschema::validator::node_walker::validators::lists::ListVsListValidator;
+use crate::mdschema::validator::node_walker::validators::tables::TableVsTableValidator;
 use crate::mdschema::validator::node_walker::validators::textual::TextualVsTextualValidator;
 use crate::mdschema::validator::node_walker::validators::textual_container::TextualContainerVsTextualContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
@@ -66,7 +67,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
 
     // Both are tables
     if both_are_tables(&schema_node, &input_node) {
-        return CodeVsCodeValidator::validate(
+        return TableVsTableValidator::validate(
             &walker.with_cursors(&schema_cursor, &input_cursor),
             got_eof,
         );
@@ -394,6 +395,27 @@ mod tests {
     fn test_validate_node_vs_node_with_heading_and_codeblock() {
         let schema_str = "## Heading\n```\nCode\n```";
         let input_str = "## Heading\n```\nCode\n```";
+
+        let result = ValidatorTester::<NodeVsNodeValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .validate_complete();
+
+        assert_eq!(result.errors(), []);
+        assert_eq!(result.value(), &json!({}));
+    }
+
+    #[test]
+    fn test_validate_node_vs_node_with_simple_table() {
+        let schema_str = r#"
+|c1|c2|
+|-|-|
+|r1|r2|
+"#;
+        let input_str = r#"
+|c1|c2|
+|-|-|
+|r1|r2|
+"#;
 
         let result = ValidatorTester::<NodeVsNodeValidator>::from_strs(schema_str, input_str)
             .walk()
