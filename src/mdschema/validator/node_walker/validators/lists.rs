@@ -22,7 +22,9 @@ use crate::mdschema::validator::{
 };
 use crate::{
     invariant_violation,
-    mdschema::validator::errors::{SchemaError, SchemaViolationError, ValidationError},
+    mdschema::validator::errors::{
+        ChildrenLengthRange, SchemaError, SchemaViolationError, ValidationError,
+    },
 };
 use log::trace;
 use serde_json::json;
@@ -134,8 +136,10 @@ impl ValidatorImpl for ListVsListValidator {
         match extract_repeated_matcher_from_list_item(&schema_cursor, walker.schema_str()) {
             // We were able to find a valid repeated matcher in the schema list item.
             Some(Ok(matcher)) => {
-                let min_items = matcher.extras().min_items().unwrap_or(0);
-                let max_items = matcher.extras().max_items();
+                let extras = matcher.extras();
+                let min_items_option = extras.min_items();
+                let min_items = extras.min_items_or(0);
+                let max_items = extras.max_items();
                 trace!(
                     "Found repeated matcher: id={:?}, min_items={}, max_items={:?}, variable_length={}",
                     matcher.id(),
@@ -159,7 +163,7 @@ impl ValidatorImpl for ListVsListValidator {
                     return result;
                 }
 
-                let mut values_at_level = Vec::with_capacity(max_items.unwrap_or(1));
+                let mut values_at_level = Vec::with_capacity(extras.max_items_or(1));
                 let mut validate_so_far = 0;
 
                 loop {
@@ -200,12 +204,12 @@ impl ValidatorImpl for ListVsListValidator {
                     );
 
                     // If we've now validated the max number of items, check if there are more
-                    if let Some(max_items) = max_items
-                        && validate_so_far == max_items
+                    if let Some(max_items_value) = max_items
+                        && validate_so_far == max_items_value
                     {
                         trace!(
                             "Reached max items limit ({}), checking if there are more items",
-                            max_items
+                            max_items_value
                         );
 
                         // Check if there are more items beyond the max
@@ -216,13 +220,16 @@ impl ValidatorImpl for ListVsListValidator {
                             // Report error immediately - extra items won't disappear
                             trace!(
                                 "Error: More items than max allowed ({} > {}), early exit",
-                                "at least one more", max_items
+                                "at least one more", max_items_value
                             );
                             result.add_error(ValidationError::SchemaViolation(
                                 SchemaViolationError::ChildrenLengthMismatch {
                                     schema_index: schema_cursor.descendant_index(),
                                     input_index: input_cursor.descendant_index(),
-                                    expected: (min_items, max_items).into(),
+                                    expected: ChildrenLengthRange::from_optional_bounds(
+                                        min_items_option,
+                                        Some(max_items_value),
+                                    ),
                                     actual: validate_so_far + 1, // At least one more
                                 },
                             ));
@@ -248,7 +255,10 @@ impl ValidatorImpl for ListVsListValidator {
                         SchemaViolationError::ChildrenLengthMismatch {
                             schema_index: schema_cursor.descendant_index(),
                             input_index: input_cursor.descendant_index(),
-                            expected: (min_items, max_items.unwrap_or(min_items)).into(),
+                            expected: ChildrenLengthRange::from_optional_bounds(
+                                min_items_option,
+                                max_items,
+                            ),
                             actual: validate_so_far,
                         },
                     ));

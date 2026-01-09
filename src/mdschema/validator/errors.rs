@@ -1,5 +1,8 @@
 use crate::mdschema::validator::{
-    matcher::{matcher::*, matcher_extras::MatcherExtrasError},
+    matcher::{
+        matcher::*,
+        matcher_extras::{MatcherExtras, MatcherExtrasError},
+    },
     validator::{Validator, ValidatorState},
 };
 use ariadne::{Color, Label, Report, ReportKind, Source};
@@ -405,6 +408,20 @@ impl From<(usize, usize)> for ChildrenLengthRange {
 impl From<usize> for ChildrenLengthRange {
     fn from(min: usize) -> Self {
         ChildrenLengthRange(min, min)
+    }
+}
+
+impl ChildrenLengthRange {
+    /// Build a range from optional min/max bounds (defaults to 0 for missing min).
+    pub fn from_optional_bounds(min: Option<usize>, max: Option<usize>) -> Self {
+        let min = min.unwrap_or(0);
+        let max = max.unwrap_or(min);
+        ChildrenLengthRange(min, max)
+    }
+
+    /// Build a range from a matcher's extras.
+    pub fn from_matcher_extras(extras: &MatcherExtras) -> Self {
+        ChildrenLengthRange::from_optional_bounds(extras.min_items(), extras.max_items())
     }
 }
 

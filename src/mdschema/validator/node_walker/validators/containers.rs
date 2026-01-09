@@ -90,11 +90,13 @@ impl ValidatorImpl for TextualContainerVsTextualContainerValidator {
         }
 
         match count_non_literal_matchers_in_children(&schema_cursor, walker.schema_str()) {
-            Ok(non_repeating_matchers_count) if non_repeating_matchers_count > 1 && got_eof => {
+            Ok(non_literal_matchers_in_children)
+                if non_literal_matchers_in_children > 1 && got_eof =>
+            {
                 result.add_error(ValidationError::SchemaError(
                     SchemaError::MultipleMatchersInNodeChildren {
                         schema_index: schema_cursor.descendant_index(),
-                        received: non_repeating_matchers_count,
+                        received: non_literal_matchers_in_children,
                     },
                 ))
             }
@@ -253,15 +255,15 @@ impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
             Ok(matcher) if matcher.is_repeated() => {
                 let mut matches = vec![];
 
-                let min_count = matcher.extras().min_items().unwrap_or(0);
-                let max_count = matcher.extras().max_items();
+                let extras = matcher.extras();
+                let expected_range = ChildrenLengthRange::from_matcher_extras(extras);
 
                 if !input_cursor.goto_first_child() {
                     result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::NotEnoughNodesForRepeatingParagraph {
                             schema_index: schema_cursor.descendant_index(),
                             input_index: input_cursor.descendant_index(),
-                            expected: (min_count, max_count.unwrap_or(min_count)).into(),
+                            expected: expected_range,
                             actual: 0,
                         },
                     ));
@@ -273,10 +275,16 @@ impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
                         &walker.with_cursors(&schema_cursor, &input_cursor),
                         got_eof,
                     );
+
+                    if current_match.has_errors() {
+                        result.join_errors(current_match.errors());
+                        return result;
+                    }
+
                     matches.push(current_match.value().clone());
 
                     let prev_sibling = input_cursor.clone();
-                    if input_cursor.goto_next_sibling() && is_paragraph_node(&input_cursor.node()) {
+                    if input_cursor.goto_next_sibling() {
                         // continue
                     } else {
                         input_cursor.reset_to(&prev_sibling);
@@ -285,10 +293,7 @@ impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
                 }
 
                 if let Some(id) = matcher.id() {
-                    result.set_match(
-                        id,
-                        serde_json::Value::Array(matches.into_iter().collect()),
-                    );
+                    result.set_match(id, serde_json::Value::Array(matches.into_iter().collect()));
                 }
 
                 result
@@ -359,8 +364,12 @@ mod tests {
 
     use super::{TextualContainerVsTextualContainerValidator, is_repeated_matcher_paragraph};
     use crate::mdschema::validator::{
-        node_pos_pair::NodePosPair, node_walker::validators::test_utils::ValidatorTester,
-        ts_types::*, ts_utils::parse_markdown,
+        node_pos_pair::NodePosPair,
+        node_walker::validators::{
+            containers::ParagraphVsRepeatedMatcherParagraphValidator, test_utils::ValidatorTester,
+        },
+        ts_types::*,
+        ts_utils::parse_markdown,
     };
 
     #[test]
@@ -508,5 +517,35 @@ mod tests {
         );
         assert_eq!(errors, vec![]);
         assert_eq!(value, json!({"a": "a", "b": "b"}));
+    }
+
+    #[test]
+    fn test_paragraph_vs_repeated_matcher_paragraph_simple() {
+        let schema_str = r#"
+`items:/.*/`{,}
+"#;
+        let input_str = r#"
+foo
+bar
+buzz
+"#;
+
+        let result = ValidatorTester::<ParagraphVsRepeatedMatcherParagraphValidator>::from_strs(
+            schema_str, input_str,
+        )
+        .walk()
+        .goto_first_child_then_unwrap()
+        .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+        .validate_complete();
+
+        let errors = result.errors().to_vec();
+        let value = result.value().clone();
+
+        // assert_eq!(
+        //     *result.farthest_reached_pos(),
+        //     NodePosPair::from_pos(12, 10)
+        // );
+        // assert_eq!(errors, vec![]);
+        assert_eq!(value, json!({"items": ["foo", "bar", "buzz"]}));
     }
 }

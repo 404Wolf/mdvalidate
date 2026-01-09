@@ -201,9 +201,19 @@ impl MatcherExtras {
         self.min_items
     }
 
+    /// Return minimum items or the provided default.
+    pub fn min_items_or(&self, default: usize) -> usize {
+        self.min_items.unwrap_or(default)
+    }
+
     /// Return optional maximum number of items at this list level
     pub fn max_items(&self) -> Option<usize> {
         self.max_items
+    }
+
+    /// Return maximum items or the provided default.
+    pub fn max_items_or(&self, default: usize) -> usize {
+        self.max_items.unwrap_or(default)
     }
 
     /// Whether min/max constraints were specified
