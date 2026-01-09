@@ -165,14 +165,12 @@ impl ValidationResult {
         self.farthest_reached_pos.keep_farther_pos(other);
     }
 
-    /// Get the farthest reached position as a descendant index pair.
     pub fn farthest_reached_pos(&self) -> &NodePosPair {
         &self.farthest_reached_pos
     }
 
-    /// Destruct the result into (value, errors, farthest_reached_pos).
-    pub fn destruct(self) -> (Value, Vec<ValidationError>, NodePosPair) {
-        (self.data.value, self.data.errors, self.farthest_reached_pos)
+    pub fn set_farthest_reached_pos(&mut self, farthest_reached_pos: NodePosPair) {
+        self.farthest_reached_pos = farthest_reached_pos;
     }
 }
 

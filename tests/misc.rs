@@ -39,21 +39,35 @@ test_case!(
 );
 
 test_case!(
-    node_list_and_code_block,
+    complicated_multiple_doc_children_example,
     r#"
-- item
+# Hi `name:/[A-Z][a-z]*/`
 
-```txt
-hi
+| Header 1 | Header `num:/\d/` |
+|----------|----------|
+| Cell 1   | Cell 2   |
+
+- `items:/.*/`{,}
+
+```{lang:/\w+/}
+{code}
 ```
+
 "#,
     r#"
-- item
+# Hi Wolf
 
-```txt
-hi
+| Header 1 | Header 2 |
+|----------|----------|
+| Cell 1   | Cell 2   |
+
+- apples
+- bananas
+
+```python
+print("hi")
 ```
 "#,
-    json!({}),
+    json!({"lang": "python", "code": "print(\"hi\")", "name": "Wolf", "num": "2", "items": ["apples", "bananas"]}),
     vec![]
 );

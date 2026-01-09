@@ -7,8 +7,6 @@ order: 5
 import SchemaAndInput from "../../../components/SchemaAndInput.astro";
 import TODO from "../../../components/TODO.astro";
 
-<TODO feature="Tables are not yet implemented" />
-
 Tables can be validated for structure, headers, and cell content using matchers.
 
 ## Basic Table Matching
@@ -32,8 +30,8 @@ Tables match literally by default - headers and all rows must match exactly:
 Headers can use matchers to validate column names:
 
 <SchemaAndInput
-  schema={"| `col:/\\w+/` | `col:/\\w+/` |\n| :--- | :-- |\n| data | more |"}
-  input={"| Name | Age |\n| :--- | :-- |\n| data | more |"}
+  schema={"| buzz `col:/\\w+/` bar | `col:/\\w+/` |\n| :--- | :-- |\n| data | more |"}
+  input={"| buzz Name bar | Age |\n| :--- | :-- |\n| data | more |"}
   valid={true}
   output={'{"col":["Name","Age"]}'}
 />
@@ -50,6 +48,8 @@ Individual cells can contain matchers:
 />
 
 ## Repeated Rows
+
+<TODO feature="Repeated row validation is not implemented yet" />
 
 Use `{min,max}` syntax on row patterns to match multiple rows:
 

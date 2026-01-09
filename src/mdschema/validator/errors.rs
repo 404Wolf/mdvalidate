@@ -12,6 +12,19 @@ use crate::mdschema::validator::{
 };
 
 #[macro_export]
+macro_rules! trace_cursors {
+    ($schema_cursor:expr, $input_cursor:expr) => {{
+        println!(
+            "{}",
+            crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair(
+                &$schema_cursor,
+                &$input_cursor,
+            )
+        );
+    }};
+}
+
+#[macro_export]
 macro_rules! invariant_violation {
     (result, $schema_cursor:expr, $input_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
         $crate::invariant_violation!($schema_cursor, $input_cursor, $message $(, $($args)*)?)
@@ -19,12 +32,16 @@ macro_rules! invariant_violation {
     ($schema_cursor:expr, $input_cursor:expr, $message:expr $(, $($args:tt)*)?) => {{
         #[cfg(feature = "invariant_violations")]
         {
+            let cursor_info = $crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair(
+                $schema_cursor,
+                $input_cursor,
+            );
             let error_msg = $crate::mdschema::validator::errors::invariant_violation_message(
                 Some(($schema_cursor, $input_cursor)),
                 format!($message $(, $($args)*)?),
                 module_path!(),
             );
-            panic!("Internal invariant violated:\n{}", error_msg);
+            panic!("Internal invariant violated:\n{}\n\n{}", error_msg, cursor_info);
         }
 
         #[cfg(not(feature = "invariant_violations"))]
@@ -377,6 +394,7 @@ pub enum SchemaViolationError {
 pub enum MalformedStructureKind {
     MissingListItemContent,
     HadExtraListItem,
+    MismatchingTableCells,
 }
 
 impl fmt::Display for SchemaViolationError {
