@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "mdvalidate"
-version = "0.2.1"
+version = "0.2.2"
 description = "Markdown schema validation engine"
 license = "MIT"
 documentation = "https://github.com/404wolf/mdvalidate"
