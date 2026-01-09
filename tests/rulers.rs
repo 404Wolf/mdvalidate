@@ -4,7 +4,7 @@ use serde_json::json;
 mod helpers;
 
 use mdvalidate::mdschema::validator::errors::{
-    ChildrenCount, SchemaViolationError, ValidationError,
+    SchemaViolationError, ValidationError,
 };
 
 test_case!(ruler_dashes, r#"---"#, r#"---"#, json!({}), vec![]);
@@ -18,7 +18,7 @@ test_case!(
         SchemaViolationError::ChildrenLengthMismatch {
             schema_index: 0,
             input_index: 0,
-            expected: ChildrenCount::SpecificCount(1),
+            expected: 1.into(),
             actual: 0,
         }
     )]

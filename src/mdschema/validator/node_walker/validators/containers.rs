@@ -134,7 +134,7 @@ impl ValidatorImpl for TextualContainerVsTextualContainerValidator {
                 SchemaViolationError::ChildrenLengthMismatch {
                     schema_index: schema_cursor.descendant_index(),
                     input_index: input_cursor.descendant_index(),
-                    expected: ChildrenCount::from_specific(expected_input_node_count),
+                    expected: expected_input_node_count.into(),
                     actual: actual_input_node_count,
                 },
             ));
@@ -220,7 +220,8 @@ pub(super) struct ParagraphVsRepeatedMatcherParagraphValidator;
 
 impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
     fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-        let result = ValidationResult::from_cursors(walker.schema_cursor(), &walker.input_cursor());
+        let mut result =
+            ValidationResult::from_cursors(walker.schema_cursor(), &walker.input_cursor());
 
         let mut schema_cursor = walker.schema_cursor().clone();
         let mut input_cursor = walker.input_cursor().clone();
@@ -238,26 +239,59 @@ impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
             );
         }
 
-        // Go from the container to the first child in the container, and then
-        // iterate over the siblings at the same rate.
-        match (
-            input_cursor.goto_first_child(),
-            schema_cursor.goto_first_child(),
-        ) {
-            (true, true) => {
-                // Great, keep going
-            }
-            (false, false) => {
-                // nothing to do
-                return result;
-            }
-            (true, false) => todo!(),
-            (false, true) => todo!(),
+        if !schema_cursor.goto_first_child() {
+            #[cfg(feature = "invariant_violations")]
+            invariant_violation!(
+                result,
+                &schema_cursor,
+                &input_cursor,
+                "for repeating matchers we should always have a first child in the schema"
+            );
         }
 
         match Matcher::try_from_schema_cursor(&schema_cursor, walker.schema_str()) {
             Ok(matcher) if matcher.is_repeated() => {
-                todo!()
+                let mut matches = vec![];
+
+                let min_count = matcher.extras().min_items().unwrap_or(0);
+                let max_count = matcher.extras().max_items();
+
+                if !input_cursor.goto_first_child() {
+                    result.add_error(ValidationError::SchemaViolation(
+                        SchemaViolationError::NotEnoughNodesForRepeatingParagraph {
+                            schema_index: schema_cursor.descendant_index(),
+                            input_index: input_cursor.descendant_index(),
+                            expected: (min_count, max_count.unwrap_or(min_count)).into(),
+                            actual: 0,
+                        },
+                    ));
+                    return result;
+                }
+
+                loop {
+                    let current_match = TextualVsTextualValidator::validate(
+                        &walker.with_cursors(&schema_cursor, &input_cursor),
+                        got_eof,
+                    );
+                    matches.push(current_match.value().clone());
+
+                    let prev_sibling = input_cursor.clone();
+                    if input_cursor.goto_next_sibling() && is_paragraph_node(&input_cursor.node()) {
+                        // continue
+                    } else {
+                        input_cursor.reset_to(&prev_sibling);
+                        break;
+                    }
+                }
+
+                if let Some(id) = matcher.id() {
+                    result.set_match(
+                        id,
+                        serde_json::Value::Array(matches.into_iter().collect()),
+                    );
+                }
+
+                result
             }
             _ => {
                 #[cfg(feature = "invariant_violations")]

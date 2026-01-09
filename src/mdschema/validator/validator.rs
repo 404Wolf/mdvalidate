@@ -255,7 +255,7 @@ impl ValidatorState for Validator {
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::errors::{ChildrenCount, SchemaError, SchemaViolationError};
+    use crate::mdschema::validator::errors::{SchemaError, SchemaViolationError};
 
     use super::*;
 
@@ -435,7 +435,7 @@ fooobar
                 expected,
                 actual,
             }) => {
-                assert_eq!(*expected, ChildrenCount::from_specific(3));
+                assert_eq!(*expected, 3);
                 assert_eq!(*actual, 2);
                 assert_eq!(*schema_index, 0);
             }
@@ -962,7 +962,7 @@ Footer: goodbye
                 expected,
                 ..
             }) => {
-                assert_eq!(*expected, ChildrenCount::from_specific(4));
+                assert_eq!(*expected, 4);
                 assert_eq!(*actual, 5);
             }
             _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),

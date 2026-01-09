@@ -240,7 +240,7 @@ mod tests {
     use super::super::test_utils::ValidatorTester;
     use super::NodeVsNodeValidator;
     use crate::mdschema::validator::{
-        errors::{ChildrenCount, SchemaViolationError, ValidationError},
+        errors::{SchemaViolationError, ValidationError},
         node_pos_pair::NodePosPair,
     };
 
@@ -434,11 +434,7 @@ mod tests {
                 ValidationError::SchemaViolation(
                     SchemaViolationError::ChildrenLengthMismatch { expected, .. },
                 ) => {
-                    assert_eq!(
-                        expected,
-                        &ChildrenCount::SpecificCount(0),
-                        "expected should be 0 for empty schema"
-                    );
+                    assert_eq!(expected.0, 0, "expected should be 0 for empty schema");
                 }
                 _ => panic!("Expected ChildrenLengthMismatch error, got: {:?}", error),
             },

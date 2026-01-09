@@ -9,7 +9,7 @@ import TODO from "../../../components/TODO.astro";
 
 Matchers allow you to validate dynamic content using regular expressions. A matcher is defined using inline code syntax with a specific format: `` `label:/pattern/` ``.
 
-## Basic Syntax
+# Syntax
 
 The basic matcher format is:
 
@@ -40,7 +40,7 @@ The pattern is automatically anchored to the start (as if prefixed with `^`), so
 
 <SchemaAndInput schema={"`age:/\d+/`"} input={"not a number"} valid={false} />
 
-## Matchers with Surrounding Text
+## With Surrounding Text
 
 Matchers can be combined with literal text as prefixes and suffixes:
 
@@ -116,7 +116,31 @@ Right now, you can only have one matcher per paragraph (collection of spanning e
   valid={false}
 />
 
-## Literal Code Blocks
+# Repeating Paragraphs
+
+<TODO />
+
+You can validate multiple paragraph nodes into an array by using a repeated matcher. The repeated matcher syntax will show up again for lists, it looks like `` {min,max} ``, where `min` and `max` are optional.
+
+<SchemaAndInput
+  schema={"`\`test:/test/\`{3,3}`"}
+  input={"test\ntest\ntest"}
+  valid={true}
+  output={'{"test":["test","test","test"]}'}
+/>
+
+<SchemaAndInput
+  schema={"`\`test:/test/\`{,3}`"}
+  input={"test\ntest\ntest\ntest"}
+  valid={false}
+  output={'{"test":["test","test","test"]}'}
+/>
+
+The matched content is passed to the executable:
+- As arguments (`$0`, `$1`, etc.)
+- Via stdin (if command reads from stdin)
+
+# Literal Code Blocks
 
 To match inline code blocks literally instead of treating them as matchers, add `!` after the code block:
 
@@ -150,7 +174,7 @@ Use `!!` to match a literal exclamation mark after code:
   valid={true}
 />
 
-## Execution Validation
+# Execution Validation
 
 <TODO />
 

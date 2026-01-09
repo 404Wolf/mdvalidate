@@ -1,6 +1,8 @@
 use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::errors::{ChildrenCount, SchemaViolationError, ValidationError};
+use crate::mdschema::validator::errors::{
+    ChildrenLengthRange, SchemaViolationError, ValidationError,
+};
 
 /// Compare the number of children between schema and input nodes.
 ///
@@ -31,7 +33,7 @@ pub fn compare_node_children_lengths(
         ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
             schema_index: schema_cursor.descendant_index(),
             input_index: input_cursor.descendant_index(),
-            expected: ChildrenCount::from_specific(schema_child_count),
+            expected: ChildrenLengthRange(schema_child_count, schema_child_count),
             actual: input_child_count,
         });
 

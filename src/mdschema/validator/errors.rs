@@ -337,6 +337,16 @@ pub enum SchemaViolationError {
         kind: NodeContentMismatchKind,
     },
 
+    /// Not enough nodes for a repeating paragraph.
+    NotEnoughNodesForRepeatingParagraph {
+        schema_index: usize,
+        input_index: usize,
+        /// Expected number of children from schema.
+        expected: ChildrenLengthRange,
+        /// Actual number of children in input.
+        actual: usize,
+    },
+
     /// Matcher appears in list context without repetition syntax.
     ///
     /// List nodes require matchers to use `{min,max}` syntax.
@@ -350,7 +360,7 @@ pub enum SchemaViolationError {
         schema_index: usize,
         input_index: usize,
         /// Expected number of children from schema.
-        expected: ChildrenCount,
+        expected: ChildrenLengthRange, // min, max
         /// Actual number of children in input.
         actual: usize,
     },
@@ -383,6 +393,37 @@ pub enum SchemaViolationError {
     },
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct ChildrenLengthRange(pub usize, pub usize);
+
+impl From<(usize, usize)> for ChildrenLengthRange {
+    fn from((min, max): (usize, usize)) -> Self {
+        ChildrenLengthRange(min, max)
+    }
+}
+
+impl From<usize> for ChildrenLengthRange {
+    fn from(min: usize) -> Self {
+        ChildrenLengthRange(min, min)
+    }
+}
+
+impl PartialEq<usize> for ChildrenLengthRange {
+    fn eq(&self, other: &usize) -> bool {
+        self.0 == *other && self.1 == *other
+    }
+}
+
+impl std::fmt::Display for ChildrenLengthRange {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let ChildrenLengthRange(min, max) = self;
+        match (min, max) {
+            (min, max) if min == max => write!(f, "exactly {}", min),
+            (min, max) => write!(f, "between {} and {}", min, max),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MalformedStructureKind {
     MissingListItemContent,
@@ -405,6 +446,11 @@ impl fmt::Display for SchemaViolationError {
                 ..
             } => {
                 write!(f, "Expected {} '{}', found '{}'", kind, expected, actual)
+            }
+            SchemaViolationError::NotEnoughNodesForRepeatingParagraph {
+                expected, actual, ..
+            } => {
+                write!(f, "Expected {} children, found {}", expected, actual)
             }
             SchemaViolationError::NonRepeatingMatcherInListContext { .. } => {
                 write!(f, "Non-repeating matcher used in list context")
@@ -432,34 +478,6 @@ impl fmt::Display for SchemaViolationError {
                 write!(f, "Malformed node structure: {:?}", kind)
             }
         }
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub enum ChildrenCount {
-    SpecificCount(usize),
-    Range { min: usize, max: Option<usize> },
-}
-
-impl fmt::Display for ChildrenCount {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ChildrenCount::SpecificCount(count) => write!(f, "{}", count),
-            ChildrenCount::Range { min, max } => match max {
-                Some(max_val) => write!(f, "between {} and {}", min, max_val),
-                None => write!(f, "at least {}", min),
-            },
-        }
-    }
-}
-
-impl ChildrenCount {
-    pub fn from_specific(count: usize) -> Self {
-        ChildrenCount::SpecificCount(count)
-    }
-
-    pub fn from_range(min: usize, max: Option<usize>) -> Self {
-        ChildrenCount::Range { min, max }
     }
 }
 
@@ -576,6 +594,27 @@ fn validation_error_to_ariadne(
                     )
                     .finish()
             }
+            SchemaViolationError::NotEnoughNodesForRepeatingParagraph {
+                schema_index: _,
+                input_index,
+                expected,
+                actual,
+            } => {
+                let node = find_node_by_index(tree.root_node(), *input_index);
+                let node_range = node.start_byte()..node.end_byte();
+
+                Report::build(ReportKind::Error, (filename, node_range.clone()))
+                    .with_message("Not enough nodes for repeating paragraph")
+                    .with_label(
+                        Label::new((filename, node_range))
+                            .with_message(format!(
+                                "Expected {} children but found {}.",
+                                expected, actual
+                            ))
+                            .with_color(Color::Red),
+                    )
+                    .finish()
+            }
             SchemaViolationError::NonRepeatingMatcherInListContext {
                 schema_index,
                 input_index,
@@ -588,27 +627,27 @@ fn validation_error_to_ariadne(
                 let input_range = input_node.start_byte()..input_node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, input_range.clone()))
-                .with_message("Non-repeating matcher in repeating context")
-                .with_label(
-                    Label::new((filename, input_range))
-                        .with_message(
-                            "This input corresponds to a list node in the schema"
-                        )
-                        .with_color(Color::Blue),
-                )
-                .with_label(
-                    Label::new((filename, schema_range))
-                        .with_message(format!(
-                            "This matcher is in a list context but is not marked as repeating: '{}'",
-                            schema_content
-                        ))
-                        .with_color(Color::Red),
-                )
-                .with_help(r#"
+            .with_message("Non-repeating matcher in repeating context")
+            .with_label(
+                Label::new((filename, input_range))
+                    .with_message(
+                        "This input corresponds to a list node in the schema"
+                    )
+                    .with_color(Color::Blue),
+            )
+            .with_label(
+                Label::new((filename, schema_range))
+                    .with_message(format!(
+                        "This matcher is in a list context but is not marked as repeating: '{}'",
+                        schema_content
+                    ))
+                    .with_color(Color::Red),
+            )
+            .with_help(r#"
 You can mark a list node as repeating by adding a '{<min_count>,<max_count>} directly after the matcher, like
 - `myLabel:/foo/`{1,12}
 "#)
-                .finish()
+            .finish()
             }
             SchemaViolationError::ChildrenLengthMismatch {
                 schema_index: _,
@@ -633,7 +672,7 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 if parent.kind() == "list_item" {
                     report = report.with_help(
                         "If you want to allow any number of list items, use the {min,max} syntax \
-                     (e.g., `item:/pattern/`{1,} or `item:/pattern/`{0,})",
+                 (e.g., `item:/pattern/`{1,} or `item:/pattern/`{0,})",
                     );
                 }
 
@@ -648,26 +687,26 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                 let node_range = node.start_byte()..node.end_byte();
 
                 Report::build(ReportKind::Error, (filename, node_range.clone()))
-                .with_message("Nested list exceeds maximum depth")
-                .with_label(
-                    Label::new((filename, node_range))
-                        .with_message(format!(
-                            "List nesting exceeds maximum depth of {} level(s).",
-                            max_depth,
-                        ))
-                        .with_color(Color::Red),
-                )
-                .with_help(
-                    "For schemas like:\n\
-                     - `num1:/\\d/`{1,}\n\
-                     \u{20} - `num2:/\\d/`{1,}{1,}\n\
-                     \n\
-                     You may need to adjust the repetition for the first matcher\n\
-                     to allow for the depth of the following ones. For example, you could\n\
-                     make that `num1:/\\d/`{1,}{1,}{1,} to allow for three levels of nesting (the one \
-                     below it, and the two allowed below that).",
-                )
-                .finish()
+                    .with_message("Nested list exceeds maximum depth")
+                    .with_label(
+                        Label::new((filename, node_range))
+                            .with_message(format!(
+                                "List nesting exceeds maximum depth of {} level(s).",
+                                max_depth,
+                            ))
+                            .with_color(Color::Red),
+                    )
+                    .with_help(
+                        "For schemas like:\n\
+                 - `num1:/\\d/`{1,}\n\
+                 \u{20} - `num2:/\\d/`{1,}{1,}\n\
+                 \n\
+                 You may need to adjust the repetition for the first matcher\n\
+                 to allow for the depth of the following ones. For example, you could\n\
+                 make that `num1:/\\d/`{1,}{1,}{1,} to allow for three levels of nesting (the one \
+                 below it, and the two allowed below that).",
+                    )
+                    .finish()
             }
             SchemaViolationError::WrongListCount {
                 schema_index,
@@ -704,8 +743,8 @@ You can mark a list node as repeating by adding a '{<min_count>,<max_count>} dir
                     )
                     .with_help(
                         "The number of items in `matcher`{1,2} syntax refers to the number of \
-                     entries at the level of that matcher (deeper items are not included in \
-                     that count).",
+                 entries at the level of that matcher (deeper items are not included in \
+                 that count).",
                     )
                     .finish()
             }

@@ -22,9 +22,7 @@ use crate::mdschema::validator::{
 };
 use crate::{
     invariant_violation,
-    mdschema::validator::errors::{
-        ChildrenCount, SchemaError, SchemaViolationError, ValidationError,
-    },
+    mdschema::validator::errors::{SchemaError, SchemaViolationError, ValidationError},
 };
 use log::trace;
 use serde_json::json;
@@ -224,7 +222,7 @@ impl ValidatorImpl for ListVsListValidator {
                                 SchemaViolationError::ChildrenLengthMismatch {
                                     schema_index: schema_cursor.descendant_index(),
                                     input_index: input_cursor.descendant_index(),
-                                    expected: ChildrenCount::from_range(min_items, Some(max_items)),
+                                    expected: (min_items, max_items).into(),
                                     actual: validate_so_far + 1, // At least one more
                                 },
                             ));
@@ -250,7 +248,7 @@ impl ValidatorImpl for ListVsListValidator {
                         SchemaViolationError::ChildrenLengthMismatch {
                             schema_index: schema_cursor.descendant_index(),
                             input_index: input_cursor.descendant_index(),
-                            expected: ChildrenCount::from_range(min_items, max_items),
+                            expected: (min_items, max_items.unwrap_or(min_items)).into(),
                             actual: validate_so_far,
                         },
                     ));
@@ -427,7 +425,7 @@ impl ValidatorImpl for ListVsListValidator {
                                     schema_index: at_list_schema_cursor.descendant_index(),
                                     input_index: at_list_input_cursor.descendant_index(),
                                     // +1 because we need to include this first node that we are currently on
-                                    expected: ChildrenCount::from_specific(literal_chunk_count),
+                                    expected: literal_chunk_count.into(),
                                     actual: available_literal_items,
                                 },
                             ));
@@ -444,7 +442,7 @@ impl ValidatorImpl for ListVsListValidator {
                             schema_index: at_list_schema_cursor.descendant_index(),
                             input_index: at_list_input_cursor.descendant_index(),
                             // +1 because we need to include this first node that we are currently on
-                            expected: ChildrenCount::from_specific(remaining_schema_nodes + 1),
+                            expected: (remaining_schema_nodes + 1).into(),
                             actual: remaining_input_nodes + 1,
                         },
                     ));
@@ -774,10 +772,10 @@ mod tests {
     use super::{
         ListVsListValidator, ensure_at_first_list_item, extract_repeated_matcher_from_list_item,
     };
+    use crate::mdschema::validator::errors::ChildrenLengthRange;
     use crate::mdschema::validator::{
         errors::{
-            ChildrenCount, MalformedStructureKind, NodeContentMismatchKind, SchemaViolationError,
-            ValidationError,
+            MalformedStructureKind, NodeContentMismatchKind, SchemaViolationError, ValidationError,
         },
         node_walker::ValidationResult,
         ts_types::*,
@@ -1151,7 +1149,7 @@ Footer: test (footer isn't validated with_list_vs_list)
                 SchemaViolationError::ChildrenLengthMismatch {
                     schema_index: 1,
                     input_index: 1,
-                    expected: ChildrenCount::from_specific(6),
+                    expected: 6.into(),
                     actual: 3,
                 }
             )]
@@ -1184,7 +1182,7 @@ Footer: test (footer isn't validated with_list_vs_list)
                 SchemaViolationError::ChildrenLengthMismatch {
                     schema_index: 1,
                     input_index: 1,
-                    expected: ChildrenCount::from_specific(3),
+                    expected: 3.into(),
                     actual: 6,
                 }
             )]
@@ -1600,7 +1598,7 @@ Footer: test (footer isn't validated with_list_vs_list)
                 SchemaViolationError::ChildrenLengthMismatch {
                     schema_index: 2,
                     input_index: 6,
-                    expected: ChildrenCount::from_range(0, Some(2)),
+                    expected: (0, 2).into(),
                     actual: 3,
                 }
             )],
@@ -1798,10 +1796,7 @@ Footer: test (footer isn't validated with_list_vs_list)
             matches!(
                 &result.errors()[0],
                 ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
-                    expected: ChildrenCount::Range {
-                        min: 1,
-                        max: Some(1)
-                    },
+                    expected: ChildrenLengthRange(1, 1),
                     actual: 2, // We detect "at least one more" = 2
                     ..
                 })
