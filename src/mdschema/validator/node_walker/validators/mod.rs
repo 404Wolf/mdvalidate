@@ -36,8 +36,7 @@ pub(super) mod textual;
 pub trait ValidatorImpl: Default {
     fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
 }
-
-pub trait Validator {
+pub trait Validator: Default {
     fn validate(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
 }
 

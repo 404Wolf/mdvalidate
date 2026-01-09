@@ -4,13 +4,10 @@
 //! - `TextualContainerVsTextualContainerValidator`: walks inline children in
 //!   paragraphs/emphasis and validates them with matcher support and link-aware
 //!   handling.
-use log::trace;
-use serde_json::Value;
-use tree_sitter::TreeCursor;
-
 use crate::mdschema::validator::matcher::matcher::MatcherKind;
+use crate::mdschema::validator::node_walker::helpers::check_repeating_matchers::check_repeating_matchers;
 use crate::mdschema::validator::node_walker::helpers::count_non_literal_matchers_in_children::count_non_literal_matchers_in_children;
-use crate::mdschema::validator::ts_utils::get_node_text;
+use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use crate::mdschema::validator::{
     errors::*,
@@ -27,6 +24,10 @@ use crate::mdschema::validator::{
     ts_utils::count_siblings,
 };
 use crate::{compare_node_kinds_check, invariant_violation};
+use derive_builder::Builder;
+use log::trace;
+use serde_json::Value;
+use tree_sitter::TreeCursor;
 
 /// Validate a textual region of input against a textual region of schema.
 ///
@@ -60,17 +61,9 @@ use crate::{compare_node_kinds_check, invariant_violation};
 ///      check that there is a text node in the input, maybe error, and if there is,
 ///      validate that the contents of the rest of it is the same.
 ///    - Then move to the next node pair, hopping two nodes at once for the schema node.
-#[derive(Default)]
+#[derive(Default, Builder)]
 pub(super) struct ContainerVsContainerValidator {
     allow_repeating: bool,
-}
-
-impl ContainerVsContainerValidator {
-    pub fn with_allow_repeating() -> Self {
-        Self {
-            allow_repeating: true,
-        }
-    }
 }
 
 impl ValidatorImpl for ContainerVsContainerValidator {
@@ -102,6 +95,19 @@ impl ValidatorImpl for ContainerVsContainerValidator {
         if is_repeated_matcher_paragraph(&schema_cursor, walker.schema_str()) {
             return ParagraphVsRepeatedMatcherParagraphValidator::default()
                 .validate(walker, got_eof);
+        }
+
+        if !self.allow_repeating {
+            if let Some(repeating_matcher_index) =
+                check_repeating_matchers(&schema_cursor, walker.schema_str())
+            {
+                result.add_error(ValidationError::SchemaError(
+                    SchemaError::RepeatingMatcherInTextContainer {
+                        schema_index: repeating_matcher_index,
+                    },
+                ));
+                return result;
+            }
         }
 
         match count_non_literal_matchers_in_children(&schema_cursor, walker.schema_str()) {
@@ -296,7 +302,21 @@ impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
                 }
 
                 if matches.len() < extras.min_items().unwrap_or(0) {
-                    todo!("Too few items for repeating matcher");
+                    if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                        // That's ok. We may get them later.
+                        return result;
+                    } else {
+                        result.add_error(ValidationError::SchemaViolation(
+                            SchemaViolationError::WrongListCount {
+                                schema_index: schema_cursor.descendant_index(),
+                                input_index: input_cursor.descendant_index(),
+                                min: extras.min_items(),
+                                max: extras.max_items(),
+                                actual: matches.len(),
+                            },
+                        ));
+                        return result;
+                    }
                 }
 
                 input_cursor.goto_next_sibling();
@@ -665,5 +685,82 @@ foo
 
         // Should have an error since "foo" doesn't match the pattern "^test"
         assert!(!result.errors().is_empty());
+    }
+
+    #[test]
+    fn test_paragraph_vs_paragraph_with_min() {
+        let schema_str = r#"
+`data`{2,}
+"#;
+        let input_str = r#"
+test
+"#;
+
+        let result =
+            ValidatorTester::<ContainerVsContainerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+                .validate_complete();
+
+        assert_eq!(
+            result.errors(),
+            vec![ValidationError::SchemaViolation(
+                SchemaViolationError::WrongListCount {
+                    schema_index: 2,
+                    input_index: 1,
+                    min: Some(2),
+                    max: None,
+                    actual: 1
+                }
+            )]
+        );
+        assert_eq!(*result.value(), json!({}));
+    }
+
+    #[test]
+    fn test_paragraph_vs_paragraph_with_min_incomplete() {
+        let schema_str = r#"
+`data`{2,}
+"#;
+        let input_str = r#"
+test
+"#;
+
+        let result =
+            ValidatorTester::<ContainerVsContainerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+                .validate_incomplete();
+
+        // no errors yet since incomplete. we don't have too many, we have too
+        // few, so we may get them later
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(*result.value(), json!({})); // no matches yet
+    }
+
+    #[test]
+    fn test_paragraph_vs_paragraph_with_max() {
+        let schema_str = r#"
+`data`{,2}
+"#;
+        let input_str = r#"
+test
+
+foo
+
+bar
+"#;
+
+        let result =
+            ValidatorTester::<ContainerVsContainerValidator>::from_strs(schema_str, input_str)
+                .walk()
+                .goto_first_child_then_unwrap()
+                .peek_nodes(|(s, i)| assert!(both_are_paragraphs(s, i)))
+                .validate_complete();
+
+        assert_eq!(result.errors(), vec![]); // stops yoinking after the max
+        assert_eq!(*result.value(), json!({"data": ["test", "foo"]}));
     }
 }

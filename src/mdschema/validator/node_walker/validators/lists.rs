@@ -11,7 +11,8 @@ use crate::mdschema::validator::{
     node_walker::{
         ValidationResult,
         validators::{
-            Validator, ValidatorImpl, containers::ContainerVsContainerValidator,
+            Validator, ValidatorImpl,
+            containers::{ContainerVsContainerValidatorBuilder},
         },
     },
     ts_types::*,
@@ -309,10 +310,8 @@ impl ValidatorImpl for ListVsListValidator {
                 // If there are more items to validate AT THE SAME LEVEL, recurse to
                 // validate them. We now use the *next* schema node too.
                 if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
-                    let next_result = ListVsListValidator::default().validate(
-                        &walker.with_cursors(&schema_cursor, &input_cursor),
-                        got_eof,
-                    );
+                    let next_result = ListVsListValidator::default()
+                        .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                     result.join_other_result(&next_result);
                 }
 
@@ -330,10 +329,8 @@ impl ValidatorImpl for ListVsListValidator {
                             schema_cursor.node().kind()
                         );
 
-                        let next_result = ListVsListValidator::default().validate(
-                            &walker.with_cursors(&schema_cursor, &input_cursor),
-                            got_eof,
-                        );
+                        let next_result = ListVsListValidator::default()
+                            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                         // We need to be able to capture errors that happen in the recursive call
                         result.join_errors(next_result.errors());
                         values_at_level.push(next_result.value().clone());
@@ -495,10 +492,8 @@ impl ValidatorImpl for ListVsListValidator {
                         input_cursor.goto_first_child();
                         schema_cursor.goto_first_child();
 
-                        let deeper_result = ListVsListValidator::default().validate(
-                            &walker.with_cursors(&schema_cursor, &input_cursor),
-                            got_eof,
-                        );
+                        let deeper_result = ListVsListValidator::default()
+                            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                         result.join_other_result(&deeper_result);
                     }
                 }
@@ -506,10 +501,8 @@ impl ValidatorImpl for ListVsListValidator {
                 // Recurse on next sibling if available!
                 if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
                     trace!("Moving to next sibling list items for continued validation");
-                    let new_matches = ListVsListValidator::default().validate(
-                        &walker.with_cursors(&schema_cursor, &input_cursor),
-                        got_eof,
-                    );
+                    let new_matches = ListVsListValidator::default()
+                        .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                     result.join_other_result(&new_matches);
                 } else {
                     trace!("No more sibling pairs found, validation complete");
@@ -606,7 +599,11 @@ fn validate_list_item_contents_vs_list_item_contents(
                 ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
 
             (
-                ContainerVsContainerValidator::default().validate(&walker, got_eof),
+                ContainerVsContainerValidatorBuilder::default()
+                    .allow_repeating(true)
+                    .build()
+                    .unwrap()
+                    .validate(&walker, got_eof),
                 false,
             )
         }
