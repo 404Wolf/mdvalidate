@@ -797,6 +797,37 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_repeated_row_vs_row_simple() {
+        let schema_str = r#"
+|c2|c2|
+|-|-|
+|`a:/.*/`|`b:/.*/`|{,}
+"#;
+        let input_str = r#"
+|c2|c2|
+|-|-|
+|a1|b1|
+|a2|b2|
+"#;
+
+        let result = ValidatorTester::<RepeatedRowVsRowValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap() // document -> table
+            .goto_first_child_then_unwrap() // table -> header row
+            .goto_next_sibling_then_unwrap() // header row -> delimiter row
+            .goto_next_sibling_then_unwrap() // delimiter row -> data row
+            .peek_nodes(|(s, i)| assert!(both_are_table_data_rows(s, i)))
+            .validate_complete();
+
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(
+            *result.value(),
+            json!({"a": ["a1", "a2"], "b": ["b1", "b2"]})
+        );
+    }
+
+    #[test]
+    #[ignore]
     fn test_validate_table_vs_table_with_repeated_cell() {
         let schema_str = r#"
 |c2|c2|
