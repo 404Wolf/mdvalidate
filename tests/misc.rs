@@ -3,7 +3,9 @@ use serde_json::json;
 #[macro_use]
 mod helpers;
 
-use mdvalidate::mdschema::validator::errors::{MalformedStructureKind, SchemaViolationError, ValidationError};
+use mdvalidate::mdschema::validator::errors::{
+    MalformedStructureKind, SchemaViolationError, ValidationError,
+};
 
 test_case!(
     node_heading_and_paragraph,

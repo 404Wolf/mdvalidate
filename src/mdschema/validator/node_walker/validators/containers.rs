@@ -70,6 +70,7 @@ impl ValidatorImpl for ContainerVsContainerValidator {
     fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
+        let need_to_restart_result = result.clone();
 
         let mut schema_cursor = walker.schema_cursor().clone();
         let mut input_cursor = walker.input_cursor().clone();
@@ -80,7 +81,9 @@ impl ValidatorImpl for ContainerVsContainerValidator {
                 result,
                 &schema_cursor,
                 &input_cursor,
-                "expected textual container nodes"
+                "expected textual container nodes, got {:?} and {:?}",
+                schema_cursor.node().kind(),
+                input_cursor.node().kind()
             );
         }
 
@@ -173,8 +176,35 @@ impl ValidatorImpl for ContainerVsContainerValidator {
             (false, false) => {
                 return result;
             }
-            (true, false) => todo!(),
-            (false, true) => todo!(),
+            (false, true) => {
+                if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                    // okay, we'll just wait!
+                    return need_to_restart_result;
+                } else {
+                    result.add_error(ValidationError::SchemaViolation(
+                        SchemaViolationError::MalformedNodeStructure {
+                            schema_index: schema_cursor.descendant_index(),
+                            input_index: input_cursor.descendant_index(),
+                            kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
+                        },
+                    ));
+                }
+            }
+            (true, false) => {
+                if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                    // okay, we'll just wait!
+                    return need_to_restart_result;
+                } else {
+                    result.add_error(ValidationError::SchemaViolation(
+                        SchemaViolationError::MalformedNodeStructure {
+                            schema_index: schema_cursor.descendant_index(),
+                            input_index: input_cursor.descendant_index(),
+                            kind: MalformedStructureKind::SchemaHasChildInputDoesnt,
+                        },
+                    ));
+                }
+                return result;
+            }
         }
 
         loop {

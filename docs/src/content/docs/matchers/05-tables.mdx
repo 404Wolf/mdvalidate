@@ -49,8 +49,6 @@ Individual cells can contain matchers:
 
 ## Repeated Rows
 
-<TODO feature="Repeated row validation is not implemented yet" />
-
 Use `{min,max}` syntax on row patterns to match multiple rows:
 
 <SchemaAndInput
@@ -73,8 +71,25 @@ Use `{min,max}` syntax on row patterns to match multiple rows:
   valid={false}
 />
 
+### Mixing Literal and Repeated Rows
+
+You can combine literal rows with repeated rows in the same table:
+
+<SchemaAndInput
+  schema={"| Item | Price |\n| :--- | :---- |\n| Header | 10 |\n| `item:/\\w+/` | `price:/\\d+/` |{1,3}\n| Footer | 99 |"}
+  input={"| Item | Price |\n| :--- | :---- |\n| Header | 10 |\n| Apple | 5 |\n| Banana | 3 |\n| Footer | 99 |"}
+  valid={true}
+  output={'{"item":["Apple","Banana"],"price":["5","3"]}'}
+/>
+
+The validator will:
+1. Match the literal "Header" row
+2. Match 1-3 repeating rows with the pattern
+3. Match the literal "Footer" row
+
 ## Notes
 
-- Rows return arrays when using repetition matchers
+- Repeated rows return arrays for matched values
 - Headers and separator rows are required in both schema and input
 - Column count must match between schema and input
+- Repeated row patterns must appear at the end of a row (after all cells)
