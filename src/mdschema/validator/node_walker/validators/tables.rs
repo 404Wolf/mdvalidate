@@ -7,7 +7,6 @@
 // use std::rc::Rc;
 // use thiserror::Error;
 
-use crate::invariant_violation;
 use crate::mdschema::validator::errors::{
     MalformedStructureKind, SchemaViolationError, ValidationError,
 };
@@ -17,9 +16,11 @@ use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::containers::ContainerVsContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
 use crate::mdschema::validator::ts_types::*;
-use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end};
+use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end, walk_to_root};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use crate::{invariant_violation, trace_cursors};
 use log::trace;
+use mdvalidate_utils::PrettyPrint;
 use tree_sitter::TreeCursor;
 
 /// Validate two tables.
@@ -145,6 +146,14 @@ fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
                     ),
                 }
 
+                // First check if we are dealing with a special case -- repeated rows!
+                if both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node())
+                    && let Some(_bounds) =
+                        try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
+                {
+                    todo!()
+                }
+
                 // we are at the first cell initially. we validate the first
                 // cell in the input vs the first cell in the schema, and then
                 // jump to the next sibling pair. If there is no next sibling
@@ -243,6 +252,20 @@ fn try_get_repeated_row_bounds(
         )
     }
 
+    // If we have a table like:
+    //
+    // |c1|c2|
+    // |-|-|
+    // |r1{1,2}|{2,}|
+    //
+    // We don't want to lock onto the {2,}
+    let full_row_str = get_node_text(&schema_cursor.node(), schema_str);
+    // We are guaranteed there will be a cell at the very end that could be a
+    // correct repeater if the cell does not end with "|" or ":"
+    if full_row_str.ends_with(|c| c == '|' || c == ':') {
+        return None;
+    }
+
     let mut schema_cursor = schema_cursor.clone();
 
     if !schema_cursor.goto_first_child() {
@@ -320,6 +343,27 @@ mod tests {
 |c1|c2|
 |-|-|
 |r1|r2|{1,2
+"#;
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> table
+        schema_cursor.goto_first_child(); // table -> header row
+        schema_cursor.goto_next_sibling(); // header row -> delimiter row
+        schema_cursor.goto_next_sibling(); // delimiter row -> data row
+        assert!(is_table_data_row_node(&schema_cursor.node()));
+
+        assert_eq!(
+            try_get_repeated_row_bounds(&schema_cursor, schema_str),
+            None
+        )
+    }
+
+    #[test]
+    fn test_is_repeated_row_is_not_repeated_bounds_in_wrong_place() {
+        let schema_str = r#"
+|c1|c2|
+|-|-|
+|r1{21,5}|{2,}|
 "#;
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
