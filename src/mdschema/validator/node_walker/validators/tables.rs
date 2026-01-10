@@ -252,7 +252,7 @@ impl RepeatedRowVsRowValidator {
 
 impl ValidatorImpl for RepeatedRowVsRowValidator {
     fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-        let schema_cursor = walker.schema_cursor().clone();
+        let mut schema_cursor = walker.schema_cursor().clone();
         let mut input_cursor = walker.input_cursor().clone();
 
         let mut result = ValidationResult::from_cursors(&schema_cursor, &input_cursor);
@@ -295,8 +295,6 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
         let mut all_matches: Vec<Vec<String>> = vec![Vec::new(); num_corresponding_matchers];
 
         'row_iter: for _ in 0..max_bound {
-            let schema_cursor_at_first_cell = schema_cursor_at_first_cell.clone();
-
             // Validate the entire row
             {
                 let mut input_cursor_at_first_cell = get_cursor_at_first_cell(&input_cursor);
@@ -357,9 +355,6 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
             }
         }
 
-        // TODO: bound checking
-        // let min_bound = self.bounds.0.unwrap_or(0);
-
         for (matches, matcher) in all_matches.iter().zip(corresponding_matchers_only_matchers) {
             if let Some(key) = matcher.id() {
                 result.set_match(key, matches.clone().into());
@@ -369,6 +364,7 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
         // Update the result to reflect where we ended up:
         // - schema_cursor stays at the repeating row definition
         // - input_cursor has advanced past all matched rows
+        schema_cursor.goto_next_sibling();
         result.sync_cursor_pos(&schema_cursor, &input_cursor);
 
         result
@@ -889,6 +885,92 @@ mod tests {
                     kind: NodeContentMismatchKind::Matcher,
                 }
             )]
+        );
+    }
+
+    #[test]
+    fn test_validate_table_vs_table_with_repeated_cell_max_bound() {
+        let schema_str = r#"
+|c2|c2|
+|-|-|
+|`a:/.*/`|`b:/.*/`|{,2}
+            "#;
+        let input_str = r#"
+|c2|c2|
+|-|-|
+|a1|b1|
+|a2|b2|
+"#;
+
+        let result = ValidatorTester::<TableVsTableValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_tables(s, i)))
+            .validate_complete();
+
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(
+            *result.value(),
+            json!({"a": ["a1", "a2"], "b": ["b1", "b2"]})
+        );
+    }
+
+    #[test]
+    fn test_validate_table_vs_table_with_repeated_cell_min_bound() {
+        let schema_str = r#"
+|c2|c2|
+|-|-|
+|`a:/.*/`|`b:/.*/`|{2,}
+            "#;
+        let input_str = r#"
+|c2|c2|
+|-|-|
+|a1|b1|
+|a2|b2|
+|a3|b3|
+"#;
+
+        let result = ValidatorTester::<TableVsTableValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_tables(s, i)))
+            .validate_complete();
+
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(
+            *result.value(),
+            json!({"a": ["a1", "a2", "a3"], "b": ["b1", "b2", "b3"]})
+        );
+    }
+
+    #[test]
+    fn test_validate_table_vs_table_repeated_then_literal() {
+        let schema_str = r#"
+|c1|c2|
+|-|-|
+|`a:/.*/`|`b:/.*/`|{,2}
+|lit1|lit2|
+|lit3|lit4|
+            "#;
+        let input_str = r#"
+|c1|c2|
+|-|-|
+|a1|b1|
+|a2|b2|
+|lit1|lit2|
+|lit3|lit4|
+"#;
+
+        let result = ValidatorTester::<TableVsTableValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_tables(s, i)))
+            .validate_complete();
+
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(
+            *result.value(),
+            json!({"a": ["a1", "a2"], "b": ["b1", "b2"]})
         );
     }
 }
