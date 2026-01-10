@@ -18,7 +18,7 @@ use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorIm
 use crate::mdschema::validator::ts_types::*;
 use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::{invariant_violation, trace_cursors};
+use crate::invariant_violation;
 use log::trace;
 use tree_sitter::TreeCursor;
 

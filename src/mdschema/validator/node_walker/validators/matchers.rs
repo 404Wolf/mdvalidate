@@ -346,11 +346,19 @@ impl ValidatorImpl for MatcherVsTextValidator {
             };
 
             // Seek forward from the current input byte offset by the length of the suffix
-            let input_suffix_len = input_cursor.node().byte_range().end - input_byte_offset;
-
-            // Check if input_suffix is shorter than schema_suffix
-            let input_suffix =
+            let input_suffix_raw =
                 &walker.input_str()[input_byte_offset..input_cursor.node().byte_range().end];
+            
+            // Trim the input suffix if we're in a table cell context, to match how schema_suffix is obtained
+            let input_suffix = if is_table_cell_node(&input_cursor.node()) 
+                || input_cursor.node().parent().is_some_and(|n| is_table_cell_node(&n)) {
+                input_suffix_raw.trim()
+            } else {
+                input_suffix_raw
+            };
+
+            // Calculate the actual length after potential trimming
+            let input_suffix_len = input_suffix.len();
 
             if input_suffix_len < schema_suffix.len() {
                 if got_eof {
