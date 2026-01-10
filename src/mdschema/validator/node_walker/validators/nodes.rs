@@ -5,6 +5,9 @@
 //!   based on node kinds and performs shared structural checks.
 use log::trace;
 
+use crate::mdschema::validator::errors::{
+    MalformedStructureKind, SchemaViolationError, ValidationError,
+};
 use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::code::CodeVsCodeValidator;
@@ -19,7 +22,7 @@ use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorIm
 use crate::mdschema::validator::ts_types::*;
 use crate::mdschema::validator::ts_utils::waiting_at_end;
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::{compare_node_children_lengths_check, compare_node_kinds_check, invariant_violation};
+use crate::{compare_node_kinds_check, invariant_violation};
 
 /// Validate two arbitrary nodes against each other.
 ///
@@ -136,8 +139,33 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 result.set_farthest_reached_pos(parent_pos);
                 return result;
             }
-            (true, false) => todo!(),
-            (false, true) => todo!(),
+            (false, true) => {
+                if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                    // okay, we'll just wait!
+                } else {
+                    result.add_error(ValidationError::SchemaViolation(
+                        SchemaViolationError::MalformedNodeStructure {
+                            schema_index: schema_cursor.descendant_index(),
+                            input_index: input_cursor.descendant_index(),
+                            kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
+                        },
+                    ));
+                }
+            }
+            (true, false) => {
+                if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                    // okay, we'll just wait!
+                } else {
+                    result.add_error(ValidationError::SchemaViolation(
+                        SchemaViolationError::MalformedNodeStructure {
+                            schema_index: schema_cursor.descendant_index(),
+                            input_index: input_cursor.descendant_index(),
+                            kind: MalformedStructureKind::SchemaHasChildInputDoesnt,
+                        },
+                    ));
+                }
+                return result;
+            }
             (false, false) => {
                 return result; // nothing left
             }
@@ -159,8 +187,33 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                     result.set_farthest_reached_pos(parent_pos);
                     return result;
                 }
-                (true, false) => todo!(),
-                (false, true) => todo!(),
+                (false, true) => {
+                    if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                        // okay, we'll just wait!
+                    } else {
+                        result.add_error(ValidationError::SchemaViolation(
+                            SchemaViolationError::MalformedNodeStructure {
+                                schema_index: schema_cursor.descendant_index(),
+                                input_index: input_cursor.descendant_index(),
+                                kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
+                            },
+                        ));
+                    }
+                }
+                (true, false) => {
+                    if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                        // okay, we'll just wait!
+                    } else {
+                        result.add_error(ValidationError::SchemaViolation(
+                            SchemaViolationError::MalformedNodeStructure {
+                                schema_index: schema_cursor.descendant_index(),
+                                input_index: input_cursor.descendant_index(),
+                                kind: MalformedStructureKind::SchemaHasChildInputDoesnt,
+                            },
+                        ));
+                    }
+                    return result;
+                }
                 (false, false) => break,
             }
         }
@@ -201,7 +254,7 @@ mod tests {
     use super::super::test_utils::ValidatorTester;
     use super::NodeVsNodeValidator;
     use crate::mdschema::validator::{
-        errors::{SchemaViolationError, ValidationError},
+        errors::{MalformedStructureKind, SchemaViolationError, ValidationError},
         node_pos_pair::NodePosPair,
         ts_types::both_are_paragraphs,
     };
@@ -389,19 +442,16 @@ mod tests {
             .walk()
             .validate_complete();
 
-        assert_ne!(result.errors(), []);
-
-        match result.errors().first() {
-            Some(error) => match error {
-                ValidationError::SchemaViolation(
-                    SchemaViolationError::ChildrenLengthMismatch { expected, .. },
-                ) => {
-                    assert_eq!(expected.0, 0, "expected should be 0 for empty schema");
+        assert_eq!(
+            result.errors(),
+            &vec![ValidationError::SchemaViolation(
+                SchemaViolationError::MalformedNodeStructure {
+                    schema_index: 0,
+                    input_index: 1,
+                    kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
                 }
-                _ => panic!("Expected ChildrenLengthMismatch error, got: {:?}", error),
-            },
-            None => panic!("Expected error"),
-        }
+            )]
+        );
     }
 
     #[test]

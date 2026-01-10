@@ -446,6 +446,8 @@ pub enum MalformedStructureKind {
     MissingListItemContent,
     HadExtraListItem,
     MismatchingTableCells,
+    SchemaHasChildInputDoesnt,
+    InputHasChildSchemaDoesnt,
 }
 
 impl fmt::Display for SchemaViolationError {

@@ -296,7 +296,8 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
 
                 let mut matcher_num = 0;
                 'col_iter: for i in 0.. {
-                    let cell_str = get_node_text(&input_cursor.node(), walker.input_str());
+                    let cell_str =
+                        get_node_text(&input_cursor_at_first_cell.node(), walker.input_str());
 
                     match corresponding_matchers.get(i).unwrap() {
                         Some(matcher) => match matcher.match_str(cell_str) {
@@ -337,35 +338,14 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
                         }
                     }
 
-                    match (
-                        schema_cursor_at_first_cell.goto_next_sibling(),
-                        input_cursor_at_first_cell.goto_next_sibling(),
-                    ) {
-                        (true, true) => {}
-                        (false, false) => break 'col_iter,
-                        (true, false) => {
-                            if goto_next_sibling_pair_or_exit(
-                                &schema_cursor,
-                                &input_cursor,
-                                walker,
-                                got_eof,
-                                &mut result,
-                            ) {
-                                return result;
-                            } else {
-                                return need_to_restart_result;
-                            }
-                        }
-                        (false, true) => {}
+                    if !input_cursor_at_first_cell.goto_next_sibling() {
+                        break 'col_iter;
                     }
                 }
             }
 
             // Move the input to the next row (the schema stays put!)
-            if input_cursor.goto_next_sibling() {
-                // continue!
-                // TODO: should we check bounds?
-            } else {
+            if !input_cursor.goto_next_sibling() {
                 break 'row_iter;
             }
         }

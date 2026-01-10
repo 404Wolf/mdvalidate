@@ -429,17 +429,15 @@ fooobar
         assert_eq!(errors.len(), 1);
 
         match &errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
+            ValidationError::SchemaViolation(SchemaViolationError::MalformedNodeStructure {
                 schema_index,
-                input_index: _,
-                expected,
-                actual,
+                input_index,
+                kind,
             }) => {
-                assert_eq!(*expected, 3);
-                assert_eq!(*actual, 2);
-                assert_eq!(*schema_index, 0);
+                assert_eq!(*schema_index, 7);
+                assert_eq!(*input_index, 5);
             }
-            _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),
+            _ => panic!("Expected MalformedNodeStructure error, got {:?}", errors[0]),
         }
     }
 

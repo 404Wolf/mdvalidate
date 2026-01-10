@@ -3,7 +3,7 @@ use serde_json::json;
 #[macro_use]
 mod helpers;
 
-use mdvalidate::mdschema::validator::errors::{SchemaViolationError, ValidationError};
+use mdvalidate::mdschema::validator::errors::{MalformedStructureKind, SchemaViolationError, ValidationError};
 
 test_case!(
     node_heading_and_paragraph,
@@ -27,11 +27,10 @@ test_case!(
     r#"# Hi"#,
     json!({}),
     vec![ValidationError::SchemaViolation(
-        SchemaViolationError::ChildrenLengthMismatch {
+        SchemaViolationError::MalformedNodeStructure {
             schema_index: 0,
-            input_index: 0,
-            expected: 0.into(),
-            actual: 1,
+            input_index: 1,
+            kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
         }
     )]
 );
