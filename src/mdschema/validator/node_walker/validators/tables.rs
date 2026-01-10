@@ -3,10 +3,7 @@
 //! Types:
 //! - `TableVsTableValidator`: validates table structure (rows, headers, cells)
 //!   and delegates cell content checks to textual container validation.
-// use std::os::raw::c_short;
-// use std::rc::Rc;
-// use thiserror::Error;
-
+use crate::invariant_violation;
 use crate::mdschema::validator::errors::{
     MalformedStructureKind, SchemaViolationError, ValidationError,
 };
@@ -16,11 +13,9 @@ use crate::mdschema::validator::node_walker::ValidationResult;
 use crate::mdschema::validator::node_walker::validators::containers::ContainerVsContainerValidator;
 use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorImpl};
 use crate::mdschema::validator::ts_types::*;
-use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end, walk_to_root};
+use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
-use crate::{invariant_violation, trace_cursors};
 use log::trace;
-use mdvalidate_utils::PrettyPrint;
 use tree_sitter::TreeCursor;
 
 /// Validate two tables.
@@ -29,7 +24,183 @@ pub(super) struct TableVsTableValidator;
 
 impl ValidatorImpl for TableVsTableValidator {
     fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-        validate_impl(walker, got_eof)
+        let mut schema_cursor = walker.schema_cursor().clone();
+        let mut input_cursor = walker.input_cursor().clone();
+
+        let mut result = ValidationResult::from_cursors(&schema_cursor, &input_cursor);
+        let need_to_restart_result = result.clone();
+
+        // Both should be at tables already
+        #[cfg(feature = "invariant_violations")]
+        if !both_are_tables(&schema_cursor.node(), &input_cursor.node()) {
+            invariant_violation!(
+                result,
+                &schema_cursor,
+                &input_cursor,
+                "we should already be at table nodes"
+            )
+        }
+
+        if !schema_cursor.goto_first_child() || !input_cursor.goto_first_child() {
+            #[cfg(feature = "invariant_violations")]
+            invariant_violation!(
+                result,
+                &schema_cursor,
+                &input_cursor,
+                "we should be able to dive down one layer into a table"
+            )
+        }
+
+        #[cfg(feature = "invariant_violations")]
+        if !both_are_table_headers(&schema_cursor.node(), &input_cursor.node()) {
+            invariant_violation!(
+                result,
+                &schema_cursor,
+                &input_cursor,
+                "the immediate child of all tables should be table header"
+            )
+        }
+
+        result.sync_cursor_pos(&schema_cursor, &input_cursor);
+
+        //  (document[0]0..41)
+        //  └─ (table[1]1..40)
+        //     ├─ (table_header_row[2]1..22) <-- we are iterating over these in the outer loop
+        //     │  ├─ (table_cell[3]2..16) <-- we are iterating over these in the inner loop
+        //     │  │  └─ (text[4]2..16)
+        //     │  └─ (table_cell[5]17..21)
+        //     │     └─ (text[6]17..21)
+        //     ├─ (table_delimiter_row[7]23..28)
+        //     │  ├─ (table_column_alignment[8]24..25)
+        //     │  └─ (table_column_alignment[9]26..27)
+        //     └─ (table_data_row[10]29..40)
+        //        ├─ (table_cell[11]30..34)
+        //        │  └─ (text[12]30..34)
+        //        └─ (table_cell[13]35..39)
+        //           └─ (text[14]35..39)
+
+        // General idea: For each row, walk down to the first child, iterate over all its siblings,
+        // hop back to the row container, go to the next row, until there are no rows left.
+
+        'row_iter: loop {
+            {
+                // Dive in to the first row, iterate over children, hop back (hop
+                // back is automatic since we use different cursors in the context)
+                {
+                    let mut schema_cursor = schema_cursor.clone();
+                    let mut input_cursor = input_cursor.clone();
+
+                    match (
+                        schema_cursor.goto_first_child(),
+                        input_cursor.goto_first_child(),
+                    ) {
+                        (true, true) => {
+                            #[cfg(feature = "invariant_violations")]
+                            if !both_are_table_cells(&schema_cursor.node(), &input_cursor.node()) {
+                                invariant_violation!(
+                                    result,
+                                    &schema_cursor,
+                                    &input_cursor,
+                                    "the immediate child of table headers should be a table cell"
+                                )
+                            }
+                        }
+                        (false, false) => break 'row_iter,
+                        _ => invariant_violation!(
+                            result,
+                            &schema_cursor,
+                            &input_cursor,
+                            "table is malformed in a way that should be impossible"
+                        ),
+                    }
+
+                    // First check if we are dealing with a special case -- repeated rows!
+                    if both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node())
+                        && let Some(_bounds) =
+                            try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
+                    {
+                        todo!()
+                    }
+
+                    // we are at the first cell initially. we validate the first
+                    // cell in the input vs the first cell in the schema, and then
+                    // jump to the next sibling pair. If there is no next sibling
+                    // pair we are done.
+                    'col_iter: loop {
+                        let cell_result = ContainerVsContainerValidator::default()
+                            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+                        result.join_other_result(&cell_result);
+
+                        match (
+                            schema_cursor.goto_next_sibling(),
+                            input_cursor.goto_next_sibling(),
+                        ) {
+                            (true, true) => {}
+                            (false, false) => break 'col_iter,
+                            (true, false) => {
+                                if goto_next_sibling_pair_or_exit(
+                                    &schema_cursor,
+                                    &input_cursor,
+                                    walker,
+                                    got_eof,
+                                    &mut result,
+                                ) {
+                                    return result;
+                                } else {
+                                    return need_to_restart_result;
+                                }
+                            }
+                            (false, true) => {}
+                        }
+                    }
+                }
+            }
+
+            'wait_for_row: loop {
+                match (
+                    schema_cursor.goto_next_sibling(),
+                    input_cursor.goto_next_sibling(),
+                ) {
+                    (true, true) => {
+                        result.keep_farther_pos(&NodePosPair::from_cursors(
+                            &schema_cursor,
+                            &input_cursor,
+                        ));
+
+                        if !both_are_table_delimiter_rows(
+                            &schema_cursor.node(),
+                            &input_cursor.node(),
+                        ) {
+                            break 'wait_for_row;
+                        }
+                    }
+                    (false, false) => break 'row_iter,
+                    (true, false) => {
+                        if goto_next_sibling_pair_or_exit(
+                            &schema_cursor,
+                            &input_cursor,
+                            walker,
+                            got_eof,
+                            &mut result,
+                        ) {
+                            return result;
+                        } else {
+                            return need_to_restart_result;
+                        }
+                    }
+                    _ => {
+                        invariant_violation!(
+                            result,
+                            &schema_cursor,
+                            &input_cursor,
+                            "table is malformed in a way that should be impossible"
+                        )
+                    }
+                }
+            }
+        }
+
+        result
     }
 }
 
@@ -53,183 +224,6 @@ fn goto_next_sibling_pair_or_exit<'a>(
     } else {
         false
     }
-}
-
-fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-    let mut schema_cursor = walker.schema_cursor().clone();
-    let mut input_cursor = walker.input_cursor().clone();
-
-    let mut result = ValidationResult::from_cursors(&schema_cursor, &input_cursor);
-    let need_to_restart_result = result.clone();
-
-    // Both should be at tables already
-    #[cfg(feature = "invariant_violations")]
-    if !both_are_tables(&schema_cursor.node(), &input_cursor.node()) {
-        invariant_violation!(
-            result,
-            &schema_cursor,
-            &input_cursor,
-            "we should already be at table nodes"
-        )
-    }
-
-    if !schema_cursor.goto_first_child() || !input_cursor.goto_first_child() {
-        #[cfg(feature = "invariant_violations")]
-        invariant_violation!(
-            result,
-            &schema_cursor,
-            &input_cursor,
-            "we should be able to dive down one layer into a table"
-        )
-    }
-
-    #[cfg(feature = "invariant_violations")]
-    if !both_are_table_headers(&schema_cursor.node(), &input_cursor.node()) {
-        invariant_violation!(
-            result,
-            &schema_cursor,
-            &input_cursor,
-            "the immediate child of all tables should be table header"
-        )
-    }
-
-    result.sync_cursor_pos(&schema_cursor, &input_cursor);
-
-    //  (document[0]0..41)
-    //  └─ (table[1]1..40)
-    //     ├─ (table_header_row[2]1..22) <-- we are iterating over these in the outer loop
-    //     │  ├─ (table_cell[3]2..16) <-- we are iterating over these in the inner loop
-    //     │  │  └─ (text[4]2..16)
-    //     │  └─ (table_cell[5]17..21)
-    //     │     └─ (text[6]17..21)
-    //     ├─ (table_delimiter_row[7]23..28)
-    //     │  ├─ (table_column_alignment[8]24..25)
-    //     │  └─ (table_column_alignment[9]26..27)
-    //     └─ (table_data_row[10]29..40)
-    //        ├─ (table_cell[11]30..34)
-    //        │  └─ (text[12]30..34)
-    //        └─ (table_cell[13]35..39)
-    //           └─ (text[14]35..39)
-
-    // General idea: For each row, walk down to the first child, iterate over all its siblings,
-    // hop back to the row container, go to the next row, until there are no rows left.
-
-    'row_iter: loop {
-        {
-            // Dive in to the first row, iterate over children, hop back (hop
-            // back is automatic since we use different cursors in the context)
-            {
-                let mut schema_cursor = schema_cursor.clone();
-                let mut input_cursor = input_cursor.clone();
-
-                match (
-                    schema_cursor.goto_first_child(),
-                    input_cursor.goto_first_child(),
-                ) {
-                    (true, true) => {
-                        #[cfg(feature = "invariant_violations")]
-                        if !both_are_table_cells(&schema_cursor.node(), &input_cursor.node()) {
-                            invariant_violation!(
-                                result,
-                                &schema_cursor,
-                                &input_cursor,
-                                "the immediate child of table headers should be a table cell"
-                            )
-                        }
-                    }
-                    (false, false) => break 'row_iter,
-                    _ => invariant_violation!(
-                        result,
-                        &schema_cursor,
-                        &input_cursor,
-                        "table is malformed in a way that should be impossible"
-                    ),
-                }
-
-                // First check if we are dealing with a special case -- repeated rows!
-                if both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node())
-                    && let Some(_bounds) =
-                        try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
-                {
-                    todo!()
-                }
-
-                // we are at the first cell initially. we validate the first
-                // cell in the input vs the first cell in the schema, and then
-                // jump to the next sibling pair. If there is no next sibling
-                // pair we are done.
-                'col_iter: loop {
-                    let cell_result = ContainerVsContainerValidator::default()
-                        .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-                    result.join_other_result(&cell_result);
-
-                    match (
-                        schema_cursor.goto_next_sibling(),
-                        input_cursor.goto_next_sibling(),
-                    ) {
-                        (true, true) => {}
-                        (false, false) => break 'col_iter,
-                        (true, false) => {
-                            if goto_next_sibling_pair_or_exit(
-                                &schema_cursor,
-                                &input_cursor,
-                                walker,
-                                got_eof,
-                                &mut result,
-                            ) {
-                                return result;
-                            } else {
-                                return need_to_restart_result;
-                            }
-                        }
-                        (false, true) => {}
-                    }
-                }
-            }
-        }
-
-        'wait_for_row: loop {
-            match (
-                schema_cursor.goto_next_sibling(),
-                input_cursor.goto_next_sibling(),
-            ) {
-                (true, true) => {
-                    result.keep_farther_pos(&NodePosPair::from_cursors(
-                        &schema_cursor,
-                        &input_cursor,
-                    ));
-
-                    if !both_are_table_delimiter_rows(&schema_cursor.node(), &input_cursor.node()) {
-                        break 'wait_for_row;
-                    }
-                }
-                (false, false) => break 'row_iter,
-                (true, false) => {
-                    if goto_next_sibling_pair_or_exit(
-                        &schema_cursor,
-                        &input_cursor,
-                        walker,
-                        got_eof,
-                        &mut result,
-                    ) {
-                        return result;
-                    } else {
-                        return need_to_restart_result;
-                    }
-                }
-                _ => {
-                    invariant_violation!(
-                        result,
-                        &schema_cursor,
-                        &input_cursor,
-                        "table is malformed in a way that should be impossible"
-                    )
-                }
-            }
-        }
-    }
-
-    result
 }
 
 /// We say that a row is repeated if there is a repeater directly after the row.
