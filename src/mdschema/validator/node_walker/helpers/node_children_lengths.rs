@@ -1,6 +1,8 @@
 use tree_sitter::TreeCursor;
 
-use crate::mdschema::validator::errors::{ChildrenCount, SchemaViolationError, ValidationError};
+use crate::mdschema::validator::errors::{
+    ChildrenLengthRange, SchemaViolationError, ValidationError,
+};
 
 /// Compare the number of children between schema and input nodes.
 ///
@@ -9,9 +11,10 @@ use crate::mdschema::validator::errors::{ChildrenCount, SchemaViolationError, Va
 /// - Not at EOF: input has more children than schema
 ///
 /// # Arguments
-/// - `schema_cursor`: Cursor at schema node
-/// - `input_cursor`: Cursor at input node
-/// - `got_eof`: Whether we've reached end of file
+/// * `schema_cursor`: Cursor at schema node
+/// * `input_cursor`: Cursor at input node
+/// * `got_eof`: Whether we have received the full input document.
+#[allow(dead_code)] // TODO: use this instead of throwing children descendant mismatches
 pub fn compare_node_children_lengths(
     schema_cursor: &TreeCursor,
     input_cursor: &TreeCursor,
@@ -31,7 +34,7 @@ pub fn compare_node_children_lengths(
         ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
             schema_index: schema_cursor.descendant_index(),
             input_index: input_cursor.descendant_index(),
-            expected: ChildrenCount::from_specific(schema_child_count),
+            expected: ChildrenLengthRange(schema_child_count, schema_child_count),
             actual: input_child_count,
         });
 

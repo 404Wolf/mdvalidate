@@ -133,6 +133,12 @@ node_kind_pair!(
     ["table"]
 );
 node_kind_pair!(
+    is_table_data_row_node,
+    both_are_table_data_rows,
+    "Check if both nodes are table data rows.",
+    ["table_data_row"]
+);
+node_kind_pair!(
     is_table_cell_node,
     both_are_table_cells,
     "Check if both nodes are table cells.",

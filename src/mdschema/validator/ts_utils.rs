@@ -4,9 +4,9 @@ use crate::invariant_violation;
 use tree_sitter::{Node, Parser, Tree, TreeCursor};
 use tree_sitter_markdown::language;
 
-use crate::mdschema::validator::{errors::ValidationError, validator::ValidatorState};
 #[cfg(feature = "invariant_violations")]
-use crate::mdschema::validator::ts_types::is_marker_node;
+use crate::mdschema::validator::ts_types::*;
+use crate::mdschema::validator::{errors::ValidationError, validator::ValidatorState};
 
 use regex::Regex;
 use std::sync::LazyLock;
@@ -14,7 +14,13 @@ use std::sync::LazyLock;
 /// Extract text from a tree-sitter node using the provided source string.
 pub fn get_node_text<'a, S: Into<&'a str>>(node: &Node, src: S) -> &'a str {
     let src_ref = src.into();
-    node.utf8_text(src_ref.as_bytes()).unwrap()
+    let node_str = node.utf8_text(src_ref.as_bytes()).unwrap();
+
+    if is_table_cell_node(&node) || node.parent().is_some_and(|n| is_table_cell_node(&n)) {
+        node_str.trim_start().trim_end()
+    } else {
+        node_str
+    }
 }
 
 /// Ordered lists use numbers followed by period . or right paren )
@@ -342,8 +348,10 @@ pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<Valida
 }
 
 #[cfg(test)]
+#[allow(unused_imports)]
 mod tests {
-    use crate::mdschema::validator::ts_types::{is_list_node, is_textual_node};
+    #[allow(unused_imports)]
+    use crate::mdschema::validator::ts_types::*;
     use crate::mdschema::validator::utils::parse_markdown_and_get_tree;
 
     use super::*;

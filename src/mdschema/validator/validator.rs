@@ -177,7 +177,7 @@ impl Validator {
             farthest_reached_pos.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
 
             let walker = ValidatorWalker::new(schema_cursor, &schema_str, input_cursor, &input_str);
-            NodeVsNodeValidator::validate(&walker, got_eof)
+            NodeVsNodeValidator::default().validate(&walker, got_eof)
         };
 
         self.push_validation_result(validation_result);
@@ -255,7 +255,7 @@ impl ValidatorState for Validator {
 mod tests {
     use serde_json::json;
 
-    use crate::mdschema::validator::errors::{ChildrenCount, SchemaError, SchemaViolationError};
+    use crate::mdschema::validator::errors::{SchemaError, SchemaViolationError};
 
     use super::*;
 
@@ -429,17 +429,15 @@ fooobar
         assert_eq!(errors.len(), 1);
 
         match &errors[0] {
-            ValidationError::SchemaViolation(SchemaViolationError::ChildrenLengthMismatch {
+            ValidationError::SchemaViolation(SchemaViolationError::MalformedNodeStructure {
                 schema_index,
-                input_index: _,
-                expected,
-                actual,
+                input_index,
+                kind,
             }) => {
-                assert_eq!(*expected, ChildrenCount::from_specific(3));
-                assert_eq!(*actual, 2);
-                assert_eq!(*schema_index, 0);
+                assert_eq!(*schema_index, 7);
+                assert_eq!(*input_index, 5);
             }
-            _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),
+            _ => panic!("Expected MalformedNodeStructure error, got {:?}", errors[0]),
         }
     }
 
@@ -962,7 +960,7 @@ Footer: goodbye
                 expected,
                 ..
             }) => {
-                assert_eq!(*expected, ChildrenCount::from_specific(4));
+                assert_eq!(*expected, 4);
                 assert_eq!(*actual, 5);
             }
             _ => panic!("Expected ChildrenLengthMismatch error, got {:?}", errors[0]),

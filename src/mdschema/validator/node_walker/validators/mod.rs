@@ -1,3 +1,20 @@
+//! Node-walker validators.
+//!
+//! Types:
+//! - `ValidatorImpl`: core validator implementation trait.
+//! - `Validator`: wrapper used to get tracing on every validator call.
+//!
+//! Validator implementations:
+//! - `nodes::NodeVsNodeValidator`: dispatches between textual, code, list, table, heading, quote, and link validators.
+//! - `textual::TextualVsTextualValidator`: compares textual and inline code nodes, delegating matcher work as needed.
+//! - `matchers::MatcherVsTextValidator`: handles schema nodes that embed matcher syntax inside text or code spans.
+//! - `code::CodeVsCodeValidator`: validates fenced code blocks (matcher-based language, capture support).
+//! - `headings::HeadingVsHeadingValidator`: ensures heading kinds match and defers to textual container comparison.
+//! - `quotes::QuoteVsQuoteValidator`: validates block quotes by walking their contents with textual container logic.
+//! - `links::LinkVsLinkValidator`: checks link and image destinations plus alt text, with matcher coverage.
+//! - `tables::TableVsTableValidator`: walks table rows/cells and hands off textual cells to textual container validation.
+//! - `lists::ListVsListValidator`: aligns schema and input list items, handling nested structures and matcher-aware text.
+//! - `containers::TextualContainerVsTextualContainerValidator`: walks inline container nodes and compares literal/matcher-driven text.
 #[allow(dead_code)]
 use tracing::instrument;
 
@@ -6,6 +23,7 @@ use crate::mdschema::validator::{
 };
 
 pub(super) mod code;
+pub(super) mod containers;
 pub(super) mod headings;
 pub(super) mod links;
 pub(super) mod lists;
@@ -14,14 +32,12 @@ pub(crate) mod nodes;
 pub(super) mod quotes;
 pub(super) mod tables;
 pub(super) mod textual;
-pub(super) mod textual_container;
 
 pub trait ValidatorImpl {
-    fn validate_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
 }
-
 pub trait Validator {
-    fn validate(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
+    fn validate(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult;
 }
 
 impl<T: ValidatorImpl> Validator for T {
@@ -30,8 +46,8 @@ impl<T: ValidatorImpl> Validator for T {
         i = %walker.input_cursor().descendant_index(),
         s = %walker.schema_cursor().descendant_index(),
     ), ret)]
-    fn validate(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-        Self::validate_impl(walker, got_eof)
+    fn validate(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        self.validate_impl(walker, got_eof)
     }
 }
 
@@ -47,7 +63,7 @@ mod test_utils {
     use super::*;
 
     pub struct ValidatorTester<'a, V: Validator> {
-        _phantom: std::marker::PhantomData<V>,
+        validator: V,
         schema_tree: Tree,
         schema_str: &'a str,
         input_tree: Tree,
@@ -55,12 +71,12 @@ mod test_utils {
     }
 
     impl<'a, V: Validator> ValidatorTester<'a, V> {
-        pub fn from_strs(schema_str: &'a str, input_str: &'a str) -> Self {
+        pub fn with_validator(schema_str: &'a str, input_str: &'a str, validator: V) -> Self {
             let schema_tree = parse_markdown(schema_str).unwrap();
             let input_tree = parse_markdown(input_str).unwrap();
 
             Self {
-                _phantom: std::marker::PhantomData,
+                validator,
                 schema_tree,
                 schema_str,
                 input_tree,
@@ -68,12 +84,27 @@ mod test_utils {
             }
         }
 
+        pub fn from_strs_and_validator(
+            schema_str: &'a str,
+            input_str: &'a str,
+            validator: V,
+        ) -> Self {
+            Self::with_validator(schema_str, input_str, validator)
+        }
+
+        pub fn from_strs(schema_str: &'a str, input_str: &'a str) -> Self
+        where
+            V: Default,
+        {
+            Self::with_validator(schema_str, input_str, V::default())
+        }
+
         pub fn walk(&'_ self) -> ValidationTesterWalker<'_, V> {
             let schema_cursor = self.schema_tree.walk();
             let input_cursor = self.input_tree.walk();
 
             ValidationTesterWalker {
-                _phantom: std::marker::PhantomData,
+                validator: &self.validator,
                 schema_cursor,
                 schema_str: self.schema_str,
                 input_cursor,
@@ -83,7 +114,7 @@ mod test_utils {
     }
 
     pub struct ValidationTesterWalker<'a, V: Validator> {
-        _phantom: std::marker::PhantomData<V>,
+        validator: &'a V,
         schema_cursor: TreeCursor<'a>,
         schema_str: &'a str,
         input_cursor: TreeCursor<'a>,
@@ -100,7 +131,7 @@ mod test_utils {
                 &self.input_cursor,
                 self.input_str,
             );
-            V::validate(&walker, got_eof)
+            self.validator.validate(&walker, got_eof)
         }
 
         pub fn validate_complete(&mut self) -> ValidationResult {

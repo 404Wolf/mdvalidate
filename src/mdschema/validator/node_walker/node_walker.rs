@@ -57,7 +57,7 @@ impl<'a, S: ValidatorState> NodeWalker<'a, S> {
             .farthest_reached_pos()
             .walk_cursors_to_pos(schema_cursor, input_cursor);
 
-        let validation_result = NodeVsNodeValidator::validate(&walker, got_eof);
+        let validation_result = NodeVsNodeValidator::default().validate(&walker, got_eof);
 
         self.state.push_validation_result(validation_result.clone());
 
