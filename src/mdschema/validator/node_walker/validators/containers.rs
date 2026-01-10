@@ -93,7 +93,7 @@ impl ValidatorImpl for ContainerVsContainerValidator {
         );
 
         if is_repeated_matcher_paragraph(&schema_cursor, walker.schema_str()) {
-            return ParagraphVsRepeatedMatcherParagraphValidator::default()
+            return RepeatedMatcherParagraphVsParagraphValidator::default()
                 .validate(walker, got_eof);
         }
 
@@ -236,9 +236,9 @@ impl ValidatorImpl for ContainerVsContainerValidator {
 /// }
 /// ```
 #[derive(Default)]
-pub(super) struct ParagraphVsRepeatedMatcherParagraphValidator;
+pub(super) struct RepeatedMatcherParagraphVsParagraphValidator;
 
-impl ValidatorImpl for ParagraphVsRepeatedMatcherParagraphValidator {
+impl ValidatorImpl for RepeatedMatcherParagraphVsParagraphValidator {
     fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
             ValidationResult::from_cursors(walker.schema_cursor(), &walker.input_cursor());
@@ -405,7 +405,7 @@ mod tests {
         errors::{SchemaViolationError, ValidationError},
         node_pos_pair::NodePosPair,
         node_walker::validators::{
-            containers::ParagraphVsRepeatedMatcherParagraphValidator, test_utils::ValidatorTester,
+            containers::RepeatedMatcherParagraphVsParagraphValidator, test_utils::ValidatorTester,
         },
         ts_types::*,
         ts_utils::parse_markdown,
@@ -573,7 +573,7 @@ bar
 buzz
 "#;
 
-        let result = ValidatorTester::<ParagraphVsRepeatedMatcherParagraphValidator>::from_strs(
+        let result = ValidatorTester::<RepeatedMatcherParagraphVsParagraphValidator>::from_strs(
             schema_str, input_str,
         )
         .walk()
@@ -603,7 +603,7 @@ buzz
 # Test
 "#;
 
-        let result = ValidatorTester::<ParagraphVsRepeatedMatcherParagraphValidator>::from_strs(
+        let result = ValidatorTester::<RepeatedMatcherParagraphVsParagraphValidator>::from_strs(
             schema_str, input_str,
         )
         .walk()
@@ -632,7 +632,7 @@ bar *italic*
 buzz
 "#;
 
-        let result = ValidatorTester::<ParagraphVsRepeatedMatcherParagraphValidator>::from_strs(
+        let result = ValidatorTester::<RepeatedMatcherParagraphVsParagraphValidator>::from_strs(
             schema_str, input_str,
         )
         .walk()

@@ -5,8 +5,9 @@
 //!   and delegates cell content checks to textual container validation.
 use crate::invariant_violation;
 use crate::mdschema::validator::errors::{
-    MalformedStructureKind, SchemaViolationError, ValidationError,
+    MalformedStructureKind, NodeContentMismatchKind, SchemaViolationError, ValidationError,
 };
+use crate::mdschema::validator::matcher::matcher::Matcher;
 use crate::mdschema::validator::matcher::matcher_extras::MatcherExtras;
 use crate::mdschema::validator::node_pos_pair::NodePosPair;
 use crate::mdschema::validator::node_walker::ValidationResult;
@@ -16,6 +17,7 @@ use crate::mdschema::validator::ts_types::*;
 use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
 use log::trace;
+use regex::bytes::Match;
 use tree_sitter::TreeCursor;
 
 /// Validate two tables.
@@ -116,10 +118,13 @@ impl ValidatorImpl for TableVsTableValidator {
 
                     // First check if we are dealing with a special case -- repeated rows!
                     if both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node())
-                        && let Some(_bounds) =
+                        && let Some(bounds) =
                             try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
                     {
-                        todo!()
+                        let repeated_row_result = RepeatedRowVsRowValidator::new(bounds)
+                            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+                        repeated_row_result
+                            .walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
                     }
 
                     // we are at the first cell initially. we validate the first
@@ -205,6 +210,8 @@ impl ValidatorImpl for TableVsTableValidator {
 }
 
 /// Returns true if we should early return with an error (result was modified).
+///
+/// This is for the case where the input has a child but the schema does not.
 fn goto_next_sibling_pair_or_exit<'a>(
     schema_cursor: &TreeCursor<'a>,
     input_cursor: &TreeCursor<'a>,
@@ -224,6 +231,212 @@ fn goto_next_sibling_pair_or_exit<'a>(
     } else {
         false
     }
+}
+
+#[derive(Default)]
+pub(super) struct RepeatedRowVsRowValidator {
+    bounds: (Option<usize>, Option<usize>),
+}
+
+impl RepeatedRowVsRowValidator {
+    pub fn new(bounds: (Option<usize>, Option<usize>)) -> Self {
+        Self { bounds }
+    }
+}
+
+impl ValidatorImpl for RepeatedRowVsRowValidator {
+    fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
+        let mut schema_cursor = walker.schema_cursor().clone();
+        let mut input_cursor = walker.input_cursor().clone();
+
+        let mut result = ValidationResult::from_cursors(&schema_cursor, &input_cursor);
+        let need_to_restart_result = result.clone();
+
+        #[cfg(feature = "invariant_violations")]
+        if !both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node()) {
+            invariant_violation!(
+                result,
+                &schema_cursor,
+                &input_cursor,
+                "is_repeated_row only works for data row nodes. Title row nodes cannot be repeated. Got {:?}",
+                schema_cursor.node().kind()
+            )
+        }
+
+        // A version of the schema cursor where it is pointed at the first cell in the (repeating) row
+        let schema_cursor_at_first_cell = get_cursor_at_first_cell(&schema_cursor);
+
+        let max_bound = self.bounds.1.unwrap_or(usize::MAX);
+
+        let corresponding_matchers =
+            get_cell_indexes_that_have_simple_matcher(&schema_cursor, walker.schema_str());
+
+        let corresponding_matchers_only_matchers: Vec<&Matcher> = corresponding_matchers
+            .iter()
+            .filter_map(|n| n.as_ref())
+            .collect();
+        let num_corresponding_matchers = corresponding_matchers_only_matchers.len();
+
+        let mut all_matches: Vec<Vec<String>> = vec![Vec::new(); num_corresponding_matchers];
+
+        'row_iter: for _ in 0..max_bound {
+            let mut schema_cursor_at_first_cell = schema_cursor_at_first_cell.clone();
+
+            // Validate the entire row
+            {
+                let mut input_cursor_at_first_cell = get_cursor_at_first_cell(&input_cursor);
+
+                let mut matcher_num = 0;
+                'col_iter: for i in 0.. {
+                    let cell_str = get_node_text(&input_cursor.node(), walker.input_str());
+
+                    match corresponding_matchers.get(i).unwrap() {
+                        Some(matcher) => match matcher.match_str(cell_str) {
+                            Some(captured_str) => {
+                                all_matches
+                                    .get_mut(matcher_num)
+                                    .unwrap() // we pre filled it properly ahead of time
+                                    .push(captured_str.to_string());
+
+                                matcher_num += 1;
+                            }
+                            None => {
+                                result.add_error(ValidationError::SchemaViolation(
+                                    SchemaViolationError::NodeContentMismatch {
+                                        schema_index: schema_cursor_at_first_cell
+                                            .descendant_index(),
+                                        input_index: input_cursor_at_first_cell.descendant_index(),
+                                        expected: matcher.pattern().to_string(),
+                                        actual: cell_str.into(),
+                                        kind: NodeContentMismatchKind::Matcher,
+                                    },
+                                ));
+
+                                return result;
+                            }
+                        },
+                        None => {
+                            // Validate the cell as a normal container.
+                            let cell_result = ContainerVsContainerValidator::default().validate(
+                                &walker.with_cursors(&schema_cursor, &input_cursor),
+                                got_eof,
+                            );
+                            result.join_data(cell_result.data());
+                            if cell_result.has_errors() {
+                                result.join_errors(cell_result.errors());
+                                return result;
+                            }
+                        }
+                    }
+
+                    match (
+                        schema_cursor_at_first_cell.goto_next_sibling(),
+                        input_cursor_at_first_cell.goto_next_sibling(),
+                    ) {
+                        (true, true) => {}
+                        (false, false) => break 'col_iter,
+                        (true, false) => {
+                            if goto_next_sibling_pair_or_exit(
+                                &schema_cursor,
+                                &input_cursor,
+                                walker,
+                                got_eof,
+                                &mut result,
+                            ) {
+                                return result;
+                            } else {
+                                return need_to_restart_result;
+                            }
+                        }
+                        (false, true) => {}
+                    }
+                }
+            }
+
+            // Move the input to the next row (the schema stays put!)
+            if input_cursor.goto_next_sibling() {
+                // continue!
+                // TODO: should we check bounds?
+            } else {
+                break 'row_iter;
+            }
+        }
+
+        // TODO: bound checking
+        // let min_bound = self.bounds.0.unwrap_or(0);
+
+        for (matches, matcher) in all_matches.iter().zip(corresponding_matchers_only_matchers) {
+            if let Some(key) = matcher.id() {
+                result.set_match(key, matches.clone().into());
+            }
+        }
+
+        result
+    }
+}
+
+/// For each cell, check if it is a single simple matcher. If it is, load a
+/// Some(Matcher) with that matcher into a Vec, and if it is not, load a None
+/// instead.
+///
+/// # Arguments
+///
+/// * `schema_cursor` - A cursor pointing to the first cell in the repeating schema row.
+/// * `schema_str` - The string representation of the schema.
+///
+/// # Returns
+///
+/// A vector of `Some<Matcher>`s of the cells that have a single matcher.
+fn get_cell_indexes_that_have_simple_matcher(
+    schema_cursor: &TreeCursor,
+    schema_str: &str,
+) -> Vec<Option<Matcher>> {
+    #[cfg(feature = "invariant_violations")]
+    if !is_table_cell_node(&schema_cursor.node()) {
+        invariant_violation!("we should start at the first cell in the repeating row in the table",)
+    }
+
+    let mut schema_cursor = schema_cursor.clone();
+
+    let mut indexes = Vec::new();
+
+    loop {
+        // For it to be a "simple" matcher with nothing else, it must ONLY have
+        // a single child, which is a code node.
+        let single_child_that_is_code = schema_cursor.node().child_count() == 1
+            && is_inline_code_node(&schema_cursor.node().child(0).unwrap());
+
+        if single_child_that_is_code {
+            if let Ok(matcher) = Matcher::try_from_schema_cursor(&schema_cursor, schema_str) {
+                indexes.push(Some(matcher));
+            } else {
+                indexes.push(None);
+            }
+        } else {
+            indexes.push(None);
+        }
+
+        if schema_cursor.goto_next_sibling() {
+            // continue!
+        } else {
+            break;
+        }
+    }
+
+    indexes
+}
+
+/// Walk down to the first node, and debug assert that it is a table cell.
+fn get_cursor_at_first_cell<'a>(cursor: &TreeCursor<'a>) -> TreeCursor<'a> {
+    let mut cursor = cursor.clone();
+    cursor.goto_first_child();
+
+    #[cfg(feature = "invariant_violations")]
+    if !is_table_cell_node(&cursor.node()) {
+        invariant_violation!("the descendant of the cursor here should be a table cell",)
+    }
+
+    cursor
 }
 
 /// We say that a row is repeated if there is a repeater directly after the row.
@@ -309,6 +522,37 @@ mod tests {
         ts_utils::parse_markdown,
     };
     use serde_json::json;
+
+    #[test]
+    fn get_cell_indexes_that_have_simple_matcher_simple() {
+        // just has one matcher
+        let schema_str = r#"
+|c1|c2|c3|c4|c5|
+|-|-|-|-|-|
+|r1|`foo:/test/`|`bar:/test2/`|not a matcher|`baz:/test3/`|
+        "#;
+
+        let schema_tree = parse_markdown(schema_str).unwrap();
+        let mut schema_cursor = schema_tree.walk();
+        schema_cursor.goto_first_child(); // document -> table
+        schema_cursor.goto_first_child(); // table -> header row
+        schema_cursor.goto_next_sibling(); // header row -> delimiter row
+        schema_cursor.goto_next_sibling(); // delimiter row -> data row
+        assert!(is_table_data_row_node(&schema_cursor.node()));
+        schema_cursor.goto_first_child(); // data row -> table cell
+        assert!(is_table_cell_node(&schema_cursor.node()));
+
+        assert_eq!(
+            get_cell_indexes_that_have_simple_matcher(&schema_cursor, schema_str),
+            vec![
+                None,
+                Some(Matcher::try_from_pattern_and_suffix_str("`foo:/test/`", None).unwrap()),
+                Some(Matcher::try_from_pattern_and_suffix_str("`bar:/test2/`", None).unwrap()),
+                None,
+                Some(Matcher::try_from_pattern_and_suffix_str("`baz:/test3/`", None).unwrap())
+            ]
+        )
+    }
 
     #[test]
     fn test_is_repeated_row_is_repeated() {
@@ -526,7 +770,7 @@ mod tests {
                 }
             )]
         );
-        assert_eq!(result.value(), &json!({}));
+        assert_eq!(*result.value(), json!({}));
     }
 
     #[test]
@@ -549,6 +793,58 @@ mod tests {
             .validate_complete();
 
         assert_eq!(result.errors(), vec![]);
-        assert_eq!(result.value(), &json!({"c1": "buzz"}));
+        assert_eq!(*result.value(), json!({"c1": "buzz"}));
+    }
+
+    #[test]
+    fn test_validate_table_vs_table_with_repeated_cell() {
+        let schema_str = r#"
+|c2|c2|
+|-|-|
+|`a:/.*/`|`b:/.*/`|{,}
+            "#;
+        let input_str = r#"
+|c2|c2|
+|-|-|
+|a1|b1|
+|a2|b2|
+"#;
+
+        let result = ValidatorTester::<TableVsTableValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_tables(s, i)))
+            .validate_complete();
+
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(
+            *result.value(),
+            json!({"a": ["a1", "a2"], "b": ["b1", "b2"]})
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn test_validate_table_vs_table_with_repeated_cell_and_mismatch() {
+        let schema_str = r#"
+|c2|c2|
+|-|-|
+|`a:/.*/`|`b:/xx/`|{,}
+            "#;
+        let input_str = r#"
+|c2|c2|
+|-|-|
+|a1|b1|
+|a2|b2|
+"#;
+
+        let result = ValidatorTester::<TableVsTableValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_tables(s, i)))
+            .validate_complete();
+
+        assert_eq!(result.errors().len(), 1);
+        todo!("check specific type of error");
     }
 }
