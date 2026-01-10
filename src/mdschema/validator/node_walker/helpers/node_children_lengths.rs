@@ -14,6 +14,7 @@ use crate::mdschema::validator::errors::{
 /// * `schema_cursor`: Cursor at schema node
 /// * `input_cursor`: Cursor at input node
 /// * `got_eof`: Whether we have received the full input document.
+#[allow(dead_code)] // TODO: use this instead of throwing children descendant mismatches
 pub fn compare_node_children_lengths(
     schema_cursor: &TreeCursor,
     input_cursor: &TreeCursor,
