@@ -11,8 +11,8 @@ use crate::mdschema::validator::errors::{
 /// - Not at EOF: input has more children than schema
 ///
 /// # Arguments
-/// - `schema_cursor`: Cursor at schema node
-/// - `input_cursor`: Cursor at input node
+/// * `schema_cursor`: Cursor at schema node
+/// * `input_cursor`: Cursor at input node
 /// * `got_eof`: Whether we have received the full input document.
 pub fn compare_node_children_lengths(
     schema_cursor: &TreeCursor,

@@ -15,10 +15,10 @@ use crate::mdschema::validator::ts_utils::get_node_text;
 /// # Arguments
 /// * `schema_str`: The full input document (so far).
 /// * `input_str`: The full schema document.
-/// - `schema_cursor`: Cursor at schema text node
-/// - `input_cursor`: Cursor at input text node
-/// - `is_partial_match`: Whether we're doing a partial match (not at EOF)
-/// - `strip_extras`: Whether to strip extras (like `!`) from schema text
+/// * `schema_cursor`: Cursor at schema text node
+/// * `input_cursor`: Cursor at input text node
+/// * `is_partial_match`: Whether we're doing a partial match (not at EOF)
+/// * `strip_extras`: Whether to strip extras (like `!`) from schema text
 pub fn compare_text_contents(
     schema_str: &str,
     input_str: &str,

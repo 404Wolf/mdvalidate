@@ -13,10 +13,10 @@ use crate::mdschema::validator::ts_utils::{
 /// - Other nodes: checks exact kind match
 ///
 /// # Arguments
-/// - `schema_cursor`: Cursor at schema node
-/// - `input_cursor`: Cursor at input node
-/// - `schema_str`: The schema markdown string
-/// - `input_str`: The input markdown string
+/// * `schema_cursor`: Cursor at schema node
+/// * `input_cursor`: Cursor at input node
+/// * `schema_str`: The schema markdown string
+/// * `input_str`: The input markdown string
 pub fn compare_node_kinds(
     schema_cursor: &TreeCursor,
     input_cursor: &TreeCursor,

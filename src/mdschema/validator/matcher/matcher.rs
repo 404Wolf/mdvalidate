@@ -171,9 +171,7 @@ impl Matcher {
     ///
     /// # Arguments
     /// * `pattern` - The pattern string within the matcher codeblock.
-    /// * `after_str` - Optional extras string following the pattern. This must
-    ///   have a sequence of valid matcher extras, only followed by additional
-    ///   text if there is a space in between.
+    /// * `after_str` - Optional extras string following the pattern. This must have a sequence of valid matcher extras, only followed by additional text if there is a space in between.
     pub fn try_from_pattern_and_suffix_str(
         pattern_str: &str,
         after_str: Option<&str>,
