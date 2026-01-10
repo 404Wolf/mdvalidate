@@ -177,7 +177,7 @@ impl Validator {
             farthest_reached_pos.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
 
             let walker = ValidatorWalker::new(schema_cursor, &schema_str, input_cursor, &input_str);
-            NodeVsNodeValidator::default().validate(&walker, got_eof)
+            NodeVsNodeValidator.validate(&walker, got_eof)
         };
 
         self.push_validation_result(validation_result);
@@ -295,7 +295,7 @@ mod tests {
             validator
                 .input_tree
                 .root_node()
-                .utf8_text(&validator.last_input_str().as_bytes())
+                .utf8_text(validator.last_input_str().as_bytes())
                 .expect("Failed to get input text"),
             "Updated input"
         );
@@ -1083,15 +1083,13 @@ Content for section 3."#;
         let mut validator = Validator::new(schema, "", false).expect("Failed to create validator");
 
         // Incrementally add content in logical chunks
-        let chunks = vec![
-            "# Title\n\n",
+        let chunks = ["# Title\n\n",
             "# Title\n\n## Section 1\n\n",
             "# Title\n\n## Section 1\n\nContent for section 1.\n\n",
             "# Title\n\n## Section 1\n\nContent for section 1.\n\n## Section 2\n\n",
             "# Title\n\n## Section 1\n\nContent for section 1.\n\n## Section 2\n\nContent for section 2.\n\n",
             "# Title\n\n## Section 1\n\nContent for section 1.\n\n## Section 2\n\nContent for section 2.\n\n## Section 3\n\n",
-            input_complete,
-        ];
+            input_complete];
 
         for (i, chunk) in chunks.iter().enumerate() {
             let is_eof = i == chunks.len() - 1;

@@ -149,7 +149,7 @@ macro_rules! compare_text_contents_check {
         $result:expr
     ) => {
         {
-            let text_result = crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents(
+            let text_result = $crate::mdschema::validator::node_walker::helpers::compare_text_contents::compare_text_contents(
                 $schema_str,
                 $input_str,
                 &$schema_cursor,

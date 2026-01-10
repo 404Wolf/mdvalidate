@@ -16,7 +16,7 @@ pub fn get_node_text<'a, S: Into<&'a str>>(node: &Node, src: S) -> &'a str {
     let src_ref = src.into();
     let node_str = node.utf8_text(src_ref.as_bytes()).unwrap();
 
-    if is_table_cell_node(&node) || node.parent().is_some_and(|n| is_table_cell_node(&n)) {
+    if is_table_cell_node(node) || node.parent().is_some_and(|n| is_table_cell_node(&n)) {
         node_str.trim_start().trim_end()
     } else {
         node_str
@@ -339,7 +339,6 @@ pub fn validate_str(schema: &str, input: &str) -> (serde_json::Value, Vec<Valida
 
     let errors = validator
         .errors_so_far()
-        .into_iter()
         .cloned()
         .collect::<Vec<ValidationError>>();
     let matches = validator.matches_so_far().clone();
@@ -478,22 +477,22 @@ mod tests {
 
         // Root node should be a document and should not be the last node
         assert_eq!(root_node.kind(), "document");
-        assert_eq!(is_last_node(input, &root_node), false);
+        assert!(!is_last_node(input, &root_node));
 
         // First child is the heading, which is not the last node
         let first_child = root_node.child(0).unwrap();
         assert_eq!(first_child.kind(), "atx_heading");
-        assert_eq!(is_last_node(input, &first_child), false);
+        assert!(!is_last_node(input, &first_child));
 
         // Last child is the paragraph, but it's not the deepest node
         let last_child = root_node.child(root_node.named_child_count() - 1).unwrap();
         assert_eq!(last_child.kind(), "paragraph");
-        assert_eq!(is_last_node(input, &last_child), false);
+        assert!(!is_last_node(input, &last_child));
 
         // Text node is the deepest, rightmost node that ends at the input end
         let text_node = last_child.child(0).unwrap();
         assert_eq!(text_node.kind(), "text");
-        assert_eq!(is_last_node(input, &text_node), true);
+        assert!(is_last_node(input, &text_node));
     }
 
     #[test]

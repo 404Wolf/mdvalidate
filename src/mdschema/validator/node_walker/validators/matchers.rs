@@ -285,7 +285,7 @@ impl ValidatorImpl for MatcherVsTextValidator {
 
                         trace!(
                             "Matcher did not match input string: pattern={}, input='{}'",
-                            matcher.pattern().to_string(),
+                            matcher.pattern(),
                             input_after_prefix
                         );
 
@@ -294,7 +294,7 @@ impl ValidatorImpl for MatcherVsTextValidator {
                                 schema_index: schema_cursor.descendant_index(),
                                 input_index: input_cursor_descendant_index,
                                 expected: matcher.pattern().to_string(),
-                                actual: input_after_prefix.into(),
+                                actual: input_after_prefix,
                                 kind: NodeContentMismatchKind::Matcher,
                             },
                         ));
@@ -318,7 +318,7 @@ impl ValidatorImpl for MatcherVsTextValidator {
                     }
 
                     // Delegate to the literal matcher validator
-                    return LiteralMatcherVsTextualValidator::default()
+                    return LiteralMatcherVsTextualValidator
                         .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                 }
                 _ => result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
@@ -880,7 +880,7 @@ mod tests {
 
         let walker =
             ValidatorWalker::from_cursors(&schema_cursor, schema_str, &input_cursor, input_str);
-        let result = TextualVsTextualValidator::default().validate(&walker, true);
+        let result = TextualVsTextualValidator.validate(&walker, true);
 
         assert!(result.errors().is_empty());
         assert_eq!(result.value(), &json!({"test": "test"}));

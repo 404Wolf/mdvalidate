@@ -307,7 +307,7 @@ impl ValidatorImpl for ListVsListValidator {
                 // If there are more items to validate AT THE SAME LEVEL, recurse to
                 // validate them. We now use the *next* schema node too.
                 if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
-                    let next_result = ListVsListValidator::default()
+                    let next_result = ListVsListValidator
                         .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                     result.join_other_result(&next_result);
                 }
@@ -326,7 +326,7 @@ impl ValidatorImpl for ListVsListValidator {
                             schema_cursor.node().kind()
                         );
 
-                        let next_result = ListVsListValidator::default()
+                        let next_result = ListVsListValidator
                             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                         // We need to be able to capture errors that happen in the recursive call
                         result.join_errors(next_result.errors());
@@ -489,7 +489,7 @@ impl ValidatorImpl for ListVsListValidator {
                         input_cursor.goto_first_child();
                         schema_cursor.goto_first_child();
 
-                        let deeper_result = ListVsListValidator::default()
+                        let deeper_result = ListVsListValidator
                             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                         result.join_other_result(&deeper_result);
                     }
@@ -498,7 +498,7 @@ impl ValidatorImpl for ListVsListValidator {
                 // Recurse on next sibling if available!
                 if schema_cursor.goto_next_sibling() && input_cursor.goto_next_sibling() {
                     trace!("Moving to next sibling list items for continued validation");
-                    let new_matches = ListVsListValidator::default()
+                    let new_matches = ListVsListValidator
                         .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                     result.join_other_result(&new_matches);
                 } else {
@@ -549,7 +549,7 @@ fn validate_list_item_contents_vs_list_item_contents(
     input_str: &str,
     got_eof: bool,
 ) -> (ValidationResult, bool) {
-    let mut result = ValidationResult::from_cursors(&schema_cursor, &input_cursor);
+    let mut result = ValidationResult::from_cursors(schema_cursor, input_cursor);
 
     let mut schema_cursor = schema_cursor.clone();
     let mut input_cursor = input_cursor.clone();
@@ -885,7 +885,7 @@ mod tests {
             .unwrap()
             .unwrap();
 
-        assert_eq!(matcher.id(), Some("name".into()));
+        assert_eq!(matcher.id(), Some("name"));
         // MatcherType is now always a regex pattern
         assert!(!format!("{}", matcher.pattern()).is_empty());
     }

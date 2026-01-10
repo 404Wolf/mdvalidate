@@ -76,7 +76,7 @@ macro_rules! compare_node_children_lengths_check {
         $got_eof:expr,
         $result:expr
     ) => {
-        if let Some(error) = crate::mdschema::validator::node_walker::helpers::node_children_lengths::compare_node_children_lengths(
+        if let Some(error) = $crate::mdschema::validator::node_walker::helpers::node_children_lengths::compare_node_children_lengths(
             &$schema_cursor,
             &$input_cursor,
             $got_eof,

@@ -63,11 +63,11 @@ pub fn compare_node_kinds(
     }
 
     if schema_cursor.node().kind() == "atx_heading" && input_cursor.node().kind() == "atx_heading" {
-        let schema_heading_kind = match get_heading_kind(&schema_cursor) {
+        let schema_heading_kind = match get_heading_kind(schema_cursor) {
             Ok(kind) => kind,
             Err(error) => return Some(error),
         };
-        let input_heading_kind = match get_heading_kind(&input_cursor) {
+        let input_heading_kind = match get_heading_kind(input_cursor) {
             Ok(kind) => kind,
             Err(error) => return Some(error),
         };
@@ -123,7 +123,7 @@ macro_rules! compare_node_kinds_check {
         $input_str:expr,
         $result:expr
     ) => {
-        if let Some(error) = crate::mdschema::validator::node_walker::helpers::compare_node_kinds::compare_node_kinds(
+        if let Some(error) = $crate::mdschema::validator::node_walker::helpers::compare_node_kinds::compare_node_kinds(
             &$schema_cursor,
             &$input_cursor,
             $schema_str,

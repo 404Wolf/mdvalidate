@@ -99,12 +99,12 @@ impl ValidatorImpl for ContainerVsContainerValidator {
         );
 
         if is_repeated_matcher_paragraph(&schema_cursor, walker.schema_str()) {
-            return RepeatedMatcherParagraphVsParagraphValidator::default()
+            return RepeatedMatcherParagraphVsParagraphValidator
                 .validate(walker, got_eof);
         }
 
-        if !self.allow_repeating {
-            if let Some(repeating_matcher_index) =
+        if !self.allow_repeating
+            && let Some(repeating_matcher_index) =
                 check_repeating_matchers(&schema_cursor, walker.schema_str())
             {
                 result.add_error(ValidationError::SchemaError(
@@ -114,7 +114,6 @@ impl ValidatorImpl for ContainerVsContainerValidator {
                 ));
                 return result;
             }
-        }
 
         match count_non_literal_matchers_in_children(&schema_cursor, walker.schema_str()) {
             Ok(non_literal_matchers_in_children)
@@ -214,10 +213,10 @@ impl ValidatorImpl for ContainerVsContainerValidator {
             let pair_result = if both_are_link_nodes(&schema_cursor.node(), &input_cursor.node())
                 || both_are_image_nodes(&schema_cursor.node(), &input_cursor.node())
             {
-                LinkVsLinkValidator::default()
+                LinkVsLinkValidator
                     .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof)
             } else {
-                let new_result = TextualVsTextualValidator::default()
+                let new_result = TextualVsTextualValidator
                     .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                 new_result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
                 new_result
@@ -274,7 +273,7 @@ pub(super) struct RepeatedMatcherParagraphVsParagraphValidator;
 impl ValidatorImpl for RepeatedMatcherParagraphVsParagraphValidator {
     fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
         let mut result =
-            ValidationResult::from_cursors(walker.schema_cursor(), &walker.input_cursor());
+            ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
 
         let mut schema_cursor = walker.schema_cursor().clone();
         let mut input_cursor = walker.input_cursor().clone();
@@ -320,10 +319,7 @@ impl ValidatorImpl for RepeatedMatcherParagraphVsParagraphValidator {
                     let input_paragraph_text =
                         get_node_text(&input_cursor.node(), walker.input_str());
 
-                    match matcher.match_str(input_paragraph_text) {
-                        Some(matched) => matches.push(matched),
-                        None => {}
-                    }
+                    if let Some(matched) = matcher.match_str(input_paragraph_text) { matches.push(matched) }
 
                     let prev_sibling = input_cursor.clone();
                     if input_cursor.goto_next_sibling() && is_paragraph_node(&input_cursor.node()) {

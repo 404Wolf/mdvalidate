@@ -47,7 +47,7 @@ pub fn has_literal_within_extras(text: &str) -> bool {
         && text.len() != 1
         && !{
             match partition_at_special_chars(&text[1..]) {
-                Some((extras, _after)) => extras == "",
+                Some((extras, _after)) => extras.is_empty(),
                 None => false,
             }
         }
@@ -128,11 +128,10 @@ impl MatcherExtras {
     /// * `text` - Optional text following the matcher code block
     pub fn try_new(text: Option<&str>) -> Result<Self, MatcherExtrasError> {
         // Check if text matches the pattern, if text is provided
-        if let Some(text) = text {
-            if !MATCHERS_EXTRA_PATTERN.is_match(text) {
+        if let Some(text) = text
+            && !MATCHERS_EXTRA_PATTERN.is_match(text) {
                 return Err(MatcherExtrasError::MatcherExtrasInvalid);
             }
-        }
 
         Ok(match text {
             Some(text) => {

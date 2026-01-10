@@ -188,7 +188,7 @@ impl Matcher {
         }
 
         let (id, pattern) = match captures {
-            Some(caps) => extract_id_and_pattern(&caps, &pattern_str)?,
+            Some(caps) => extract_id_and_pattern(&caps, pattern_str)?,
             None => {
                 return Err(MatcherError::MatcherInteriorRegexInvalid(format!(
                     "Expected format: 'id:/regex/' or 'id', got {}",
@@ -233,7 +233,7 @@ impl Matcher {
         let pattern_str = get_node_text(&schema_cursor.node(), schema_str);
         let next_node = get_next_node(schema_cursor);
         let extras_str = next_node
-            .filter(|n| is_text_node(&n)) // don't bother if not text; extras must be in text
+            .filter(|n| is_text_node(n)) // don't bother if not text; extras must be in text
             .map(|n| get_node_text(&n, schema_str))
             .and_then(|n| partition_at_special_chars(n).map(|(extras, _)| extras));
 
@@ -258,7 +258,7 @@ impl Matcher {
 
     /// The ID of the matcher. This is the key in the final JSON.
     pub fn id(&self) -> Option<&str> {
-        self.id.as_ref().map(|s| s.as_str())
+        self.id.as_deref()
     }
 
     /// Get a reference to the extras
@@ -500,7 +500,7 @@ mod tests {
         // rather than there being wrong ones. We probably want to change this
         // eventually though.
         let result = Matcher::try_from_pattern_and_suffix_str("`name:/test/`", Some("bullshit"));
-        assert!(!result.is_err()); // TODO: for now
+        assert!(result.is_ok()); // TODO: for now
     }
 
     #[test]

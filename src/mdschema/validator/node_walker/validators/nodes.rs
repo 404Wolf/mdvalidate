@@ -55,20 +55,20 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     if both_are_textual_nodes(&schema_node, &input_node) {
         trace!("Both are textual nodes, validating text vs text");
 
-        return TextualVsTextualValidator::default()
+        return TextualVsTextualValidator
             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are codeblock nodes
     else if both_are_codeblocks(&schema_node, &input_node) {
-        return CodeVsCodeValidator::default()
+        return CodeVsCodeValidator
             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     } else if both_are_quotes(&schema_node, &input_node) {
-        return QuoteVsQuoteValidator::default()
+        return QuoteVsQuoteValidator
             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are tables
     else if both_are_tables(&schema_node, &input_node) {
-        return TableVsTableValidator::default()
+        return TableVsTableValidator
             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are textual containers
@@ -78,19 +78,19 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
     }
     // Both are textual nodes
     else if both_are_textual_nodes(&schema_node, &input_node) {
-        return TextualVsTextualValidator::default()
+        return TextualVsTextualValidator
             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are link nodes or image nodes
     else if both_are_link_nodes(&schema_node, &input_node)
         || both_are_image_nodes(&schema_node, &input_node)
     {
-        return LinkVsLinkValidator::default()
+        return LinkVsLinkValidator
             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are list nodes
     else if both_are_list_nodes(&schema_node, &input_node) {
-        return ListVsListValidator::default()
+        return ListVsListValidator
             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
     // Both are ruler nodes
@@ -100,7 +100,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         // First, if they are headings, validate the headings themselves.
         trace!("Both are heading nodes, validating heading vs heading");
 
-        let heading_result = HeadingVsHeadingValidator::default()
+        let heading_result = HeadingVsHeadingValidator
             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
 
         result.join_other_result(&heading_result);
@@ -130,7 +130,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             input_cursor.goto_first_child(),
         ) {
             (true, true) => {
-                let new_result = NodeVsNodeValidator::default()
+                let new_result = NodeVsNodeValidator
                     .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                 result.join_other_result(&new_result);
                 result.sync_cursor_pos(&schema_cursor, &input_cursor);
@@ -180,7 +180,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 input_cursor.goto_next_sibling(),
             ) {
                 (true, true) => {
-                    let new_result = NodeVsNodeValidator::default()
+                    let new_result = NodeVsNodeValidator
                         .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                     result.join_other_result(&new_result);
                     result.sync_cursor_pos(&schema_cursor, &input_cursor);
@@ -325,7 +325,7 @@ mod tests {
                 || result
                     .value()
                     .as_object()
-                    .map_or(true, |obj| obj.is_empty())
+                    .is_none_or(|obj| obj.is_empty())
         );
     }
 

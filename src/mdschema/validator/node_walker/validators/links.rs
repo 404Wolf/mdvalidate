@@ -274,8 +274,8 @@ fn validate_link_destination(
         }
     }
 
-    if let Some(matcher_result) = extract_matcher_from_curly_delineated_text(input_text) {
-        if let Ok(matcher) = matcher_result {
+    if let Some(matcher_result) = extract_matcher_from_curly_delineated_text(input_text)
+        && let Ok(matcher) = matcher_result {
             if let Some(matched_str) = matcher.match_str(schema_text) {
                 if let Some(id) = matcher.id() {
                     result.set_match(id, json!(matched_str));
@@ -294,7 +294,6 @@ fn validate_link_destination(
 
             return result;
         }
-    }
 
     let text_result = compare_text_contents(
         schema_str,

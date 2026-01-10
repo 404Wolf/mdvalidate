@@ -174,7 +174,7 @@ mod test_utils {
             self.print();
             panic!();
             #[allow(unreachable_code)]
-            return &mut self;
+            return self;
         }
 
         pub fn print(&mut self) -> &mut Self {

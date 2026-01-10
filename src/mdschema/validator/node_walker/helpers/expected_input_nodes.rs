@@ -16,7 +16,7 @@ use crate::mdschema::validator::{
 /// # Algorithm
 ///
 /// ```ignore
-//// we at matcher?
+/// we at matcher?
 /// ├── no
 /// │   └── next is matcher?
 /// │       ├── no -> 0
@@ -131,19 +131,15 @@ fn has_extra_text(schema_cursor: &TreeCursor, schema_str: &str) -> Result<bool, 
         Some(is_literal) => {
             let had_next_matcher = move_cursor_to_next_matcher(&mut lookahead_cursor, schema_str)?;
 
-            let has_text_after_matcher = text_after_matcher(schema_cursor, schema_str)? != "";
+            let has_text_after_matcher = !(text_after_matcher(schema_cursor, schema_str)?).is_empty();
 
             if has_text_after_matcher {
                 return Ok(true);
             }
 
             if is_literal {
-                let next_is_literal = match at_coalescing_matcher(&lookahead_cursor, schema_str)
-                    .unwrap_or(Some(false))
-                {
-                    Some(next_matcher_is_literal) => next_matcher_is_literal,
-                    None => false,
-                };
+                let next_is_literal = at_coalescing_matcher(&lookahead_cursor, schema_str)
+                    .unwrap_or(Some(false)).unwrap_or_default();
                 if !had_next_matcher {
                     return Ok(false);
                 };
@@ -173,7 +169,7 @@ fn text_after_matcher<'a>(
         );
     }
 
-    match get_next_node(&schema_cursor) {
+    match get_next_node(schema_cursor) {
         Some(next_node) => {
             if !is_text_node(&next_node) {
                 return Ok("");
@@ -204,7 +200,7 @@ fn extras_after_matcher<'a>(
         );
     }
 
-    match get_next_node(&schema_cursor) {
+    match get_next_node(schema_cursor) {
         Some(next_node) => {
             let next_node_str = get_node_text(&next_node, schema_str);
 
@@ -266,7 +262,7 @@ fn move_cursor_to_next_matcher(
     schema_cursor: &mut TreeCursor,
     schema_str: &str,
 ) -> Result<bool, ValidationError> {
-    let extras_after_matcher = extras_after_matcher(schema_cursor, schema_str)? != "";
+    let extras_after_matcher = !(extras_after_matcher(schema_cursor, schema_str)?).is_empty();
 
     // If there was extras after the matcher, that means we should skip to the
     // next next node
@@ -310,7 +306,7 @@ mod tests {
         has_extra_text(&schema_cursor, schema_str).unwrap()
     }
 
-    fn get_text_after_matcher<'a>(schema_str: &'a str) -> &'a str {
+    fn get_text_after_matcher(schema_str: &str) -> &str {
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child();
@@ -318,7 +314,7 @@ mod tests {
         text_after_matcher(&schema_cursor, schema_str).unwrap()
     }
 
-    fn get_extras_after_matcher<'a>(schema_str: &'a str) -> &'a str {
+    fn get_extras_after_matcher(schema_str: &str) -> &str {
         let schema_tree = parse_markdown(schema_str).unwrap();
         let mut schema_cursor = schema_tree.walk();
         schema_cursor.goto_first_child();

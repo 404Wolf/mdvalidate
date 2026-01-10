@@ -49,7 +49,7 @@ fn validate_textual_vs_textual_impl(walker: &ValidatorWalker, got_eof: bool) -> 
     };
 
     if current_node_is_code_node || current_node_is_text_node_and_next_node_code_node {
-        return MatcherVsTextValidator::default().validate(walker, got_eof);
+        return MatcherVsTextValidator.validate(walker, got_eof);
     }
 
     validate_textual_vs_textual_direct(
@@ -93,12 +93,12 @@ pub(super) fn validate_textual_vs_textual_direct(
 
     compare_node_kinds_check!(schema_cursor, input_cursor, schema_str, input_str, result);
 
-    let is_partial_match = waiting_at_end(got_eof, input_str, &input_cursor);
+    let is_partial_match = waiting_at_end(got_eof, input_str, input_cursor);
     let text_result = compare_text_contents(
         schema_str,
         input_str,
-        &schema_cursor,
-        &input_cursor,
+        schema_cursor,
+        input_cursor,
         is_partial_match,
         false,
     );

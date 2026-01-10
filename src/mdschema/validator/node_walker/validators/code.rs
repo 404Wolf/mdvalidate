@@ -159,8 +159,7 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
                 Some((input_lang_str, input_lang_descendant_index)),
                 Some((schema_lang_str, schema_lang_descendant_index)),
             ) = (schema_lang, input_lang)
-            {
-                if input_lang_str != schema_lang_str {
+                && input_lang_str != schema_lang_str {
                     result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::NodeContentMismatch {
                             schema_index: *schema_lang_descendant_index,
@@ -171,7 +170,6 @@ fn validate_code_vs_code_impl(walker: &ValidatorWalker) -> ValidationResult {
                         },
                     ));
                 }
-            }
         }
     }
 

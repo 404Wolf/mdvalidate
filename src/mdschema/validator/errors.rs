@@ -19,7 +19,7 @@ macro_rules! trace_cursors {
     ($schema_cursor:expr, $input_cursor:expr) => {{
         println!(
             "{}",
-            crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair(
+            $crate::mdschema::validator::node_walker::utils::pretty_print_cursor_pair(
                 &$schema_cursor,
                 &$input_cursor,
             )

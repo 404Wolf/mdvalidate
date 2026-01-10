@@ -372,7 +372,7 @@ This is a test"#;
                 "Expected exactly one error but found {:?}",
                 errors
             );
-            assert!(matches.is_null() || matches.as_object().map_or(true, |obj| obj.is_empty()));
+            assert!(matches.is_null() || matches.as_object().is_none_or(|obj| obj.is_empty()));
         }
     }
 

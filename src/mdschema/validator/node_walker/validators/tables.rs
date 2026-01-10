@@ -502,7 +502,7 @@ fn try_get_repeated_row_bounds(
     let full_row_str = get_node_text(&schema_cursor.node(), schema_str);
     // We are guaranteed there will be a cell at the very end that could be a
     // correct repeater if the cell does not end with "|" or ":"
-    if full_row_str.ends_with(|c| c == '|' || c == ':') {
+    if full_row_str.ends_with(['|', ':']) {
         return None;
     }
 
