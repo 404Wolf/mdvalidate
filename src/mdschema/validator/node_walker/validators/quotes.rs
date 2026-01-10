@@ -61,10 +61,8 @@ impl ValidatorImpl for QuoteVsQuoteValidator {
         }
 
         // Delegate to TextualContainerVsTextualContainerValidator for the children
-        return ContainerVsContainerValidator::default().validate(
-            &walker.with_cursors(&schema_cursor, &input_cursor),
-            got_eof,
-        );
+        return ContainerVsContainerValidator::default()
+            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
     }
 }
 

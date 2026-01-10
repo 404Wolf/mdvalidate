@@ -312,10 +312,8 @@ impl ValidatorImpl for MatcherVsTextValidator {
                     }
 
                     // Delegate to the literal matcher validator
-                    return LiteralMatcherVsTextualValidator::default().validate(
-                        &walker.with_cursors(&schema_cursor, &input_cursor),
-                        got_eof,
-                    );
+                    return LiteralMatcherVsTextualValidator::default()
+                        .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                 }
                 _ => result.add_error(ValidationError::SchemaError(SchemaError::MatcherError {
                     error,

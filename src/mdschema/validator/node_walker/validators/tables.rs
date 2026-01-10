@@ -121,7 +121,7 @@ impl ValidatorImpl for TableVsTableValidator {
                         && let Some(bounds) =
                             try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
                     {
-                        let repeated_row_result = RepeatedRowVsRowValidator::new(bounds)
+                        let repeated_row_result = RepeatedRowVsRowValidator::from_bounds(bounds)
                             .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                         repeated_row_result
                             .walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
@@ -233,13 +233,12 @@ fn goto_next_sibling_pair_or_exit<'a>(
     }
 }
 
-#[derive(Default)]
 pub(super) struct RepeatedRowVsRowValidator {
     bounds: (Option<usize>, Option<usize>),
 }
 
 impl RepeatedRowVsRowValidator {
-    pub fn new(bounds: (Option<usize>, Option<usize>)) -> Self {
+    pub fn from_bounds(bounds: (Option<usize>, Option<usize>)) -> Self {
         Self { bounds }
     }
 }
@@ -268,8 +267,17 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
 
         let max_bound = self.bounds.1.unwrap_or(usize::MAX);
 
-        let corresponding_matchers =
-            get_cell_indexes_that_have_simple_matcher(&schema_cursor, walker.schema_str());
+        let corresponding_matchers = {
+            let mut schema_cursor = schema_cursor.clone();
+            let had_first_child = schema_cursor.goto_first_child();
+
+            #[cfg(feature = "invariant_violations")]
+            if !had_first_child {
+                invariant_violation!("should have had first child")
+            }
+
+            get_cell_indexes_that_have_simple_matcher(&schema_cursor, walker.schema_str())
+        };
 
         let corresponding_matchers_only_matchers: Vec<&Matcher> = corresponding_matchers
             .iter()
@@ -810,14 +818,18 @@ mod tests {
 |a2|b2|
 "#;
 
-        let result = ValidatorTester::<RepeatedRowVsRowValidator>::from_strs(schema_str, input_str)
-            .walk()
-            .goto_first_child_then_unwrap() // document -> table
-            .goto_first_child_then_unwrap() // table -> header row
-            .goto_next_sibling_then_unwrap() // header row -> delimiter row
-            .goto_next_sibling_then_unwrap() // delimiter row -> data row
-            .peek_nodes(|(s, i)| assert!(both_are_table_data_rows(s, i)))
-            .validate_complete();
+        let result = ValidatorTester::from_strs_and_validator(
+            schema_str,
+            input_str,
+            RepeatedRowVsRowValidator::from_bounds((None, None)),
+        )
+        .walk()
+        .goto_first_child_then_unwrap() // document -> table
+        .goto_first_child_then_unwrap() // table -> header row
+        .goto_next_sibling_then_unwrap() // header row -> delimiter row
+        .goto_next_sibling_then_unwrap() // delimiter row -> data row
+        .peek_nodes(|(s, i)| assert!(both_are_table_data_rows(s, i)))
+        .validate_complete();
 
         assert_eq!(result.errors(), vec![]);
         assert_eq!(

@@ -14,8 +14,9 @@ use crate::mdschema::validator::{
 
 static ID_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9-_]+$").unwrap());
 
-static REGEX_MATCHER_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^(?:(?P<id_with_regex>[a-zA-Z0-9-_]+):)?(?:\/(?P<regex>.+?)\/|(?P<bare_id>[a-zA-Z0-9-_]+))$").unwrap());
+static REGEX_MATCHER_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:(?P<id_with_regex>[a-zA-Z0-9-_]+):)?(?:\/(?P<regex>.+?)\/|(?P<bare_id>[a-zA-Z0-9-_]+))$").unwrap()
+});
 
 static RANGE_PATTERN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{(\d*),(\d*)\}").unwrap());
 
@@ -315,7 +316,9 @@ fn extract_id_and_pattern(
     }
 
     // Otherwise, we have a regex pattern (e.g., `id:/regex/` or `/regex/`)
-    let id = captures.name("id_with_regex").map(|m| m.as_str().to_string());
+    let id = captures
+        .name("id_with_regex")
+        .map(|m| m.as_str().to_string());
     let regex_pattern = captures
         .name("regex")
         .map(|m| m.as_str().to_string())
@@ -327,9 +330,10 @@ fn extract_id_and_pattern(
         })?;
 
     // Create a regex matcher from the pattern
-    let matcher = MatcherKind::from_regex(Regex::new(&format!("^{}", regex_pattern)).map_err(|e| {
-        MatcherError::MatcherInteriorRegexInvalid(format!("Invalid regex pattern: {}", e))
-    })?);
+    let matcher =
+        MatcherKind::from_regex(Regex::new(&format!("^{}", regex_pattern)).map_err(|e| {
+            MatcherError::MatcherInteriorRegexInvalid(format!("Invalid regex pattern: {}", e))
+        })?);
 
     Ok((id, matcher))
 }
@@ -469,13 +473,17 @@ mod tests {
         // Matches everything including spaces and special characters
         assert_eq!(matcher.match_str("valid-later"), Some("valid-later"));
         assert_eq!(matcher.match_str("test@symbol"), Some("test@symbol"));
-        assert_eq!(matcher.match_str("anything at all!"), Some("anything at all!"));
+        assert_eq!(
+            matcher.match_str("anything at all!"),
+            Some("anything at all!")
+        );
     }
 
     #[test]
     fn test_matcher_invalid_pattern() {
         // Test error handling for truly invalid pattern (invalid chars for ID, not a regex)
-        let result = Matcher::try_from_pattern_and_suffix_str("`invalid pattern with spaces`", None);
+        let result =
+            Matcher::try_from_pattern_and_suffix_str("`invalid pattern with spaces`", None);
         assert!(result.is_err());
         match result.as_ref().unwrap_err() {
             MatcherError::MatcherInteriorRegexInvalid(_) => {

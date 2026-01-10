@@ -10,10 +10,7 @@ use crate::mdschema::validator::{
     matcher::matcher::{Matcher, MatcherError},
     node_walker::{
         ValidationResult,
-        validators::{
-            Validator, ValidatorImpl,
-            containers::{ContainerVsContainerValidatorBuilder},
-        },
+        validators::{Validator, ValidatorImpl, containers::ContainerVsContainerValidatorBuilder},
     },
     ts_types::*,
     ts_utils::{

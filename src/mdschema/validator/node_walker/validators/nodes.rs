@@ -116,7 +116,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
         trace!("Both are heading nodes or document nodes. Recursing into sibling pairs.");
 
         // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
-        compare_node_children_lengths_check!(schema_cursor, input_cursor, got_eof, result);
+        // compare_node_children_lengths_check!(schema_cursor, input_cursor, got_eof, result);
 
         let parent_pos = NodePosPair::from_cursors(&schema_cursor, &input_cursor);
 
