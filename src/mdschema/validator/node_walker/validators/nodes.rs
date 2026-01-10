@@ -42,6 +42,7 @@ impl ValidatorImpl for NodeVsNodeValidator {
 
 fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
     let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
+    let need_to_restart_result = result.clone();
 
     let schema_node = walker.schema_cursor().node();
     let input_node = walker.input_cursor().node();
@@ -142,6 +143,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             (false, true) => {
                 if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
                     // okay, we'll just wait!
+                    return need_to_restart_result;
                 } else {
                     result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::MalformedNodeStructure {
@@ -155,6 +157,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
             (true, false) => {
                 if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
                     // okay, we'll just wait!
+                    return need_to_restart_result;
                 } else {
                     result.add_error(ValidationError::SchemaViolation(
                         SchemaViolationError::MalformedNodeStructure {
@@ -190,6 +193,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 (false, true) => {
                     if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
                         // okay, we'll just wait!
+                        return need_to_restart_result;
                     } else {
                         result.add_error(ValidationError::SchemaViolation(
                             SchemaViolationError::MalformedNodeStructure {
@@ -203,6 +207,7 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                 (true, false) => {
                     if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
                         // okay, we'll just wait!
+                        return need_to_restart_result;
                     } else {
                         result.add_error(ValidationError::SchemaViolation(
                             SchemaViolationError::MalformedNodeStructure {

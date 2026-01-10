@@ -3,7 +3,6 @@
 //! Types:
 //! - `TableVsTableValidator`: validates table structure (rows, headers, cells)
 //!   and delegates cell content checks to textual container validation.
-use crate::invariant_violation;
 use crate::mdschema::validator::errors::{
     MalformedStructureKind, NodeContentMismatchKind, SchemaViolationError, ValidationError,
 };
@@ -16,8 +15,8 @@ use crate::mdschema::validator::node_walker::validators::{Validator, ValidatorIm
 use crate::mdschema::validator::ts_types::*;
 use crate::mdschema::validator::ts_utils::{get_node_text, waiting_at_end};
 use crate::mdschema::validator::validator_walker::ValidatorWalker;
+use crate::{invariant_violation, trace_cursors};
 use log::trace;
-use regex::bytes::Match;
 use tree_sitter::TreeCursor;
 
 /// Validate two tables.
@@ -92,6 +91,21 @@ impl ValidatorImpl for TableVsTableValidator {
                     let mut schema_cursor = schema_cursor.clone();
                     let mut input_cursor = input_cursor.clone();
 
+                    // First check if we are dealing with a special case -- repeated rows!
+                    trace_cursors!(schema_cursor, input_cursor);
+                    if both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node())
+                        && let Some(bounds) =
+                            try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
+                    {
+                        // trace_cursors!(schema_cursor, input_cursor);
+                        let repeated_row_result = RepeatedRowVsRowValidator::from_bounds(bounds)
+                            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+                        repeated_row_result
+                            .walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
+                        dbg!(repeated_row_result);
+                        trace_cursors!(schema_cursor, input_cursor);
+                    }
+
                     match (
                         schema_cursor.goto_first_child(),
                         input_cursor.goto_first_child(),
@@ -116,17 +130,6 @@ impl ValidatorImpl for TableVsTableValidator {
                         ),
                     }
 
-                    // First check if we are dealing with a special case -- repeated rows!
-                    if both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node())
-                        && let Some(bounds) =
-                            try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
-                    {
-                        let repeated_row_result = RepeatedRowVsRowValidator::from_bounds(bounds)
-                            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-                        repeated_row_result
-                            .walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
-                    }
-
                     // we are at the first cell initially. we validate the first
                     // cell in the input vs the first cell in the schema, and then
                     // jump to the next sibling pair. If there is no next sibling
@@ -142,20 +145,34 @@ impl ValidatorImpl for TableVsTableValidator {
                         ) {
                             (true, true) => {}
                             (false, false) => break 'col_iter,
-                            (true, false) => {
-                                if goto_next_sibling_pair_or_exit(
-                                    &schema_cursor,
-                                    &input_cursor,
-                                    walker,
-                                    got_eof,
-                                    &mut result,
-                                ) {
-                                    return result;
+                            (false, true) => {
+                                if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                                    // okay, we'll just wait!
                                 } else {
-                                    return need_to_restart_result;
+                                    result.add_error(ValidationError::SchemaViolation(
+                                        SchemaViolationError::MalformedNodeStructure {
+                                            schema_index: schema_cursor.descendant_index(),
+                                            input_index: input_cursor.descendant_index(),
+                                            kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
+                                        },
+                                    ));
                                 }
                             }
-                            (false, true) => {}
+                            (true, false) => {
+                                if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                                    // okay, we'll just wait!
+                                    return need_to_restart_result;
+                                } else {
+                                    result.add_error(ValidationError::SchemaViolation(
+                                        SchemaViolationError::MalformedNodeStructure {
+                                            schema_index: schema_cursor.descendant_index(),
+                                            input_index: input_cursor.descendant_index(),
+                                            kind: MalformedStructureKind::SchemaHasChildInputDoesnt,
+                                        },
+                                    ));
+                                }
+                                return result;
+                            }
                         }
                     }
                 }
@@ -180,56 +197,40 @@ impl ValidatorImpl for TableVsTableValidator {
                         }
                     }
                     (false, false) => break 'row_iter,
-                    (true, false) => {
-                        if goto_next_sibling_pair_or_exit(
-                            &schema_cursor,
-                            &input_cursor,
-                            walker,
-                            got_eof,
-                            &mut result,
-                        ) {
-                            return result;
-                        } else {
+                    (false, true) => {
+                        if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                            // okay, we'll just wait!
                             return need_to_restart_result;
+                        } else {
+                            result.add_error(ValidationError::SchemaViolation(
+                                SchemaViolationError::MalformedNodeStructure {
+                                    schema_index: schema_cursor.descendant_index(),
+                                    input_index: input_cursor.descendant_index(),
+                                    kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
+                                },
+                            ));
                         }
                     }
-                    _ => {
-                        invariant_violation!(
-                            result,
-                            &schema_cursor,
-                            &input_cursor,
-                            "table is malformed in a way that should be impossible"
-                        )
+                    (true, false) => {
+                        if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                            // okay, we'll just wait!
+                            return need_to_restart_result;
+                        } else {
+                            result.add_error(ValidationError::SchemaViolation(
+                                SchemaViolationError::MalformedNodeStructure {
+                                    schema_index: schema_cursor.descendant_index(),
+                                    input_index: input_cursor.descendant_index(),
+                                    kind: MalformedStructureKind::SchemaHasChildInputDoesnt,
+                                },
+                            ));
+                        }
+                        return result;
                     }
                 }
             }
         }
 
         result
-    }
-}
-
-/// Returns true if we should early return with an error (result was modified).
-///
-/// This is for the case where the input has a child but the schema does not.
-fn goto_next_sibling_pair_or_exit<'a>(
-    schema_cursor: &TreeCursor<'a>,
-    input_cursor: &TreeCursor<'a>,
-    walker: &ValidatorWalker,
-    got_eof: bool,
-    result: &mut ValidationResult,
-) -> bool {
-    if !waiting_at_end(got_eof, walker.input_str(), input_cursor) {
-        result.add_error(ValidationError::SchemaViolation(
-            SchemaViolationError::MalformedNodeStructure {
-                schema_index: schema_cursor.descendant_index(),
-                input_index: input_cursor.descendant_index(),
-                kind: MalformedStructureKind::MismatchingTableCells,
-            },
-        ));
-        true
-    } else {
-        false
     }
 }
 
@@ -245,7 +246,7 @@ impl RepeatedRowVsRowValidator {
 
 impl ValidatorImpl for RepeatedRowVsRowValidator {
     fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-        let mut schema_cursor = walker.schema_cursor().clone();
+        let schema_cursor = walker.schema_cursor().clone();
         let mut input_cursor = walker.input_cursor().clone();
 
         let mut result = ValidationResult::from_cursors(&schema_cursor, &input_cursor);
@@ -288,7 +289,7 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
         let mut all_matches: Vec<Vec<String>> = vec![Vec::new(); num_corresponding_matchers];
 
         'row_iter: for _ in 0..max_bound {
-            let mut schema_cursor_at_first_cell = schema_cursor_at_first_cell.clone();
+            let schema_cursor_at_first_cell = schema_cursor_at_first_cell.clone();
 
             // Validate the entire row
             {
@@ -819,7 +820,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_validate_table_vs_table_with_repeated_cell() {
         let schema_str = r#"
 |c2|c2|
