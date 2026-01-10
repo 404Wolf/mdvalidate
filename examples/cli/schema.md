@@ -6,36 +6,6 @@ Imported with [Obsidian Markdown Importer](https://github.com/404Wolf/obsidian-c
 
 ## Phones
 
-| Type   | Number             |
-| :----- | :----------------- |
-| Backup | `c!(917) 246-7875` |
-| Misc   | `c!(929) 265-7180` |
-
-## Emails
-
-| Type                | Address        |
-| :------------------ | :------------- |
-| `contact_type:/.*/` | `contact:/.*/` |{,}
-
-
-## Socials
-
-| Type               | Handle        |
-|:-------------------|:--------------|
-| `social_type:/.*/` | `social:/.*/` |{,}
-
-## Links
-
-| Type             | URL                     |
-| :--------------- | :---------------------- |
-| `link_type:/.*/` | `link_url:/.*/`         |{,}
-
-## Other
-
-| Type              | Value         |
-|:------------------|:--------------|
-| `other_type:/.*/` | `other_url:/.*/` |{,}
-
----
-
-`comments`{,}
+| Type              | Number              |
+| :---------------- | :------------------ |
+| `phone_type:/.*/` | `phone_number:/.*/` |{,}

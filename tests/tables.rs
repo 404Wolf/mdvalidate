@@ -33,22 +33,22 @@ test_case!(
     r#"
 # Shopping List
 
-| Item | Price |
-|:-----|:------|
-| Header | 10 |
+| Item | Price                 |
+|:-----|:----------------------|
+| Header       | 10            |
 | `item:/\w+/` | `price:/\d+/` |{,3}
-| Footer | 99 |
+| Footer       | 99            |
 "#,
     r#"
 # Shopping List
 
-| Item | Price |
-|:-----|:------|
-| Header | 10 |
-| Apple  | 5  |
-| Banana | 3  |
-| Cherry | 7  |
-| Footer | 99 |
+| Item   | Price |
+|:-------|:------|
+| Header | 10    |
+| Apple  | 5     |
+| Banana | 3     |
+| Cherry | 7     |
+| Footer | 99    |
 "#,
     json!({"item": ["Apple", "Banana", "Cherry"], "price": ["5", "3", "7"]}),
     vec![]

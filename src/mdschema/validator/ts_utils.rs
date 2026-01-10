@@ -14,7 +14,13 @@ use std::sync::LazyLock;
 /// Extract text from a tree-sitter node using the provided source string.
 pub fn get_node_text<'a, S: Into<&'a str>>(node: &Node, src: S) -> &'a str {
     let src_ref = src.into();
-    node.utf8_text(src_ref.as_bytes()).unwrap()
+    let node_str = node.utf8_text(src_ref.as_bytes()).unwrap();
+
+    if is_table_cell_node(&node) || node.parent().is_some_and(|n| is_table_cell_node(&n)) {
+        node_str.trim_start().trim_end()
+    } else {
+        node_str
+    }
 }
 
 /// Ordered lists use numbers followed by period . or right paren )

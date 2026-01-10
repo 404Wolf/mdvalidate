@@ -88,7 +88,6 @@ impl ValidatorImpl for TableVsTableValidator {
 
         'row_iter: loop {
             // First check if we are dealing with a special case -- repeated rows!
-            trace_cursors!(schema_cursor, input_cursor);
             if both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node())
                 && let Some(bounds) =
                     try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
