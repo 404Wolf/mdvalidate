@@ -1,20 +1,41 @@
-# Has `num:/d/` to 3 paragraphs
-
-`test:/test\d/`{1,3}
-
-|c2|c2|
-|-|-|
-|a1|b1|
-|a2|b2|
+Imported with [Obsidian Markdown Importer](https://github.com/404Wolf/obsidian-contact-importer)
 
 ---
 
-Output is
+![{image_link:/.*/}]({image_filename:/.*/})
 
-```json
-{
-"num": "1",
-"test": ["test1", "test2", "test3"]
-"a": ["a1", "a2"], "b": ["b1", "b2"]
-}
-```
+## Phones
+
+| Type   | Number             |
+| :----- | :----------------- |
+| Backup | `c!(917) 246-7875` |
+| Misc   | `c!(929) 265-7180` |
+
+## Emails
+
+| Type                | Address        |
+| :------------------ | :------------- |
+| `contact_type:/.*/` | `contact:/.*/` |{,}
+
+
+## Socials
+
+| Type               | Handle        |
+|:-------------------|:--------------|
+| `social_type:/.*/` | `social:/.*/` |{,}
+
+## Links
+
+| Type             | URL                     |
+| :--------------- | :---------------------- |
+| `link_type:/.*/` | `link_url:/.*/`         |{,}
+
+## Other
+
+| Type              | Value         |
+|:------------------|:--------------|
+| `other_type:/.*/` | `other_url:/.*/` |{,}
+
+---
+
+`comments`{,}

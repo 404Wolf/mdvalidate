@@ -1,23 +1,40 @@
-# Has 1 to 3 paragraphs
-
-test1
-
-test2
-
-test3
-
-|c2|c2|
-|-|-|
-|`a:/.*/`|`b:/.*/`|{,}
+Imported with [Obsidian Markdown Importer](https://github.com/404Wolf/obsidian-contact-importer)
 
 ---
 
-Output is
+![Image](6bf36ff64dfc6d8a.jpeg)
 
-```json
-{
-"num": "1",
-"test": ["test1", "test2", "test3"]
-"a": ["a1", "a2"], "b": ["b1", "b2"]
-}
-```
+## Phones
+
+| Type   | Number             |
+| :----- | :----------------- |
+| Backup | `c!(917) 246-7875` |
+| Misc   | `c!(929) 265-7180` |
+
+## Emails
+
+| Type           | Address                        |
+| :------------- | :----------------------------- |
+| Misc           | `c!wolf@404wolf.com`           |
+| Misc           | `c!wsm32@case.edu`             |
+
+## Socials
+
+| Type          | Handle        |
+|:--------------|:--------------|
+
+## Links
+
+| Type     | URL                     |
+| :------- | :---------------------- |
+| HomePage | `g!https://404wolf.com` |
+
+## Other
+
+| Type          | Value         |
+|:--------------|:--------------|
+| Birthday      | `g!xxxxxxxx`  |
+
+---
+
+This is me.
