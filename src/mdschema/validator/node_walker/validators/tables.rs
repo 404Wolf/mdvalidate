@@ -95,6 +95,11 @@ impl ValidatorImpl for TableVsTableValidator {
                     .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
                 result.join_other_result(&repeated_row_result);
 
+                // If there were errors in the repeated row validation, return immediately
+                if repeated_row_result.has_errors() {
+                    return result;
+                }
+
                 // Update the cursors to where the repeated row validator left them
                 // The schema cursor stays at the repeating row, input cursor advanced past all matched rows
                 repeated_row_result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
@@ -853,7 +858,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn test_validate_table_vs_table_with_repeated_cell_and_mismatch() {
         let schema_str = r#"
 |c2|c2|
@@ -863,7 +867,7 @@ mod tests {
         let input_str = r#"
 |c2|c2|
 |-|-|
-|a1|b1|
+|a1|xx|
 |a2|b2|
 "#;
 
@@ -874,6 +878,17 @@ mod tests {
             .validate_complete();
 
         assert_eq!(result.errors().len(), 1);
-        todo!("check specific type of error");
+        assert_eq!(
+            result.errors(),
+            vec![ValidationError::SchemaViolation(
+                SchemaViolationError::NodeContentMismatch {
+                    schema_index: 11,
+                    input_index: 18,
+                    expected: "^xx".to_string(),
+                    actual: "b2".to_string(),
+                    kind: NodeContentMismatchKind::Matcher,
+                }
+            )]
+        );
     }
 }
