@@ -4,6 +4,12 @@
 //! Types:
 //! - `MatcherVsTextValidator`: handles pattern matching and capture logic used
 //!   when schema nodes embed matcher syntax inside textual content.
+//! - `TextualVsMatcherValidator`: validates textual nodes when matchers appear
+//!   immediately after schema text and need to cooperate with surrounding
+//!   literals.
+//! - `LiteralMatcherVsTextualValidator`: resolves matcher usage when literal
+//!   matchers span multiple textual nodes, computing matches across adjacent
+//!   literal fragments.
 use log::trace;
 use serde_json::json;
 use tree_sitter::TreeCursor;

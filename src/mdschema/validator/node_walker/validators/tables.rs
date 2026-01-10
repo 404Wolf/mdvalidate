@@ -3,6 +3,9 @@
 //! Types:
 //! - `TableVsTableValidator`: validates table structure (rows, headers, cells)
 //!   and delegates cell content checks to textual container validation.
+//! - `RepeatedRowVsRowValidator`: processes schema rows followed by matcher
+//!   repeaters, keeping the schema stationary while validating multiple input
+//!   rows against a repeating matcher row.
 use crate::mdschema::validator::errors::{
     MalformedStructureKind, NodeContentMismatchKind, SchemaViolationError, ValidationError,
 };
@@ -269,9 +272,6 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
             )
         }
 
-        // A version of the schema cursor where it is pointed at the first cell in the (repeating) row
-        let schema_cursor_at_first_cell = get_cursor_at_first_cell(&schema_cursor);
-
         let max_bound = self.bounds.1.unwrap_or(usize::MAX);
 
         let corresponding_matchers = {
@@ -296,56 +296,61 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
 
         'row_iter: for _ in 0..max_bound {
             // Validate the entire row
-            {
-                let mut input_cursor_at_first_cell = get_cursor_at_first_cell(&input_cursor);
+            let mut input_cursor_at_first_cell = get_cursor_at_first_cell(&input_cursor);
+            let mut schema_cursor_at_first_cell = get_cursor_at_first_cell(&schema_cursor);
 
-                let mut matcher_num = 0;
-                'col_iter: for i in 0.. {
-                    let cell_str =
-                        get_node_text(&input_cursor_at_first_cell.node(), walker.input_str());
+            let mut matcher_num = 0;
+            'col_iter: for i in 0.. {
+                let cell_str =
+                    get_node_text(&input_cursor_at_first_cell.node(), walker.input_str()).trim();
 
-                    match corresponding_matchers.get(i).unwrap() {
-                        Some(matcher) => match matcher.match_str(cell_str) {
-                            Some(captured_str) => {
-                                all_matches
-                                    .get_mut(matcher_num)
-                                    .unwrap() // we pre filled it properly ahead of time
-                                    .push(captured_str.to_string());
+                match corresponding_matchers.get(i).unwrap() {
+                    Some(matcher) => match matcher.match_str(cell_str) {
+                        Some(captured_str) => {
+                            all_matches
+                                .get_mut(matcher_num)
+                                .unwrap() // we pre filled it properly ahead of time
+                                .push(captured_str.to_string());
 
-                                matcher_num += 1;
-                            }
-                            None => {
-                                result.add_error(ValidationError::SchemaViolation(
-                                    SchemaViolationError::NodeContentMismatch {
-                                        schema_index: schema_cursor_at_first_cell
-                                            .descendant_index(),
-                                        input_index: input_cursor_at_first_cell.descendant_index(),
-                                        expected: matcher.pattern().to_string(),
-                                        actual: cell_str.into(),
-                                        kind: NodeContentMismatchKind::Matcher,
-                                    },
-                                ));
-
-                                return result;
-                            }
-                        },
+                            matcher_num += 1;
+                        }
                         None => {
-                            // Validate the cell as a normal container.
-                            let cell_result = ContainerVsContainerValidator::default().validate(
-                                &walker.with_cursors(&schema_cursor, &input_cursor),
-                                got_eof,
-                            );
-                            result.join_data(cell_result.data());
-                            if cell_result.has_errors() {
-                                result.join_errors(cell_result.errors());
-                                return result;
-                            }
+                            result.add_error(ValidationError::SchemaViolation(
+                                SchemaViolationError::NodeContentMismatch {
+                                    schema_index: schema_cursor_at_first_cell.descendant_index(),
+                                    input_index: input_cursor_at_first_cell.descendant_index(),
+                                    expected: matcher.pattern().to_string(),
+                                    actual: cell_str.into(),
+                                    kind: NodeContentMismatchKind::Matcher,
+                                },
+                            ));
+
+                            return result;
+                        }
+                    },
+                    None => {
+                        // Validate the cell as a normal container.
+                        let cell_result = ContainerVsContainerValidator::default().validate(
+                            &walker.with_cursors(
+                                &schema_cursor_at_first_cell,
+                                &input_cursor_at_first_cell,
+                            ),
+                            got_eof,
+                        );
+                        result.join_data(cell_result.data());
+                        if cell_result.has_errors() {
+                            result.join_errors(cell_result.errors());
+                            return result;
                         }
                     }
+                }
 
-                    if !input_cursor_at_first_cell.goto_next_sibling() {
+                if input_cursor_at_first_cell.goto_next_sibling() {
+                    if !schema_cursor_at_first_cell.goto_next_sibling() {
                         break 'col_iter;
                     }
+                } else {
+                    break 'col_iter;
                 }
             }
 
@@ -397,14 +402,47 @@ fn get_cell_indexes_that_have_simple_matcher(
     let mut indexes = Vec::new();
 
     loop {
-        // For it to be a "simple" matcher with nothing else, it must ONLY have
-        // a single child, which is a code node.
-        let single_child_that_is_code = schema_cursor.node().child_count() == 1
-            && is_inline_code_node(&schema_cursor.node().child(0).unwrap());
+        let mut code_child_idx = None;
+        let mut is_simple = true;
 
-        if single_child_that_is_code {
-            if let Ok(matcher) = Matcher::try_from_schema_cursor(&schema_cursor, schema_str) {
-                indexes.push(Some(matcher));
+        for idx in 0..schema_cursor.node().child_count() {
+            let child = schema_cursor.node().child(idx).unwrap();
+
+            if is_inline_code_node(&child) {
+                if code_child_idx.is_some() {
+                    is_simple = false;
+                    break;
+                }
+                code_child_idx = Some(idx);
+            } else if child.kind() == "text" {
+                let text = get_node_text(&child, schema_str);
+                if !text.chars().all(|c| c.is_whitespace()) {
+                    is_simple = false;
+                    break;
+                }
+            } else {
+                is_simple = false;
+                break;
+            }
+        }
+
+        if is_simple {
+            if let Some(code_idx) = code_child_idx {
+                let mut matcher_cursor = schema_cursor.clone();
+                if matcher_cursor.goto_first_child() {
+                    for _ in 0..code_idx {
+                        matcher_cursor.goto_next_sibling();
+                    }
+                    if let Ok(matcher) =
+                        Matcher::try_from_schema_cursor(&matcher_cursor, schema_str)
+                    {
+                        indexes.push(Some(matcher));
+                    } else {
+                        indexes.push(None);
+                    }
+                } else {
+                    indexes.push(None);
+                }
             } else {
                 indexes.push(None);
             }
@@ -878,7 +916,7 @@ mod tests {
             result.errors(),
             vec![ValidationError::SchemaViolation(
                 SchemaViolationError::NodeContentMismatch {
-                    schema_index: 11,
+                    schema_index: 14,
                     input_index: 18,
                     expected: "^xx".to_string(),
                     actual: "b2".to_string(),
@@ -971,6 +1009,43 @@ mod tests {
         assert_eq!(
             *result.value(),
             json!({"a": ["a1", "a2"], "b": ["b1", "b2"]})
+        );
+    }
+
+    #[test]
+    fn test_validate_table_vs_table_literal_repeated_literal_sandwich_with_footer() {
+        let schema_str = r#"
+# Shopping List
+
+| Item | Price |
+|:-----|:------|
+| Header | 10 |
+| `item:/\w+/` | `price:/\d+/` |{,3}
+| Footer | 99 |
+"#;
+        let input_str = r#"
+# Shopping List
+
+| Item | Price |
+|:-----|:------|
+| Header | 10 |
+| Apple | 5 |
+| Banana | 3 |
+| Cherry | 7 |
+| Footer | 99 |
+"#;
+
+        let result = ValidatorTester::<TableVsTableValidator>::from_strs(schema_str, input_str)
+            .walk()
+            .goto_first_child_then_unwrap()
+            .goto_next_sibling_then_unwrap()
+            .peek_nodes(|(s, i)| assert!(both_are_tables(s, i)))
+            .validate_complete();
+
+        assert_eq!(result.errors(), vec![]);
+        assert_eq!(
+            *result.value(),
+            json!({"item": ["Apple", "Banana", "Cherry"], "price": ["5", "3", "7"]})
         );
     }
 }

@@ -45,9 +45,9 @@ test_case!(
 | Item | Price |
 |:-----|:------|
 | Header | 10 |
-| Apple | 5 |
-| Banana | 3 |
-| Cherry | 7 |
+| Apple  | 5  |
+| Banana | 3  |
+| Cherry | 7  |
 | Footer | 99 |
 "#,
     json!({"item": ["Apple", "Banana", "Cherry"], "price": ["5", "3", "7"]}),
@@ -106,11 +106,32 @@ test_case!(
     // Should error on the second repeated row where price doesn't match the \d+ pattern
     vec![ValidationError::SchemaViolation(
         SchemaViolationError::NodeContentMismatch {
-            schema_index: 11,
-            input_index: 18,
+            schema_index: 25,
+            input_index: 27,
             expected: "^\\d+".to_string(),
             actual: "not_a_number".to_string(),
             kind: NodeContentMismatchKind::Matcher,
         }
     )]
+);
+
+test_case!(
+    test_repeated_row_sandwich,
+    r#"
+|c1|c2|
+|-|-|
+|`a:/.*/`|`b:/.*/`|{,2}
+|lit1|lit2|
+|lit3|lit4|
+"#,
+    r#"
+|c1|c2|
+|-|-|
+|a1|b1|
+|a2|b2|
+|lit1|lit2|
+|lit3|lit4|
+"#,
+    json!({"a": ["a1", "a2"], "b": ["b1", "b2"]}),
+    vec![]
 );

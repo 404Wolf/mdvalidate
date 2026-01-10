@@ -4,6 +4,9 @@
 //! - `TextualContainerVsTextualContainerValidator`: walks inline children in
 //!   paragraphs/emphasis and validates them with matcher support and link-aware
 //!   handling.
+//! - `RepeatedMatcherParagraphVsParagraphValidator`: handles paragraphs that
+//!   contain a single repeating matcher, collecting matches across repeated
+//!   paragraphs before delegating to nested validation.
 use crate::mdschema::validator::matcher::matcher::MatcherKind;
 use crate::mdschema::validator::node_walker::helpers::check_repeating_matchers::check_repeating_matchers;
 use crate::mdschema::validator::node_walker::helpers::count_non_literal_matchers_in_children::count_non_literal_matchers_in_children;
@@ -311,8 +314,8 @@ impl ValidatorImpl for RepeatedMatcherParagraphVsParagraphValidator {
 
                 let extras = matcher.extras();
 
-                let n = extras.max_items().unwrap_or(usize::MAX);
-                for _ in 0..n {
+                let max_matches = extras.max_items_or(usize::MAX);
+                for _ in 0..max_matches {
                     // compare the ENTIRE text of the paragraph
                     let input_paragraph_text =
                         get_node_text(&input_cursor.node(), walker.input_str());
@@ -331,7 +334,7 @@ impl ValidatorImpl for RepeatedMatcherParagraphVsParagraphValidator {
                     }
                 }
 
-                if matches.len() < extras.min_items().unwrap_or(0) {
+                if matches.len() < extras.min_items_or(0) {
                     if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
                         // That's ok. We may get them later.
                         return result;
