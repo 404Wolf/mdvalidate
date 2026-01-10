@@ -84,27 +84,28 @@ impl ValidatorImpl for TableVsTableValidator {
         // hop back to the row container, go to the next row, until there are no rows left.
 
         'row_iter: loop {
+            // First check if we are dealing with a special case -- repeated rows!
+            trace_cursors!(schema_cursor, input_cursor);
+            if both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node())
+                && let Some(bounds) =
+                    try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
             {
+                // Process the repeated rows using the main cursors
+                let repeated_row_result = RepeatedRowVsRowValidator::from_bounds(bounds)
+                    .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+                result.join_other_result(&repeated_row_result);
+
+                // Update the cursors to where the repeated row validator left them
+                // The schema cursor stays at the repeating row, input cursor advanced past all matched rows
+                repeated_row_result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
+
+                // Now continue to advance both cursors to the next row
+            } else {
                 // Dive in to the first row, iterate over children, hop back (hop
                 // back is automatic since we use different cursors in the context)
                 {
                     let mut schema_cursor = schema_cursor.clone();
                     let mut input_cursor = input_cursor.clone();
-
-                    // First check if we are dealing with a special case -- repeated rows!
-                    trace_cursors!(schema_cursor, input_cursor);
-                    if both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node())
-                        && let Some(bounds) =
-                            try_get_repeated_row_bounds(&schema_cursor, walker.schema_str())
-                    {
-                        // trace_cursors!(schema_cursor, input_cursor);
-                        let repeated_row_result = RepeatedRowVsRowValidator::from_bounds(bounds)
-                            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-                        repeated_row_result
-                            .walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
-                        dbg!(repeated_row_result);
-                        trace_cursors!(schema_cursor, input_cursor);
-                    }
 
                     match (
                         schema_cursor.goto_first_child(),
@@ -250,7 +251,7 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
         let mut input_cursor = walker.input_cursor().clone();
 
         let mut result = ValidationResult::from_cursors(&schema_cursor, &input_cursor);
-        let need_to_restart_result = result.clone();
+        let _need_to_restart_result = result.clone();
 
         #[cfg(feature = "invariant_violations")]
         if !both_are_table_data_rows(&schema_cursor.node(), &input_cursor.node()) {
@@ -359,6 +360,11 @@ impl ValidatorImpl for RepeatedRowVsRowValidator {
                 result.set_match(key, matches.clone().into());
             }
         }
+
+        // Update the result to reflect where we ended up:
+        // - schema_cursor stays at the repeating row definition
+        // - input_cursor has advanced past all matched rows
+        result.sync_cursor_pos(&schema_cursor, &input_cursor);
 
         result
     }
