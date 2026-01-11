@@ -22,7 +22,7 @@ tree-sitter-markdown = {package = "tree-sitter-markdown-fork", version = "0.7.1"
 ptree = "0.5.2"
 paste = "1.0.15"
 tabled = "0.20.0"
-mdvalidate-utils = {version = "0.0.1", path = "utils"}
+mdvalidate-utils = {version = "0.0.2", path = "utils"}
 thiserror = "2.0.17"
 derive_builder = "0.20.2"
 
