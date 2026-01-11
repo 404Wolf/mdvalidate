@@ -1,5 +1,7 @@
 # Welcome to `mdvalidate`
 
+(see blog [here](https://404wolf.com/posts/mdvalidate/))
+
 **Mdvalidat is an early stage work in progress!!**
 
 MDS is a **tiny language for describing how Markdown *should look***. With `mdvalidate`, you write *schemas* that define a shape of Markdown, and MDS checks real documents against them.
