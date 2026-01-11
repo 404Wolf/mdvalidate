@@ -8,8 +8,14 @@ use crate::mdschema::validator::{
         matcher_extras::{get_after_extras, get_all_extras},
     },
     ts_types::*,
-    ts_utils::{get_next_node, get_node_text},
+    ts_utils::get_next_node,
 };
+
+/// Get node text without trimming, even for table cells.
+/// This is needed for structural analysis where we need to see the actual content.
+fn get_node_text_raw<'a>(node: &tree_sitter::Node, src: &'a str) -> &'a str {
+    node.utf8_text(src.as_bytes()).unwrap()
+}
 
 /// Determine the number of nodes we expect in some corresponding input string.
 ///
@@ -175,7 +181,7 @@ fn text_after_matcher<'a>(
                 return Ok("");
             }
 
-            let next_node_str = get_node_text(&next_node, schema_str);
+            let next_node_str = get_node_text_raw(&next_node, schema_str);
 
             Ok(get_after_extras(next_node_str).unwrap_or(""))
         }
@@ -202,7 +208,7 @@ fn extras_after_matcher<'a>(
 
     match get_next_node(schema_cursor) {
         Some(next_node) => {
-            let next_node_str = get_node_text(&next_node, schema_str);
+            let next_node_str = get_node_text_raw(&next_node, schema_str);
 
             Ok(get_all_extras(next_node_str).unwrap_or(""))
         }

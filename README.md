@@ -14,7 +14,7 @@ We plan to eventually support converting a Markdown schema into a JSON schema de
 
 You can find the full docs [here](https://404wolf.github.io/mdvalidate/)!
 
-## Kitchen Sink Example (current + planned)
+## Kitchen Sink Example
 
 Schema:
 
