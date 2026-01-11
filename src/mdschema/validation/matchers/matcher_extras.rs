@@ -98,7 +98,7 @@ impl std::fmt::Display for MatcherExtrasError {
 /// # Examples
 ///
 /// ```
-/// use mdvalidate::mdschema::validation::matcher::matcher_extras::MatcherExtras;
+/// use mdvalidate::mdschema::validation::matchers::matcher_extras::MatcherExtras;
 ///
 /// // Matcher with repeat limits: `name:/\w+/`{2,5}
 /// let extras = MatcherExtras::try_new(Some("{2,5}")).unwrap();
