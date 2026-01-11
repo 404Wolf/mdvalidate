@@ -1,4 +1,4 @@
-use crate::mdschema::validator::{
+use crate::mdschema::validation::{
     errors::{
         ParserError, PrettyPrintError, ValidationError, debug_print_error, pretty_print_error,
     },
@@ -18,6 +18,14 @@ pub enum ProcessingError {
     PrettyPrint(PrettyPrintError),
     Io(std::io::Error),
     Utf8(std::str::Utf8Error),
+}
+
+#[derive(Debug)]
+pub struct ProcessingResult {
+    pub errors: Vec<ValidationError>,
+    pub matches: Value,
+    pub validator: Validator,
+    pub input_str: String,
 }
 
 impl From<std::io::Error> for ProcessingError {
@@ -76,50 +84,57 @@ impl From<PrettyPrintError> for ProcessingError {
     }
 }
 
-pub fn process<R: Read>(
-    schema_str: &String,
-    input: &mut R,
-    fast_fail: bool,
-) -> Result<((Vec<ValidationError>, Value), Validator, String), ProcessingError> {
-    let buffer_size = get_buffer_size();
+impl ProcessingResult {
+    pub fn process<R: Read>(
+        schema_str: &str,
+        input: &mut R,
+        fast_fail: bool,
+    ) -> Result<ProcessingResult, ProcessingError> {
+        let buffer_size = get_buffer_size();
 
-    let mut input_str = String::new();
-    let mut buffer = vec![0; buffer_size];
+        let mut input_str = String::new();
+        let mut buffer = vec![0; buffer_size];
 
-    let mut validator = Validator::new_incomplete(schema_str.as_str(), input_str.as_str())
-        .ok_or(ValidationError::ValidatorCreationFailed)?;
+        let mut validator = Validator::new_incomplete(schema_str, input_str.as_str())
+            .ok_or(ValidationError::ValidatorCreationFailed)?;
 
-    loop {
-        let bytes_read = input.read(&mut buffer)?;
+        loop {
+            let bytes_read = input.read(&mut buffer)?;
 
-        // If we're done reading, mark EOF
-        if bytes_read == 0 {
-            validator.read_final_input(&input_str)?;
+            // If we're done reading, mark EOF
+            if bytes_read == 0 {
+                validator.read_final_input(&input_str)?;
+                validator.validate();
+
+                break;
+            }
+
+            let new_text = std::str::from_utf8(&buffer[..bytes_read])?;
+            input_str.push_str(new_text);
+
+            validator.read_more_input(&input_str)?;
             validator.validate();
 
-            break;
+            // Check for fast-fail AFTER validation
+            if fast_fail && validator.errors_so_far().count() > 0 {
+                break;
+            }
         }
 
-        let new_text = std::str::from_utf8(&buffer[..bytes_read])?;
-        input_str.push_str(new_text);
+        let errors: Vec<_> = validator.errors_so_far().cloned().collect();
+        let matches = validator.matches_so_far().clone();
 
-        validator.read_more_input(&input_str)?;
-        validator.validate();
-
-        // Check for fast-fail AFTER validation
-        if fast_fail && validator.errors_so_far().count() > 0 {
-            break;
-        }
+        Ok(ProcessingResult {
+            errors,
+            matches,
+            validator,
+            input_str,
+        })
     }
-
-    let errors: Vec<_> = validator.errors_so_far().cloned().collect();
-    let matches = validator.matches_so_far().clone();
-
-    Ok(((errors, matches), validator, input_str))
 }
 
 pub fn process_stdio<R: Read, W: Write>(
-    schema_str: &String,
+    schema_str: &str,
     input: &mut R,
     output: &mut Option<&mut W>,
     filename: &str,
@@ -127,7 +142,12 @@ pub fn process_stdio<R: Read, W: Write>(
     quiet: bool,
     debug_mode: bool,
 ) -> Result<((Vec<ValidationError>, Value), bool), ProcessingError> {
-    let ((errors, matches), validator, _input_str) = process(schema_str, input, fast_fail)?;
+    let ProcessingResult {
+        errors,
+        matches,
+        validator,
+        input_str: _input_str,
+    } = ProcessingResult::process(schema_str, input, fast_fail)?;
 
     let mut errored = false;
     if errors.is_empty() {
@@ -175,9 +195,10 @@ mod tests {
         mut input: R,
         fast_fail: bool,
     ) -> (Vec<ValidationError>, Value) {
-        let ((errors, matches), _validator, _) = process(schema, &mut input, fast_fail)
+        let result = ProcessingResult::process(schema, &mut input, fast_fail)
             .expect("Validation should complete without errors");
-        (errors, matches)
+
+        (result.errors, result.matches)
     }
 
     /// A custom reader that only reads a specific number of bytes at a time

@@ -3,7 +3,7 @@ use serde_json::json;
 #[macro_use]
 mod helpers;
 
-use mdvalidate::mdschema::validator::errors::{SchemaViolationError, ValidationError};
+use mdvalidate::mdschema::validation::errors::{SchemaViolationError, ValidationError};
 
 test_case!(heading_literal, r#"# Hi"#, r#"# Hi"#, json!({}), vec![]);
 

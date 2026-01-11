@@ -1,5 +1,5 @@
-use mdvalidate::mdschema::validator::errors::ValidationError;
-use mdvalidate::mdschema::validator::validator::{Validator, ValidatorState};
+use mdvalidate::mdschema::validation::errors::ValidationError;
+use mdvalidate::mdschema::validation::validator::{Validator, ValidatorState};
 use serde_json::Value;
 
 pub fn run_test_case(schema: &str, input: &str) -> (Vec<ValidationError>, Value) {

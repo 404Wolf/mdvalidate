@@ -40,6 +40,8 @@ jobs:
         run: nix develop --command cargo build
       - name: Run tests
         run: nix develop --command cargo test
+      - name: Run clippy
+        run: nix develop --command cargo clippy -- -D warnings
       - name: Save Cargo cache
         if: always()
         uses: actions/cache/save@v4
