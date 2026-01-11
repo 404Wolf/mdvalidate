@@ -8,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const highWaterMark = parseInt(process.argv[2], 10) || 2;
+const speed = parseInt(process.argv[3], 10) || 80;
 
 const inputPath = join(__dirname, "./input.md");
 const stream = createReadStream(inputPath, {
@@ -19,7 +20,7 @@ stream.on("data", (chunk) => {
   process.stdout.write(chunk);
   console.error(chunk);
   stream.pause();
-  setTimeout(() => stream.resume(), 80);
+  setTimeout(() => stream.resume(), speed);
 });
 
 stream.on("end", () => {

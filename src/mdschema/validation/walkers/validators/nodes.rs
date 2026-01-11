@@ -9,6 +9,9 @@ use crate::mdschema::validation::errors::{
     MalformedStructureKind, SchemaViolationError, ValidationError,
 };
 use crate::mdschema::validation::node_pos_pair::NodePosPair;
+use crate::mdschema::validation::ts_types::*;
+use crate::mdschema::validation::ts_utils::waiting_at_end;
+use crate::mdschema::validation::validator_walker::ValidatorWalker;
 use crate::mdschema::validation::walkers::ValidationResult;
 use crate::mdschema::validation::walkers::validators::code::CodeVsCodeValidator;
 use crate::mdschema::validation::walkers::validators::containers::ContainerVsContainerValidator;
@@ -19,9 +22,6 @@ use crate::mdschema::validation::walkers::validators::quotes::QuoteVsQuoteValida
 use crate::mdschema::validation::walkers::validators::tables::TableVsTableValidator;
 use crate::mdschema::validation::walkers::validators::textual::TextualVsTextualValidator;
 use crate::mdschema::validation::walkers::validators::{Validator, ValidatorImpl};
-use crate::mdschema::validation::ts_types::*;
-use crate::mdschema::validation::ts_utils::waiting_at_end;
-use crate::mdschema::validation::validator_walker::ValidatorWalker;
 use crate::{compare_node_kinds_check, invariant_violation};
 
 /// Validate two arbitrary nodes against each other.
@@ -36,148 +36,95 @@ pub struct NodeVsNodeValidator;
 
 impl ValidatorImpl for NodeVsNodeValidator {
     fn validate_impl(&self, walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-        validate_node_vs_node_impl(walker, got_eof)
-    }
-}
+        let walker: &ValidatorWalker = walker;
+        let mut result =
+            ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
+        let need_to_restart_result = result.clone();
 
-fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> ValidationResult {
-    let mut result = ValidationResult::from_cursors(walker.schema_cursor(), walker.input_cursor());
-    let need_to_restart_result = result.clone();
+        let schema_node = walker.schema_cursor().node();
+        let input_node = walker.input_cursor().node();
 
-    let schema_node = walker.schema_cursor().node();
-    let input_node = walker.input_cursor().node();
+        // Make mutable copies that we can walk
+        let mut schema_cursor = walker.schema_cursor().clone();
+        let mut input_cursor = walker.input_cursor().clone();
 
-    // Make mutable copies that we can walk
-    let mut schema_cursor = walker.schema_cursor().clone();
-    let mut input_cursor = walker.input_cursor().clone();
+        // Both are textual nodes - use text_vs_text directly
+        if both_are_textual_nodes(&schema_node, &input_node) {
+            trace!("Both are textual nodes, validating text vs text");
 
-    // Both are textual nodes - use text_vs_text directly
-    if both_are_textual_nodes(&schema_node, &input_node) {
-        trace!("Both are textual nodes, validating text vs text");
+            return TextualVsTextualValidator
+                .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+        }
+        // Both are codeblock nodes
+        else if both_are_codeblocks(&schema_node, &input_node) {
+            return CodeVsCodeValidator
+                .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+        } else if both_are_quotes(&schema_node, &input_node) {
+            return QuoteVsQuoteValidator
+                .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+        }
+        // Both are tables
+        else if both_are_tables(&schema_node, &input_node) {
+            return TableVsTableValidator
+                .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+        }
+        // Both are textual containers
+        else if both_are_textual_containers(&schema_node, &input_node) {
+            return ContainerVsContainerValidator::default()
+                .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+        }
+        // Both are textual nodes
+        else if both_are_textual_nodes(&schema_node, &input_node) {
+            return TextualVsTextualValidator
+                .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+        }
+        // Both are link nodes or image nodes
+        else if both_are_link_nodes(&schema_node, &input_node)
+            || both_are_image_nodes(&schema_node, &input_node)
+        {
+            return LinkVsLinkValidator
+                .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+        }
+        // Both are list nodes
+        else if both_are_list_nodes(&schema_node, &input_node) {
+            return ListVsListValidator
+                .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+        }
+        // Both are ruler nodes
+        else if both_are_rulers(&schema_node, &input_node) {
+            trace!("Both are rulers. No extra validation happens for rulers.");
+        } else if both_are_headings(&schema_node, &input_node) {
+            // First, if they are headings, validate the headings themselves.
+            trace!("Both are heading nodes, validating heading vs heading");
 
-        return TextualVsTextualValidator
-            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-    }
-    // Both are codeblock nodes
-    else if both_are_codeblocks(&schema_node, &input_node) {
-        return CodeVsCodeValidator
-            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-    } else if both_are_quotes(&schema_node, &input_node) {
-        return QuoteVsQuoteValidator
-            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-    }
-    // Both are tables
-    else if both_are_tables(&schema_node, &input_node) {
-        return TableVsTableValidator
-            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-    }
-    // Both are textual containers
-    else if both_are_textual_containers(&schema_node, &input_node) {
-        return ContainerVsContainerValidator::default()
-            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-    }
-    // Both are textual nodes
-    else if both_are_textual_nodes(&schema_node, &input_node) {
-        return TextualVsTextualValidator
-            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-    }
-    // Both are link nodes or image nodes
-    else if both_are_link_nodes(&schema_node, &input_node)
-        || both_are_image_nodes(&schema_node, &input_node)
-    {
-        return LinkVsLinkValidator
-            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-    }
-    // Both are list nodes
-    else if both_are_list_nodes(&schema_node, &input_node) {
-        return ListVsListValidator
-            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-    }
-    // Both are ruler nodes
-    else if both_are_rulers(&schema_node, &input_node) {
-        trace!("Both are rulers. No extra validation happens for rulers.");
-    } else if both_are_headings(&schema_node, &input_node) {
-        // First, if they are headings, validate the headings themselves.
-        trace!("Both are heading nodes, validating heading vs heading");
+            let heading_result = HeadingVsHeadingValidator
+                .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
 
-        let heading_result = HeadingVsHeadingValidator
-            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+            result.join_other_result(&heading_result);
 
-        result.join_other_result(&heading_result);
+            // If heading validation produced errors (e.g., mismatched heading levels),
+            // don't validate children as they will also mismatch
+            if heading_result.has_errors() {
+                return result;
+            }
 
-        // If heading validation produced errors (e.g., mismatched heading levels),
-        // don't validate children as they will also mismatch
-        if heading_result.has_errors() {
+            result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
             return result;
-        }
+        } else if both_are_matching_top_level_nodes(&schema_node, &input_node) {
+            // Both are heading nodes or document nodes
+            //
+            // Crawl down one layer to get to the actual children
+            trace!("Both are heading nodes or document nodes. Recursing into sibling pairs.");
 
-        result.walk_cursors_to_pos(&mut schema_cursor, &mut input_cursor);
-        return result;
-    } else if both_are_matching_top_level_nodes(&schema_node, &input_node) {
-        // Both are heading nodes or document nodes
-        //
-        // Crawl down one layer to get to the actual children
-        trace!("Both are heading nodes or document nodes. Recursing into sibling pairs.");
+            // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
+            // compare_node_children_lengths_check!(schema_cursor, input_cursor, got_eof, result);
 
-        // Since we're dealing with top level nodes it is our responsibility to ensure that they have the same number of children.
-        // compare_node_children_lengths_check!(schema_cursor, input_cursor, got_eof, result);
+            let parent_pos = NodePosPair::from_cursors(&schema_cursor, &input_cursor);
 
-        let parent_pos = NodePosPair::from_cursors(&schema_cursor, &input_cursor);
-
-        // Now actually go down to the children
-        match (
-            schema_cursor.goto_first_child(),
-            input_cursor.goto_first_child(),
-        ) {
-            (true, true) => {
-                let new_result = NodeVsNodeValidator
-                    .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
-                result.join_other_result(&new_result);
-                result.sync_cursor_pos(&schema_cursor, &input_cursor);
-            }
-            (true, false) if waiting_at_end(got_eof, walker.input_str(), &input_cursor) => {
-                // Stop for now. We will revalidate from here later.
-                result.set_farthest_reached_pos(parent_pos);
-                return result;
-            }
-            (false, true) => {
-                if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
-                    // okay, we'll just wait!
-                    return need_to_restart_result;
-                } else {
-                    result.add_error(ValidationError::SchemaViolation(
-                        SchemaViolationError::MalformedNodeStructure {
-                            schema_index: schema_cursor.descendant_index(),
-                            input_index: input_cursor.descendant_index(),
-                            kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
-                        },
-                    ));
-                }
-            }
-            (true, false) => {
-                if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
-                    // okay, we'll just wait!
-                    return need_to_restart_result;
-                } else {
-                    result.add_error(ValidationError::SchemaViolation(
-                        SchemaViolationError::MalformedNodeStructure {
-                            schema_index: schema_cursor.descendant_index(),
-                            input_index: input_cursor.descendant_index(),
-                            kind: MalformedStructureKind::SchemaHasChildInputDoesnt,
-                        },
-                    ));
-                }
-                return result;
-            }
-            (false, false) => {
-                return result; // nothing left
-            }
-        }
-
-        loop {
+            // Now actually go down to the children
             match (
-                schema_cursor.goto_next_sibling(),
-                input_cursor.goto_next_sibling(),
+                schema_cursor.goto_first_child(),
+                input_cursor.goto_first_child(),
             ) {
                 (true, true) => {
                     let new_result = NodeVsNodeValidator
@@ -219,37 +166,88 @@ fn validate_node_vs_node_impl(walker: &ValidatorWalker, got_eof: bool) -> Valida
                     }
                     return result;
                 }
-                (false, false) => break,
+                (false, false) => {
+                    return result; // nothing left
+                }
             }
-        }
 
-        return result;
-    } else {
-        // otherwise, at the minimum check the type
-        compare_node_kinds_check!(
-            schema_cursor,
-            input_cursor,
-            walker.schema_str(),
-            walker.input_str(),
-            result
-        );
+            loop {
+                match (
+                    schema_cursor.goto_next_sibling(),
+                    input_cursor.goto_next_sibling(),
+                ) {
+                    (true, true) => {
+                        let new_result = NodeVsNodeValidator
+                            .validate(&walker.with_cursors(&schema_cursor, &input_cursor), got_eof);
+                        result.join_other_result(&new_result);
+                        result.sync_cursor_pos(&schema_cursor, &input_cursor);
+                    }
+                    (true, false) if waiting_at_end(got_eof, walker.input_str(), &input_cursor) => {
+                        // Stop for now. We will revalidate from here later.
+                        result.set_farthest_reached_pos(parent_pos);
+                        return result;
+                    }
+                    (false, true) => {
+                        if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                            // okay, we'll just wait!
+                            return need_to_restart_result;
+                        } else {
+                            result.add_error(ValidationError::SchemaViolation(
+                                SchemaViolationError::MalformedNodeStructure {
+                                    schema_index: schema_cursor.descendant_index(),
+                                    input_index: input_cursor.descendant_index(),
+                                    kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
+                                },
+                            ));
+                        }
+                    }
+                    (true, false) => {
+                        if waiting_at_end(got_eof, walker.input_str(), &input_cursor) {
+                            // okay, we'll just wait!
+                            return need_to_restart_result;
+                        } else {
+                            result.add_error(ValidationError::SchemaViolation(
+                                SchemaViolationError::MalformedNodeStructure {
+                                    schema_index: schema_cursor.descendant_index(),
+                                    input_index: input_cursor.descendant_index(),
+                                    kind: MalformedStructureKind::SchemaHasChildInputDoesnt,
+                                },
+                            ));
+                        }
+                        return result;
+                    }
+                    (false, false) => break,
+                }
+            }
 
-        if result.has_errors() {
             return result;
+        } else {
+            // otherwise, at the minimum check the type
+            compare_node_kinds_check!(
+                schema_cursor,
+                input_cursor,
+                walker.schema_str(),
+                walker.input_str(),
+                result
+            );
+
+            if result.has_errors() {
+                return result;
+            }
+
+            #[cfg(feature = "invariant_violations")]
+            invariant_violation!(
+                result,
+                &schema_cursor,
+                &input_cursor,
+                "node kind comparison is not implemented yet for {:?} vs {:?}",
+                schema_cursor.node().kind(),
+                input_cursor.node().kind()
+            );
         }
 
-        #[cfg(feature = "invariant_violations")]
-        invariant_violation!(
-            result,
-            &schema_cursor,
-            &input_cursor,
-            "node kind comparison is not implemented yet for {:?} vs {:?}",
-            schema_cursor.node().kind(),
-            input_cursor.node().kind()
-        );
+        result
     }
-
-    result
 }
 
 #[cfg(test)]
@@ -321,11 +319,7 @@ mod tests {
             result.errors()
         );
         assert!(
-            result.value().is_null()
-                || result
-                    .value()
-                    .as_object()
-                    .is_none_or(|obj| obj.is_empty())
+            result.value().is_null() || result.value().as_object().is_none_or(|obj| obj.is_empty())
         );
     }
 
