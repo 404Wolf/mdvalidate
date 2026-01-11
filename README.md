@@ -14,7 +14,7 @@ We plan to eventually support converting a Markdown schema into a JSON schema de
 
 You can find the full docs [here](https://404wolf.github.io/mdvalidate/)!
 
-## Kitchen Sink Example (current + planned)
+## Kitchen Sink Example
 
 Schema:
 
@@ -27,6 +27,10 @@ Schema:
 
 - `feature:/[A-Za-z][\w -]+/`{2,4}
   - `detail:/[a-z][\w -]+/`{,2}
+
+## Description
+
+`description`{2,3}
 
 Inline: `code`! and `bang`!!
 
@@ -66,6 +70,14 @@ Input:
   - fewer allocations
 - Safer IO
 
+## Description
+
+This release focuses on performance improvements and safety enhancements.
+
+Key changes include optimized memory management and stricter type checking.
+
+We've also improved error messages throughout the codebase.
+
 Inline: `code` and `bang`!
 
 ```rust
@@ -94,6 +106,11 @@ Output:
 {
   "build": "7A9F3C1",
   "checked": "print(\"ok\")",
+  "description": [
+    "This release focuses on performance improvements and safety enhancements.",
+    "Key changes include optimized memory management and stricter type checking.",
+    "We've also improved error messages throughout the codebase."
+  ],
   "detail": [
     "fewer allocations"
   ],

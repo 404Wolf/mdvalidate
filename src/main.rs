@@ -51,20 +51,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let env_config = EnvConfig::load();
 
     let schema_src = PathOrStdio::from(args.schema);
-    let schema_src = schema_src.reader().or_else(|e| {
-        Err(format!(
+    let schema_src = schema_src.reader().map_err(|e| format!(
             "Failed to open schema file '{}': {}",
             schema_src.filepath(),
             e
-        ))
-    })?;
+        ))?;
     let mut schema_str = String::new();
     BufReader::new(schema_src).read_to_string(&mut schema_str)?;
 
     let input = PathOrStdio::from(args.input);
     let mut input_reader = input.reader()?;
 
-    let mut output_writer: &mut Option<&mut Box<dyn Write>> = match args.output {
+    let output_writer: &mut Option<&mut Box<dyn Write>> = match args.output {
         Some(ref output_path) => {
             let output_pos = PathOrStdio::from(output_path.clone());
             &mut Some(&mut output_pos.writer()?)
@@ -75,7 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     match process_stdio(
         &schema_str,
         &mut input_reader,
-        &mut output_writer,
+        output_writer,
         input.filepath(),
         args.fast_fail,
         args.quiet,

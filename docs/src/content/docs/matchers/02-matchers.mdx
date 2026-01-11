@@ -7,42 +7,89 @@ order: 2
 import SchemaAndInput from "../../../components/SchemaAndInput.astro";
 import TODO from "../../../components/TODO.astro";
 
-Matchers allow you to validate dynamic content using regular expressions. A matcher is defined using inline code syntax with a specific format: `` `label:/pattern/` ``.
+Matchers allow you to validate dynamic content in your Markdown documents. There are two types of matchers: **regex matchers** that match patterns using regular expressions, and **all matchers** that match everything as an identity function.
 
-## Basic Syntax
+# Matcher Types
 
-The basic matcher format is:
+## Regex Matchers
+
+A regex matcher is defined using inline code syntax with a specific format: `` `label:/pattern/` ``
 
 ```
 `label:/regex-pattern/`
 ```
 
 - **label**: An identifier for the matched value (used in validation output)
-- **pattern**: A JavaScript-compatible regular expression
+- **pattern**: A regular expression that matches the content
 
 The pattern is automatically anchored to the start (as if prefixed with `^`), so it matches from the beginning of the available text.
 
+### Simple Examples
+
 <SchemaAndInput
-  schema={"`name:/\w+/`"}
+  schema={"`name:/\\w+/`"}
   input={"Alice"}
   valid={true}
   output={'{"name": "Alice"}'}
 />
 
 <SchemaAndInput
-  schema={"`age:/\d+/`"}
+  schema={"`age:/\\d+/`"}
   input={"42"}
   valid={true}
   output={'{"age": "42"}'}
 />
 
-<SchemaAndInput schema={"`name:/\w+/`"} input={"123"} valid={false} />
+<SchemaAndInput schema={"`name:/\\w+/`"} input={"123"} valid={false} />
 
-<SchemaAndInput schema={"`age:/\d+/`"} input={"not a number"} valid={false} />
+<SchemaAndInput schema={"`age:/\\d+/`"} input={"not a number"} valid={false} />
 
-## Matchers with Surrounding Text
+## All Matchers
 
-Matchers can be combined with literal text as prefixes and suffixes:
+All matchers act as an identity function - they **always** match and return exactly what was passed to them. If a matcher has no regex pattern (just a label in backticks), it becomes an all matcher that accepts all available content in the current context.
+
+The syntax is simply `` `label` `` without a regex pattern.
+
+<SchemaAndInput
+  schema={"`foo`"}
+  input={"anything goes here"}
+  valid={true}
+  output={'{"foo":"anything goes here"}'}
+/>
+
+<SchemaAndInput
+  schema={"`data`"}
+  input={"@*&^R special chars"}
+  valid={true}
+  output={'{"data":"@*&^R special chars"}'}
+/>
+
+All matchers accept any input including special characters, spaces, and other spanning (inline) nodes:
+
+<SchemaAndInput
+  schema={"`text`"}
+  input={"hello *world* 123!"}
+  valid={true}
+  output={'{"text":"hello *world* 123!"}'}
+/>
+
+<SchemaAndInput
+  schema={"`content`"}
+  input={"*italic text* and regular text"}
+  valid={true}
+  output={'{"content":"*italic text* and regular text"}'}
+/>
+
+<SchemaAndInput
+  schema={"Prefix: `data`"}
+  input={"Prefix: *some italic* and more"}
+  valid={true}
+  output={'{"data":"*some italic* and more"}'}
+/>
+
+# Matchers with Surrounding Text
+
+Both regex matchers and all matchers can be combined with literal text as prefixes and suffixes:
 
 <SchemaAndInput
   schema={`Name: \`name:/\w+/\``}
@@ -77,7 +124,9 @@ Matchers can be combined with literal text as prefixes and suffixes:
   valid={false}
 />
 
-This also works for spanning nodes of other types, like italics and subsequent code spans via literal matchers (more on this later).
+## Spanning Multiple Node Types
+
+Matchers can work across different spanning node types, like italics and subsequent code spans:
 
 <SchemaAndInput
   schema={`User \`id:/\d+/\` logged in *this is italic*)`}
@@ -93,6 +142,15 @@ This also works for spanning nodes of other types, like italics and subsequent c
   output={'{"foo":"bar"}'}
 />
 
+# Label Naming Rules
+
+Matcher labels (for both regex matchers and all matchers) must follow these rules:
+
+- Must contain only alphanumeric characters (a-z, A-Z, 0-9), hyphens (`-`), and underscores (`_`)
+- Cannot contain spaces or other special characters
+- Valid examples: `user_name`, `item-count`, `id123`, `MyData`
+- Invalid examples: `user name` (space), `data@field` (special char), `item.count` (period)
+
 ## Empty Labels
 
 <TODO />
@@ -100,15 +158,15 @@ This also works for spanning nodes of other types, like italics and subsequent c
 To match without capturing a value, use an underscore (`_`) as the label:
 
 <SchemaAndInput
-  schema={"`_:/\\w+/`"}
+  schema={"`_:/\w+/`"}
   input={"hello"}
   valid={true}
   output={"{}"}
 />
 
-## Multiple matchers
+# Multiple Matchers
 
-Right now, you can only have one matcher per paragraph (collection of spanning elements). So, for example, the following will not work.
+Right now, you can only have one matcher per paragraph (collection of spanning elements). So, for example, the following will not work:
 
 <SchemaAndInput
   schema={"`_:/\w+/` `_:/\w+/`"}
@@ -116,7 +174,33 @@ Right now, you can only have one matcher per paragraph (collection of spanning e
   valid={false}
 />
 
-## Literal Code Blocks
+# Repeating Paragraphs
+
+You can validate multiple paragraph nodes into an array by using a repeated matcher. The repeated matcher syntax is `` {min,max} ``, where `min` and `max` are optional.
+
+**Important:** Repeating paragraph matchers must be **all matchers** (`` `label` ``), not regex matchers. This is because each paragraph can contain arbitrary content and structure.
+
+<SchemaAndInput
+  schema={"`description`{2,3}"}
+  input={"First paragraph.\n\nSecond paragraph with *formatting*.\n\nThird paragraph."}
+  valid={true}
+  output={'{"description":["First paragraph.","Second paragraph with *formatting*.","Third paragraph."]}'}
+/>
+
+<SchemaAndInput
+  schema={"`content`{1,2}"}
+  input={"Only one paragraph here."}
+  valid={true}
+  output={'{"content":["Only one paragraph here."]}'}
+/>
+
+<SchemaAndInput
+  schema={"`text`{3,3}"}
+  input={"First.\n\nSecond."}
+  valid={false}
+/>
+
+# Literal Code Blocks
 
 To match inline code blocks literally instead of treating them as matchers, add `!` after the code block:
 
@@ -138,7 +222,7 @@ To match inline code blocks literally instead of treating them as matchers, add 
   valid={false}
 />
 
-### Escaping the Exclamation Mark
+## Escaping the Exclamation Mark
 
 <TODO />
 
@@ -150,14 +234,14 @@ Use `!!` to match a literal exclamation mark after code:
   valid={true}
 />
 
-## Execution Validation
+# Execution Validation
 
 <TODO />
 
 You can validate content by running an executable. Use the syntax `label:!command`:
 
 <SchemaAndInput
-  schema={"`number:!test \\$0 -gt 0`"}
+  schema={"`number:!test \$0 -gt 0`"}
   input={"42"}
   valid={true}
   output={'{"number":"42"}'}

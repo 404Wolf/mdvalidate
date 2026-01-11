@@ -3,8 +3,8 @@ use serde_json::json;
 #[macro_use]
 mod helpers;
 
-use mdvalidate::mdschema::validator::errors::{
-    ChildrenCount, SchemaViolationError, ValidationError,
+use mdvalidate::mdschema::validation::errors::{
+    MalformedStructureKind, SchemaViolationError, ValidationError,
 };
 
 test_case!(
@@ -29,11 +29,10 @@ test_case!(
     r#"# Hi"#,
     json!({}),
     vec![ValidationError::SchemaViolation(
-        SchemaViolationError::ChildrenLengthMismatch {
+        SchemaViolationError::MalformedNodeStructure {
             schema_index: 0,
-            input_index: 0,
-            expected: ChildrenCount::SpecificCount(0),
-            actual: 1,
+            input_index: 1,
+            kind: MalformedStructureKind::InputHasChildSchemaDoesnt,
         }
     )]
 );
@@ -86,21 +85,17 @@ test_case!(
 "#,
     json!({}),
     vec![
-        ValidationError::SchemaViolation(
-            SchemaViolationError::NodeTypeMismatch {
-                schema_index: 1,
-                input_index: 1,
-                expected: "atx_heading".to_string(),
-                actual: "tight_list".to_string(),
-            }
-        ),
-        ValidationError::SchemaViolation(
-            SchemaViolationError::NodeTypeMismatch {
-                schema_index: 7,
-                input_index: 6,
-                expected: "tight_list".to_string(),
-                actual: "atx_heading".to_string(),
-            }
-        )
+        ValidationError::SchemaViolation(SchemaViolationError::NodeTypeMismatch {
+            schema_index: 1,
+            input_index: 1,
+            expected: "atx_heading".to_string(),
+            actual: "tight_list".to_string(),
+        }),
+        ValidationError::SchemaViolation(SchemaViolationError::NodeTypeMismatch {
+            schema_index: 7,
+            input_index: 6,
+            expected: "tight_list".to_string(),
+            actual: "atx_heading".to_string(),
+        })
     ]
 );

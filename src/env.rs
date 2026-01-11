@@ -9,6 +9,7 @@ use serde::Deserialize;
 ///
 /// All fields are optional.
 #[derive(Debug, Deserialize, Clone)]
+#[derive(Default)]
 pub struct EnvConfig {
     /// Enable debug mode for error output.
     ///
@@ -20,11 +21,6 @@ pub struct EnvConfig {
     pub dev_debug: bool,
 }
 
-impl Default for EnvConfig {
-    fn default() -> Self {
-        Self { dev_debug: false }
-    }
-}
 
 impl EnvConfig {
     /// Load configuration from environment variables.

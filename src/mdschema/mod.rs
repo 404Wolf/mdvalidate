@@ -1,3 +1,3 @@
-pub mod validator;
+pub mod validation;
 
-pub use validator::validator::Validator;
+pub use validation::validator::Validator;

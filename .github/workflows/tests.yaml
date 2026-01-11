@@ -1,35 +1,28 @@
 name: Tests
-
 on:
   push:
-
 jobs:
   test:
     runs-on: ubuntu-latest
-
     permissions:
       contents: read
       actions: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Install Nix
         uses: cachix/install-nix-action@v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
-
       - name: Restore Nix store
         id: nix-cache
         uses: nix-community/cache-nix-action/restore@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
-
       - name: Restore Cargo cache
         uses: actions/cache/restore@v4
         id: cargo-cache
@@ -43,13 +36,12 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-${{ runner.os }}-
-
       - name: Build project
         run: nix develop --command cargo build
-
       - name: Run tests
         run: nix develop --command cargo test
-
+      - name: Run clippy
+        run: nix develop --command cargo clippy -- -D warnings
       - name: Save Cargo cache
         if: always()
         uses: actions/cache/save@v4
@@ -61,7 +53,6 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
-
       - name: Save Nix store
         uses: nix-community/cache-nix-action/save@v7
         if: always()
